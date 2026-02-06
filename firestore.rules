@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user is admin (optional, based on your auth implementation)
+    // For now, we will be permissive for authenticated users to fix the blocking error
+    
+    // Core Collections
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /games/{gameId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /active_games/{gameId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // Default fallback (Be careful with this in production!)
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

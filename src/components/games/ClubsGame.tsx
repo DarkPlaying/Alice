@@ -1,0 +1,1678 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Timer, Shield, CheckCircle2, MessageSquare, X } from 'lucide-react';
+import { supabase } from '../../supabaseClient';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { collection, getDocs } from 'firebase/firestore';
+import { auth, db } from '../../firebase';
+import { ClubsGameMaster } from './ClubsGameMaster';
+import { Loader } from '../Loader';
+
+interface ClubsGameProps {
+    onComplete: (score: number) => void;
+    onFail: () => void;
+    user?: {
+        username: string;
+        role?: string;
+        [key: string]: string | number | boolean | undefined | null;
+    };
+    onProfileClick?: () => void;
+}
+
+interface Card {
+    id: string;
+    suit: 'clubs' | 'diamonds' | 'hearts' | 'spades';
+    rank: string;
+    playerRole: 'angel' | 'demon' | null;
+    masterRole: 'angel' | 'demon' | null;
+    isRevealed: boolean;
+    isRemoved: boolean;
+}
+
+interface Message {
+    id: string;
+    user: string;
+    userId?: string;
+    text: string;
+    timestamp: Date;
+    isSystem?: boolean;
+}
+
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q'];
+
+export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGameProps) => {
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const isMaster = user?.role?.toLowerCase() === 'master' || user?.role?.toLowerCase() === 'admin';
+
+    if (isMaster) {
+        return <ClubsGameMaster onComplete={onComplete} onFail={onFail} user={user} onProfileClick={onProfileClick} />;
+    }
+
+    // Game Flow State
+    const [gameState, setGameState] = useState<'idle' | 'briefing' | 'setup' | 'setup_phase1' | 'role_reveal' | 'selection_reveal' | 'playing' | 'card_reveal' | 'round_reveal' | 'won' | 'lost'>('idle');
+    const [round, setRound] = useState(1);
+    const [timeLeft, setTimeLeft] = useState(30);
+    const [cards, setCards] = useState<Card[]>([]);
+    const [phaseExpiry, setPhaseExpiry] = useState<Date | null>(null);
+    const [_briefingShown, setBriefingShown] = useState(false);
+    const [isCancelled, setIsCancelled] = useState(false);
+
+    // Refs for synchronization stability
+    const roundRef = useRef(round);
+    const gameStateRef = useRef(gameState);
+    useEffect(() => { roundRef.current = round; }, [round]);
+    useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+    // Selection & Voting
+    const [selection, setSelection] = useState<{ angel: string | null; demon: string | null }>({ angel: null, demon: null });
+    const [masterSelection, setMasterSelection] = useState<{ angel: string | null; demon: string | null }>({ angel: null, demon: null });
+    const [masterLocked, setMasterLocked] = useState(false); // Visual indicator
+    const [globalVotes, setGlobalVotes] = useState<Record<string, string[]>>({}); // Phase 2 Votes
+    const [phase1Votes, setPhase1Votes] = useState<Record<string, { angel: string | null; demon: string | null }>>({}); // Phase 1 Votes
+    const [showResetOverlay, setShowResetOverlay] = useState(false);
+    const [myVote, setMyVote] = useState<string[]>([]);
+    const MAX_VOTES = 2;
+
+    // Enhanced Score Tracking
+    const [myScore, setMyScore] = useState(0); // Current player's own score
+    const [topPlayerScore, setTopPlayerScore] = useState(0);
+    const [topPlayerId, setTopPlayerId] = useState<string | null>(null);
+    const [topMasterScore, setTopMasterScore] = useState(0);
+
+    // Player ID Mapping (UID → #PLAYER_XXX)
+    const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
+    const [allowedPlayers, setAllowedPlayers] = useState<string[]>([]);
+    const allowedPlayersRef = useRef<string[]>([]);
+    useEffect(() => { allowedPlayersRef.current = allowedPlayers; }, [allowedPlayers]);
+
+    // Chat
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [inputMessage, setInputMessage] = useState('');
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const channelRef = useRef<RealtimeChannel | null>(null);
+    const [isPaused, setIsPaused] = useState(false);
+
+    // Identification
+    const [roundResults, setRoundResults] = useState<{ name: string, team: string, change: number, reason: string, targetId?: string | null }[] | null>(null);
+
+    // TOAST STATE
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' | 'info' } | null>(null);
+
+    const showToast = useCallback((message: string, type: 'success' | 'warning' | 'error' | 'info' = 'info') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
+    }, []);
+
+    // Initialize Board Logic
+    const initializeBoard = useCallback((_currentRound: number, currentCards: Card[]) => {
+        const expectedSuffix = _currentRound >= 4 ? '-2' : '-1';
+
+        // Check if current cards match the expected set (Set 1 vs Set 2)
+        if (currentCards.length > 0 && currentCards[0].id.endsWith(expectedSuffix)) {
+            return currentCards.map(c => ({
+                ...c,
+                isRevealed: false,
+                playerRole: null,
+                masterRole: null,
+                isRemoved: c.isRemoved
+            }));
+        }
+
+        // Fallback: Generate cards based on Round
+        // Rounds 1-3: Set 1 (-1)
+        // Rounds 4-6: Set 2 (-2)
+        const suffix = _currentRound >= 4 ? '-2' : '-1';
+
+        return RANKS.map(rank => ({
+            id: `clubs-${rank}${suffix}`,
+            suit: 'clubs' as const,
+            rank,
+            playerRole: null,
+            masterRole: null,
+            isRevealed: false,
+            isRemoved: false
+        }));
+    }, []);
+
+    // --- SCORE INTEGRITY CHECK (Watcher) ---
+    // Fixes the issue where a player syncs with a default 0 score from the Master/DB
+    // but actually has a different score in their profile.
+    const hasCorrectedScoreRef = useRef(false);
+
+    useEffect(() => {
+        const syncPlayerScore = async () => {
+            if (myScore === 0 && !hasCorrectedScoreRef.current &&
+                gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost' &&
+                auth.currentUser?.email) {
+                console.log('[CLUBS PLAYER] My score is 0, checking profile...');
+                hasCorrectedScoreRef.current = true;
+
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('visa_points')
+                    .eq('email', auth.currentUser.email)
+                    .single();
+
+                if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
+                    console.log(`[CLUBS PLAYER] Syncing score from profile: ${profile.visa_points}`);
+
+                    // Fetch latest status to get current scores object
+                    const { data: latestStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
+                    const currentScores = latestStatus?.scores || { current: {}, history: {}, start: {} };
+                    const myUid = auth.currentUser?.uid || '';
+
+                    if (!myUid) return;
+
+                    const newScores = {
+                        ...currentScores,
+                        start: { ...currentScores.start, [myUid]: profile.visa_points },
+                        current: { ...currentScores.current, [myUid]: profile.visa_points }
+                    };
+
+                    // Update game's status in database
+                    await supabase
+                        .from('clubs_game_status')
+                        .update({
+                            scores: newScores
+                        })
+                        .eq('id', 'clubs_king');
+
+                    setMyScore(profile.visa_points);
+                }
+            }
+        };
+
+        syncPlayerScore();
+    }, [myScore, gameState]);
+
+
+
+    // Helper: Update Detailed Scores
+    const updateScoreState = useCallback((status: any) => {
+        // --- 1. Hydrate Allowed Players List (Whitelist) ---
+        if (status.allowed_players) {
+            setAllowedPlayers(status.allowed_players.map((id: any) => String(id)));
+        }
+
+        if (status.scores && status.scores.current) {
+            const currentScores = status.scores.current;
+            const myUid = auth.currentUser?.uid || '';
+
+            // Get my own score - TOTAL ACCUMULATED POINTS
+            if (myUid) {
+                const current = Number(currentScores[myUid]) || 0;
+                console.log(`[CLUBS SCORE DEBUG] myUid=${myUid}, total=${current}`);
+                setMyScore(current);  // Show total accumulated points
+            } else {
+                setMyScore(0);
+            }
+
+            // Calculate Tops
+            let maxPScore = -Infinity;
+            let maxPId = '';
+            let maxMScore = -Infinity;
+
+            // USE WHITELIST for Player Identification
+            const playerIds = new Set((status.allowed_players || allowedPlayersRef.current || []).map((id: any) => String(id)));
+
+            console.log('[CLUBS PLAYER updateScoreState] Debug Info:', {
+                allowed_players: status.allowed_players,
+                playerIds: Array.from(playerIds),
+                currentScores
+            });
+
+            Object.keys(currentScores).forEach((uid) => {
+                const s = Number(currentScores[uid]) || 0;
+                const isPlayer = playerIds.has(uid);
+
+                console.log(`  [CLUBS PLAYER] UID: ${uid}, Score: ${s}, IsPlayer: ${isPlayer}`);
+
+                if (isPlayer) {
+                    // This is a PLAYER
+                    if (s > maxPScore) {
+                        maxPScore = s;
+                        maxPId = uid;
+                    }
+                } else {
+                    // This is a MASTER or non-whitelisted user
+                    if (s > maxMScore) maxMScore = s;
+                }
+            });
+
+            console.log('[CLUBS PLAYER] Calculated Top Scores:', {
+                maxPScore,
+                maxPId,
+                maxMScore
+            });
+
+            // Use calculated scores (trust our whitelist-based calculation)
+            // Only fall back to DB if we have no score data at all
+            if (maxPScore !== -Infinity) {
+                setTopPlayerScore(maxPScore);
+                setTopPlayerId(maxPId);
+            } else {
+                // No player scores found, try DB fallback
+                const dbHighP = status.scores?.high_player;
+                setTopPlayerScore(dbHighP?.score ?? 0);
+                setTopPlayerId(dbHighP?.uid ?? null);
+            }
+
+            if (maxMScore !== -Infinity) {
+                setTopMasterScore(maxMScore);
+            } else {
+                const dbHighM = status.scores?.high_master;
+                setTopMasterScore(dbHighM?.score ?? 0);
+            }
+        } else {
+            // Fallback if no scores object
+            if (status.player_score !== undefined) {
+                const ps = Number(status.player_score) || 0;
+                setTopPlayerScore(ps);
+                if (gameState === 'won' || gameState === 'lost') setMyScore(ps);
+            }
+            if (status.master_score !== undefined) {
+                setTopMasterScore(Number(status.master_score) || 0);
+            }
+        }
+    }, [user, gameState]);
+
+    // --- SELF-PERSISTENCE (BACKUP) ---
+    // Ensure player score is saved to profile when game ends.
+    const hasPersistedRef = useRef(false);
+
+    useEffect(() => {
+        // Only run if game is over (won/lost) and we haven't persisted yet
+        if ((gameState === 'won' || gameState === 'lost') && !hasPersistedRef.current) {
+            const user = auth.currentUser;
+            if (user?.email) {
+                console.log('[CLUBS PLAYER] ===== PERSISTENCE TRIGGERED =====');
+                console.log('[CLUBS PLAYER] Game State:', gameState);
+                console.log('[CLUBS PLAYER] User Email:', user.email);
+                console.log('[CLUBS PLAYER] Final myScore:', myScore);
+                hasPersistedRef.current = true;
+
+                const saveScore = async () => {
+                    try {
+                        console.log('[CLUBS PLAYER] Step 1: Fetching current Visa balance...');
+                        // Fetch FRESH Visa Points using EMAIL (profiles table uses email as key)
+                        // Profile fetch remaining for safety, but data unused in absolute paste
+                        const { error: fetchError } = await supabase
+                            .from('profiles')
+                            .select('visa_points')
+                            .eq('email', user.email)
+                            .single();
+
+                        if (fetchError) {
+                            console.error('[CLUBS PLAYER] Error fetching profile:', fetchError);
+                            return;
+                        }
+
+                        // freshVisa removed (unused in absolute pasting logic)
+                        console.log('[CLUBS PLAYER] Step 2: Persistence triggered...');
+
+                        // Fetch the START score from game status to calculate delta
+                        const { data: gameStatus } = await supabase
+                            .from('clubs_game_status')
+                            .select('scores')
+                            .eq('id', 'clubs_king')
+                            .single();
+
+                        // Fetch the final calculated score from the Master's update
+                        const finalScoresObj = gameStatus?.scores || {};
+                        const finalCurrentScores = finalScoresObj.current || {};
+                        // startScoresObj removed
+
+                        const myUid = auth.currentUser?.uid || (user as any)?.id || '';
+                        const myGameTotal = Number(finalCurrentScores[myUid]) || myScore;
+
+                        // PASTE LOGIC: The new balance IS the final absolute game score (HUD value).
+                        const newTotal = myGameTotal;
+
+                        console.log('[CLUBS PLAYER] Final Absolute Score Sync (Paste):', {
+                            myGameTotal,
+                            newTotal
+                        });
+
+                        console.log('[CLUBS PLAYER] Step 7: Updating database...');
+                        const { error: updateError } = await supabase
+                            .from('profiles')
+                            .update({ visa_points: newTotal })
+                            .eq('email', user.email);
+
+                        if (updateError) {
+                            console.error('[CLUBS PLAYER] Error updating Visa:', updateError);
+                        } else {
+                            console.log('[CLUBS PLAYER] ✅ SUCCESS! Visa updated to absolute score:', newTotal);
+                        }
+                    } catch (error) {
+                        console.error('[CLUBS PLAYER] Persistence error:', error);
+                    }
+                };
+                saveScore();
+            } else {
+                console.warn('[CLUBS PLAYER] No user.email found, skipping persistence');
+            }
+        }
+        // Reset persistence lock if game restarts
+        if (gameState !== 'won' && gameState !== 'lost') {
+            hasPersistedRef.current = false;
+        }
+    }, [gameState, myScore]);
+
+    // --- SELECTION HYDRATION (Prevent Overwrite) ---
+    // Only load selection from DB if we haven't touched it yet (or on fresh load).
+    const hasHydratedSelectionRef = useRef(false);
+    // Reset hydration flag on round change
+    useEffect(() => {
+        hasHydratedSelectionRef.current = false;
+    }, [round]);
+
+    const phase1VotesRef = useRef(phase1Votes);
+    useEffect(() => { phase1VotesRef.current = phase1Votes; }, [phase1Votes]);
+
+    useEffect(() => {
+        // Hydrate from phase1Votes (which comes from DB)
+        const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+        if (phase1Votes[myId] && !hasHydratedSelectionRef.current) {
+            // Only hydrate if local selection is empty to be safe
+            if (!selection.angel && !selection.demon) {
+                console.log('[CLUBS PLAYER] Hydrating selection from DB:', phase1Votes[myId]);
+                setSelection(phase1Votes[myId]);
+                hasHydratedSelectionRef.current = true;
+            }
+        }
+    }, [phase1Votes, selection, user]); // Run when DB updates phase1Votes
+
+    // Fetch Player IDs from profiles table
+    useEffect(() => {
+        const fetchPlayerIds = async () => {
+            try {
+                const querySnapshot = await getDocs(collection(db, 'users'));
+                const users = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+
+                // Sort users to match Admin Dashboard logic
+                users.sort((a: any, b: any) => {
+                    // 1. Force Admin/Game Master to ALWAYS be the first element
+                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
+                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+
+                    if (isMasterA && !isMasterB) return -1;
+                    if (!isMasterA && isMasterB) return 1;
+
+                    // 2. Sort remaining players by Join Date (Oldest to Newest)
+                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
+                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+
+                    return timeA - timeB;
+                });
+
+                const mapping: Record<string, string> = {};
+                const masters = new Set<string>();
+                let mCount = 1;
+                let pCount = 1;
+
+                users.forEach((u: any, index: number) => {
+                    // Match Admin Dashboard: Use GLOBAL index for ID generation
+                    // This ensures #PLAYER_011 in Admin remains #PLAYER_011 in Game
+                    const globalId = (index + 1).toString().padStart(3, '0');
+                    const pid = `#PLAYER_${globalId}`;
+
+                    const isMaster = u.role === 'master' || u.role === 'admin' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
+
+                    // Optional: You can keep #MASTER_ prefix if preferred, but user requested Admin Code match (which uses #PLAYER_)
+                    // For now, we standardize to #PLAYER_ to ensure 1:1 match with Visa IDs.
+                    // If visual distinction is needed, we can add it back, but the NUMBER must be global.
+
+                    if (u.id) mapping[u.id] = pid;
+                    if (u.uid) mapping[u.uid] = pid;
+                    if (u.username) mapping[u.username] = pid;
+                });
+
+                console.log('Role Standardisation (Player):', { mapping });
+                setPlayerIdMap(mapping);
+            } catch (error) {
+                console.error('Error fetching player IDs (Firebase):', error);
+            }
+        };
+        fetchPlayerIds();
+    }, []);
+
+    // Initial Load
+    useEffect(() => {
+        const verifyAccessAndSync = async () => {
+            try {
+                const { data: statusData } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
+                if (statusData) {
+                    // Fixed: Calculate detailed scores on initial load
+                    updateScoreState(statusData);
+
+                    // Sync State (Move up for timer logic)
+                    const serverState = statusData.gameState || 'setup_phase1';
+                    setGameState(serverState);
+
+                    // Sync Fix: Check round_data if column is null
+                    const phaseExpirySource = statusData.phase_expiry || statusData.round_data?.phase_expiry;
+                    if (phaseExpirySource) {
+                        setPhaseExpiry(new Date(phaseExpirySource));
+                    } else {
+                        // Fallback check matching Master
+                        let expiryDate = null;
+                        const now = new Date();
+                        if (serverState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
+                        else if (serverState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
+                        else if (serverState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
+                        else if (serverState === 'playing') expiryDate = new Date(now.getTime() + 120000);
+                        else if (serverState === 'round_reveal') expiryDate = new Date(now.getTime() + 30000);
+
+                        if (expiryDate) setPhaseExpiry(expiryDate);
+                    }
+
+                    if (statusData.current_round > 0) {
+                        setRound(statusData.current_round);
+
+                        // Sync removed cards
+                        const removed = statusData.removed_cards_p || [];
+                        setCards(prev => {
+                            let init: Card[] = [];
+
+                            // Load from DB if available (Random 26 Deck Mode)
+                            if (statusData.round_data?.decks?.active) {
+                                init = statusData.round_data.decks.active;
+                            } else {
+                                // Fallback
+                                init = initializeBoard(statusData.current_round, prev);
+                            }
+
+                            return init.map((c: Card) => ({ ...c, isRemoved: removed.includes(c.id) }));
+                        });
+
+                        // Sync Player Selection (Fix for Reloading)
+                        if (statusData.round_data?.player_selection) {
+                            setSelection(statusData.round_data.player_selection);
+                        }
+
+                        // Sync Master Locked status (if Master has selected)
+                        if (statusData.round_data && statusData.round_data.master_selection) {
+                            setMasterLocked(true);
+                        }
+
+                        // Sync Player Selection (Consensus)
+                        if (statusData.round_data && statusData.round_data.player_selection) {
+                            setSelection(statusData.round_data.player_selection);
+                        }
+                        // Sync Master Selection
+                        if (statusData.round_data && statusData.round_data.master_selection) {
+                            setMasterSelection(statusData.round_data.master_selection);
+                        }
+
+                        if (statusData.is_briefing_shown) setBriefingShown(true);
+                    }
+                }
+            } catch (err) {
+                console.error("SYNC_ERROR:", err);
+            }
+        };
+        verifyAccessAndSync();
+    }, [initializeBoard]);
+
+    // Clear votes & selections on new round
+    useEffect(() => {
+        setMyVote([]);
+        setGlobalVotes({});
+        setPhase1Votes({});
+        setSelection({ angel: null, demon: null });
+        setMasterLocked(false);
+    }, [round]);
+
+    // Realtime Management
+    useEffect(() => {
+        const fetchMessages = async () => {
+            const { data } = await supabase
+                .from('messages')
+                .select('*')
+                .eq('game_id', 'clubs_king')
+                .eq('channel', 'player') // Players only see player chat
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (data) {
+                const chronologicalMessages = [...data].reverse();
+                setMessages(chronologicalMessages.map((msg: any) => ({
+                    id: msg.id,
+                    user: msg.user_name,
+                    userId: msg.user_id,
+                    text: msg.content,
+                    timestamp: new Date(msg.created_at),
+                    isSystem: msg.is_system
+                })));
+            }
+        };
+        fetchMessages();
+
+        const channel = supabase.channel('clubs_king_game', {
+            config: { presence: { key: 'player' } }
+        });
+        channelRef.current = channel;
+
+        channel
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'game_id=eq.clubs_king' }, (payload) => {
+                const newMsg = payload.new;
+                if (newMsg.channel === 'player' || newMsg.is_system) {
+                    setMessages(prev => [...prev, {
+                        id: newMsg.id,
+                        user: newMsg.user_name,
+                        userId: newMsg.user_id,
+                        text: newMsg.content,
+                        timestamp: new Date(newMsg.created_at),
+                        isSystem: newMsg.is_system
+                    }]);
+                }
+            })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, (payload) => {
+                const status = payload.new;
+
+                // CRITICAL: Check for force reset
+                if (status.round_data?.force_reset) {
+                    console.log('!!! FORCE RESET DETECTED IN DATABASE !!!');
+                    setShowResetOverlay(true);
+                    return; // Exit early
+                }
+
+                if (status.is_paused !== undefined) setIsPaused(status.is_paused);
+
+                // Sync Fix: Check round_data if column is null, fallback to local default
+                const phaseExpirySource = status.phase_expiry || status.round_data?.phase_expiry;
+                if (phaseExpirySource) {
+                    setPhaseExpiry(new Date(phaseExpirySource));
+                } else if (!phaseExpiry && status.gameState) {
+                    const now = new Date();
+                    let expiryDate = null;
+                    if (status.gameState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
+                    else if (status.gameState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
+                    else if (status.gameState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
+                    else if (status.gameState === 'playing') expiryDate = new Date(now.getTime() + 120000);
+                    else if (status.gameState === 'round_reveal') expiryDate = new Date(now.getTime() + 30000);
+                    if (expiryDate) setPhaseExpiry(expiryDate);
+                }
+
+                // Sync Game State
+                if (status.gameState && status.gameState !== gameStateRef.current) {
+                    setGameState(status.gameState);
+
+                    // FALLBACK: If we entered evaluation (round_reveal) but missed the broadcast
+                    // Ensure results are hydrated if available in DB
+                    if (status.gameState === 'round_reveal' && status.round_data?.evaluation_results) {
+                        console.log('[SYNC FALLBACK] Hydrating results from DB state.');
+                        setRoundResults(status.round_data.evaluation_results);
+                    }
+                }
+
+                // Sync Round
+                if (status.current_round > roundRef.current) {
+                    setRound(status.current_round);
+                    // FORCE RESET Local State on Round Change
+                    // setIsSubmitted(false); // Variable removed
+                    // DON'T reset selection if player_selection exists in DB (auto-selected cards)
+                    if (!status.round_data?.player_selection) {
+                        setSelection({ angel: null, demon: null });
+                    } else {
+                        console.log('[CLUBS PLAYER] Preserving auto-selected cards on round change:', status.round_data.player_selection);
+                        setSelection(status.round_data.player_selection);
+                    }
+                    setPhase1Votes({});
+                    setGlobalVotes({});
+
+                    setCards(prev => {
+                        const init = initializeBoard(status.current_round, prev);
+                        const removed = status.removed_cards_p || [];
+                        return init.map(c => ({ ...c, isRemoved: removed.includes(c.id) }));
+                    });
+                } else if (status.current_round === 0) {
+                    // Reset
+                    setRound(0); setIsCancelled(true);
+                }
+
+                // Enhanced Score Tracking
+                updateScoreState(status);
+
+                // Sync Selections (Individual)
+                if (status.round_data) {
+                    if (status.round_data.phase1_selections) {
+                        const selections = status.round_data.phase1_selections;
+                        setPhase1Votes(selections);
+
+                        // Sync MY selection from DB on load (if exists)
+                        // CRITICAL FIX: Only overwrite local selection if it's empty (fresh load)
+                        // This prevents DB latency from reverting my active choices while I'm clicking.
+
+                        // Note: Logic moved to dedicated hydration effect (hasHydratedSelectionRef)
+                        // This block now only syncs phase1Votes which is correct.
+
+                    }
+
+                    // Sync Final Consensus (Overrides individual)
+                    // IMPORTANT: Always sync player_selection from DB, especially during selection_reveal
+                    if (status.round_data?.player_selection) {
+                        console.log('[CLUBS PLAYER] Syncing player selection:', status.round_data.player_selection);
+                        setSelection(status.round_data.player_selection);
+                    }
+
+                    if (status.round_data.master_selection) {
+                        setMasterSelection(status.round_data.master_selection); // Capture Master Selection
+                        setMasterLocked(true); // Master has chosen
+                    } else {
+                        setMasterLocked(false);
+                    }
+
+                    // Sync In-Game Votes (Late Joiner Fix)
+                    if (status.round_data.player_votes) {
+                        setGlobalVotes(status.round_data.player_votes);
+                    } else if (Object.keys(globalVotes).length === 0) {
+                        // Optional: If empty in DB and empty locally, keep empty
+                    }
+                }
+
+                // Real-time Deck Sync & Removal
+                setCards(prev => {
+                    let activeDeck = prev;
+                    if (status.round_data?.decks?.active) {
+                        activeDeck = status.round_data.decks.active;
+                    }
+                    const removed = status.removed_cards_p || [];
+                    return activeDeck.map((c: Card) => ({ ...c, isRemoved: removed.includes(c.id) }));
+                });
+            })
+            .on('broadcast', { event: 'force_exit' }, (p: any) => {
+                console.log("FORCE EXIT RECEIVED", p);
+                setShowResetOverlay(true);
+            })
+            // REMOVED: timer_sync listener - was causing glitches
+            // Each client now calculates their own countdown from phaseExpiry
+            .on('broadcast', { event: 'round_results' }, (p: any) => {
+                const payload = p.payload;
+                console.log('=== PLAYER RECEIVED ROUND_RESULTS ===', payload);
+                setRoundResults(payload.resList || []);
+
+                // Sync scores from broadcast - PREFER currentScores map for accuracy
+                // myId removed (unused)
+
+                if (payload.currentScores) {
+                    console.log('[SCORE SYNC] Updating all scores from broadcast payload.');
+                    // Use the centralized helper to update Detailed Scores (HUD)
+                    updateScoreState({
+                        scores: { current: payload.currentScores },
+                        master_score: payload.masterScore
+                    });
+
+                    // setScore removed (causes ReferenceError)
+                } else if (payload.playerScore !== undefined) {
+                    // Fallback to generic player score (legacy)
+                    console.log('Setting player score (provisional):', payload.playerScore);
+                    // setScore removed (causes ReferenceError)
+                    setMyScore(payload.playerScore); // Ensure HUD updates too
+                }
+            })
+            .on('broadcast', { event: 'game_over' }, (p: any) => {
+                const payload = p.payload || {};
+                const finalScores = payload.finalScores;
+                if (finalScores) {
+                    const myUid = auth.currentUser?.uid || (user as any)?.id || '';
+                    const scoresMap = finalScores as Record<string, number>;
+                    const myFinalScore = scoresMap[myUid] !== undefined ? Number(scoresMap[myUid]) : myScore;
+                    console.log('[GAME OVER] Final score boost received:', myFinalScore);
+                    setMyScore(myFinalScore);
+                }
+            })
+            .on('broadcast', { event: 'vote_cast' }, (p: any) => {
+                const { userId, votes, team } = p.payload;
+                // Players see other players' votes
+                if (team === 'player' || team === 'participants') {
+                    setGlobalVotes(prev => ({ ...prev, [userId]: votes }));
+                }
+            })
+            .on('broadcast', { event: 'phase1_vote' }, (p: any) => {
+                const { userId, selection } = p.payload;
+                setPhase1Votes(prev => ({ ...prev, [userId]: selection }));
+            })
+            .on('broadcast', { event: 'master_vote' }, (_p: any) => {
+                // const { votes } = p.payload;
+                // Currently ignoring master votes for players (Blind Mode until reveal)
+                // But Prompt said "player can see players, master can other masters".
+                // Players usually shouldn't see Master's live hunting?
+                // Actually, players usually DON'T see Master's hunting until reveal.
+                // But the prompt was specific: "player can see players ,master can other masters".
+                // So Players see Players. Master see Masters.
+                // I will NOT show Master votes to players here.
+                // But I'll listen just in case we need it later, or filter it out.
+                // For now, do nothing with master_vote for players.
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    channel.track({
+                        userId: auth.currentUser?.uid || user?.username || 'ANON',
+                        online_at: new Date().toISOString(),
+                    });
+                }
+            });
+
+        return () => { supabase.removeChannel(channel); };
+    }, [user, initializeBoard, updateScoreState]);
+
+    // Force Sync Selection on Phase Change to Player Selection
+    useEffect(() => {
+        const syncSelection = async () => {
+            // If we are in a locked phase, we MUST have the global consensus
+            if (gameState === 'selection_reveal' || gameState === 'playing' || gameState === 'round_reveal') {
+                const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
+                if (data?.round_data?.player_selection) {
+                    setSelection(data.round_data.player_selection);
+                }
+            }
+        };
+        syncSelection();
+    }, [gameState]);
+
+    // Chat Auto-Scroll
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+
+    // Timer Logic
+    useEffect(() => {
+        const timer = setInterval(() => {
+            // Don't countdown if game is paused
+            if (isPaused) return;
+
+            if (phaseExpiry) {
+                const now = new Date();
+                const diff = Math.floor((phaseExpiry.getTime() - now.getTime()) / 1000);
+                setTimeLeft(Math.max(0, diff));
+            } else {
+                setTimeLeft(prev => Math.max(0, prev - 1));
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [phaseExpiry, isPaused]);
+
+
+    // Actions
+    const handleCardClick = async (cardId: string) => {
+        console.log('=== CARD CLICKED ===', { cardId, gameState, isCancelled });
+
+        if (isCancelled) {
+            console.log('Click blocked: isCancelled is true');
+            return;
+        }
+
+        // PHASE 1: SELECTION (Consensus)
+        if (gameState === 'setup' || gameState === 'setup_phase1') {
+            console.log('Phase 1 selection mode activated');
+            const card = cards.find(c => c.id === cardId);
+            if (!card || card.isRemoved) return;
+
+            // Optimistic Update (No Side Effects in Setter)
+            let next = { ...selection }; // Use current selection
+            const isAngel = selection.angel === cardId;
+            const isDemon = selection.demon === cardId;
+
+            if (isAngel) next.angel = null;
+            else if (isDemon) next.demon = null;
+            else {
+                if (!next.angel) next.angel = cardId;
+                else if (!next.demon) next.demon = cardId;
+                else next.angel = cardId; // Overwrite Angel
+            }
+
+            setSelection(next);
+
+            // Execute Side Effects Async
+            submitPhase1Selection(next);
+
+            // Broadcast Phase 1 Vote (Live Indicator)
+            const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+            if (channelRef.current) {
+                channelRef.current.send({
+                    type: 'broadcast',
+                    event: 'phase1_vote',
+                    payload: { userId: myId, selection: next }
+                });
+            }
+            return;
+        }
+
+        // PHASE 2: VOTING (Hunting)
+        if (gameState === 'playing') {
+            console.log('Phase 2 voting mode activated');
+            const card = cards.find(c => c.id === cardId);
+            if (!card || card.isRemoved) return;
+
+            // Toggle Vote
+            let newVotes = [...myVote];
+            if (newVotes.includes(cardId)) {
+                newVotes = newVotes.filter(id => id !== cardId);
+            } else {
+                if (newVotes.length >= MAX_VOTES) { showToast("MAXIMUM 2 VOTES ALLOWED", 'warning'); return; }
+                newVotes.push(cardId);
+            }
+            setMyVote(newVotes);
+
+            // Broadcast Vote
+            const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+            console.log('=== PLAYER VOTING ===', { votes: newVotes, userId: myId });
+
+            channelRef.current?.send({
+                type: 'broadcast',
+                event: 'vote_cast',
+                payload: { votes: newVotes, userId: myId, team: 'player' }
+            });
+
+            // Note: Votes are ephemeral and counted by Master, but we should also rely on server state if possible.
+            // For this implementation, we broadcast and let Master/Server aggregate.
+            // Locally we update display immediately.
+            setGlobalVotes(prev => ({ ...prev, [myId]: newVotes }));
+            console.log('Vote broadcast sent');
+            return;
+        }
+
+        // If we reach here, gameState doesn't match any phase
+        console.log('❌ Card click ignored - gameState not in selection or voting phase:', gameState);
+    };
+
+    // --- SELF-PERSISTENCE (BACKUP) ---
+    // In case Master fails, Player persists their own score on Win/Loss
+
+    const submitPhase1Selection = async (sel: { angel: string | null; demon: string | null }) => {
+        console.log('=== PLAYER INDIVIDUAL SELECTION ===', sel);
+        // RACE CONDITION FIX:
+        // We now rely on BROADCASTING to the Master, who acts as the Single Writer to the database.
+        // This prevents players from overwriting each other's selections in the JSONB blob.
+
+        /* 
+        const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
+        const currentData = data?.round_data || {};
+        const currentSelections = currentData.phase1_selections || {};
+     
+        const { error } = await supabase.from('clubs_game_status').update({
+            round_data: {
+                ...currentData,
+                phase1_selections: {
+                    ...currentSelections,
+                    [myId]: sel
+                }
+            }
+        }).eq('id', 'clubs_king');
+     
+        if (error) {
+            console.error('!!! SELECTION SAVE FAILED !!!', error);
+            showToast(`ERROR: Could not save selection: ${error.message}`, 'error');
+        } else {
+            console.log('Individual selection saved successfully');
+        }
+        */
+        console.log('Selection broadcasted to Master for persistence.');
+    };
+
+    const sendMessage = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!inputMessage.trim()) return;
+        const senderName = user?.username || 'PLAYER';
+        const tempContent = inputMessage;
+        setInputMessage('');
+
+        try {
+            const { error } = await supabase.from('messages').insert({
+                game_id: 'clubs_king',
+                user_name: senderName,
+                user_id: auth.currentUser?.uid,
+                content: tempContent,
+                is_system: false,
+                channel: 'player'
+            });
+
+            if (error) {
+                console.error('Error sending message:', error);
+                // Optionally revert proper optimistically or show toast
+            }
+        } catch (err) {
+            console.error('Exception sending message:', err);
+        }
+    };
+
+
+
+
+    if ((!cards || cards.length === 0) && gameState !== 'idle') return <Loader />;
+    return (
+        <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+            {/* PAUSE OVERLAY */}
+            <AnimatePresence>
+                {isPaused && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center">
+                        <div className="text-center space-y-4">
+                            <h2 className="text-4xl font-bold text-red-500 tracking-widest">PROTOCOL HALTED</h2>
+                            <p className="text-white/60 font-mono text-sm uppercase">AWAITING ADMIN AUTHORIZATION</p>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {toast && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className={`absolute top-20 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-lg shadow-2xl backdrop-blur-md border flex items-center gap-3 ${toast.type === 'warning' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' :
+                            toast.type === 'error' ? 'bg-red-500/10 border-red-500 text-red-500' :
+                                'bg-green-500/10 border-green-500 text-green-500'
+                            }`}
+                    >
+                        <span className="text-xs font-black uppercase tracking-widest">{toast.message}</span>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* BRIEFING OVERLAY */}
+            <AnimatePresence>
+                {gameState === 'briefing' && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center"
+                    >
+                        <div className="max-w-4xl mx-auto text-center space-y-4 sm:space-y-8 p-4 sm:p-8 pt-20 sm:pt-8">
+                            <h1 className="text-3xl sm:text-5xl font-cinzel font-black text-white uppercase tracking-[0.2em] sm:tracking-widest">
+                                Protocol Briefing
+                            </h1>
+                            <div className="h-0.5 sm:h-1 w-32 sm:w-64 mx-auto bg-gradient-to-r from-transparent via-green-500 to-transparent" />
+                            <div className="space-y-4 sm:space-y-6 text-white/80 font-mono">
+                                <p className="text-base sm:text-xl leading-relaxed">
+                                    Welcome to the Clubs Trial, Agent.
+                                </p>
+                                <p className="text-xs sm:text-base leading-relaxed max-w-md mx-auto">
+                                    You will work as a <span className="text-green-500 font-bold">TEAM</span> to identify hidden agents among the cards.
+                                    Each round, select your <span className="text-yellow-500">Angel</span> (benign) and <span className="text-red-500">Demon</span> (hostile) targets.
+                                </p>
+                                <p className="text-xs sm:text-base leading-relaxed max-w-md mx-auto">
+                                    The collective will decide through consensus. Masters will attempt deception.
+                                    Trust your instincts. Collaborate wisely.
+                                </p>
+                                <p className="text-[10px] sm:text-sm text-white/50 uppercase tracking-widest mt-4 sm:mt-8">
+                                    Trial begins shortly...
+                                </p>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* HEADER HUB - Consolidated with Main Header */}
+            <div className="px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0">
+                <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
+                    <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
+                        {/* ROUND */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{round}/6</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TOP PLAYER */}
+                        <div className="text-center min-w-[70px] sm:min-w-[100px]">
+                            <p className="text-[7px] text-yellow-500/50 uppercase tracking-widest mb-0.5">TOP PLAYER</p>
+                            <div className="flex flex-col items-center leading-none">
+                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId || '--')}</p>
+                                <p className="text-xs sm:text-lg font-mono font-black text-white">{topPlayerScore}</p>
+                            </div>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TOP MASTER */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{topMasterScore}</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* MY SCORE */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-blue-500/50 uppercase tracking-widest mb-0.5">MY SCORE</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{myScore}</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TIMER */}
+                        <div className="text-center min-w-[60px]">
+                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
+                            <div className="flex items-center justify-center gap-1">
+                                <Timer size={12} className="text-red-500" />
+                                <p className="text-xs sm:text-lg font-mono font-black text-red-500 leading-none">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* MAIN AREA */}
+            <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative z-10">
+
+                {/* GAME BOARD */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-black/40">
+
+
+                    {/* INFO HUD */}
+                    <div className="max-w-6xl mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 sm:gap-0 px-4 sm:px-0">
+                        <div className="space-y-1 w-full sm:w-auto">
+                            <div className="flex items-center justify-between sm:justify-start gap-4">
+                                <h2 className="text-xl sm:text-4xl font-cinzel font-bold text-white uppercase tracking-widest">
+                                    {gameState === 'playing' ? "HUNTING PHASE" :
+                                        gameState === 'card_reveal' ? "IDENTITY REVEAL" :
+                                            gameState === 'round_reveal' ? "ROUND EVALUATION" :
+                                                gameState === 'selection_reveal' ? "SELECTIONS LOCKED" :
+                                                    gameState === 'won' || gameState === 'lost' ? "TRIAL COMPLETE" :
+                                                        "SELECT Your CHAMPIONS"}
+                                </h2>
+                                {/* MOBILE TIMER - Moved next to title */}
+                                <div className="sm:hidden flex items-center gap-2 bg-red-600/20 px-3 py-1.5 rounded border border-red-500/30 shadow-[0_0_15px_rgba(220,38,38,0.2)]">
+                                    <Timer size={14} className="text-red-500 animate-pulse" />
+                                    <span className="text-xl font-black italic text-red-500">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+                                </div>
+                            </div>
+                            <p className="text-white/40 font-mono text-[9px] sm:text-xs uppercase tracking-[0.2em] leading-relaxed">
+                                {gameState === 'setup_phase1' ? "AGREE WITH TEAMATES. MASTER'S CHOICE IS LOCKED." :
+                                    gameState === 'selection_reveal' ? "SELECTIONS LOCKED. PREPARING TO HUNT..." :
+                                        gameState === 'card_reveal' ? "TRUTH REVEALED. CALCULATING OUTCOMES..." :
+                                            gameState === 'playing' ? "VOTE FOR 2 CARDS. FIND ANGEL (+300) & AVOID DEMON (-50)." :
+                                                "AWAITING PHASE SHIFT..."}
+                            </p>
+                        </div>
+
+                        {/* My Selection Display Setup */}
+                        {(gameState === 'setup' || gameState === 'setup_phase1' || gameState === 'selection_reveal') && (
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${selection.angel ? 'border-yellow-500 bg-yellow-500/10' : 'border-white/10 bg-white/5'} text-center w-20 sm:w-24`}>
+                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1 leading-none">TEAM ANGEL</p>
+                                    <p className="text-[5px] sm:text-[6px] text-red-500 uppercase tracking-widest mb-1 leading-none">MASTER HUNTS</p>
+                                    <p className="text-base sm:text-lg font-black text-yellow-500">{cards.find(c => c.id === selection.angel)?.rank || '-'}</p>
+                                </div>
+                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${selection.demon ? 'border-red-500 bg-red-500/10' : 'border-white/10 bg-white/5'} text-center w-20 sm:w-24`}>
+                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1 leading-none">TEAM DEMON</p>
+                                    <p className="text-[5px] sm:text-[6px] text-green-500 uppercase tracking-widest mb-1 leading-none">MASTER AVOIDS</p>
+                                    <p className="text-base sm:text-lg font-black text-red-500">{cards.find(c => c.id === selection.demon)?.rank || '-'}</p>
+                                </div>
+
+                                <div className="hidden sm:block h-8 w-px bg-white/10 mx-2" />
+
+                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${masterLocked ? 'border-red-500/50 bg-red-900/10' : 'border-white/10 bg-white/5'} text-center min-w-[90px] sm:w-32`}>
+                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1">MASTER STATUS</p>
+                                    <div className="flex items-center justify-center gap-2">
+                                        {masterLocked ? <Shield size={14} className="text-red-500" /> : <div className="w-3 h-3 rounded-full border border-white/20 border-t-white animate-spin" />}
+                                        <p className="text-[9px] sm:text-xs font-bold text-white">{masterLocked ? 'LOCKED' : 'DECIDING...'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* CARDS GRID */}
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-4 max-w-6xl mx-auto">
+                        {cards.map((card) => {
+                            if (card.isRemoved) return <div key={card.id} className="aspect-[2/3] opacity-0 pointer-events-none" />;
+
+                            const isSelectedAngel = selection.angel === card.id;
+                            const isSelectedDemon = selection.demon === card.id;
+                            const isMasterAngel = masterSelection.angel === card.id;
+                            const isMasterDemon = masterSelection.demon === card.id;
+                            const isVoted = myVote.includes(card.id);
+
+                            // Visual State
+                            let ringColor = 'border-white/10 opacity-60 hover:opacity-100';
+                            let glow = '';
+
+                            // Dim others during reveal
+                            // Dim if NOT selected by anyone
+                            const isDimmed = gameState === 'selection_reveal' && !isSelectedAngel && !isSelectedDemon && !isMasterAngel && !isMasterDemon;
+
+                            if (isDimmed) {
+                                ringColor = 'border-white/5 opacity-20'; // Removed hover:opacity-100 here implicitly
+                            }
+
+                            // Phase 1 Visuals (Identity) - Angel/Demon glow overrides dimming
+                            if (isSelectedAngel) {
+                                ringColor = 'border-yellow-500 opacity-100';
+                                glow = 'shadow-[0_0_30px_rgba(234,179,8,0.3)]';
+                            } else if (isSelectedDemon) {
+                                ringColor = 'border-red-500 opacity-100';
+                                glow = 'shadow-[0_0_30px_rgba(239,68,68,0.3)]';
+                            }
+
+                            // MASTER REVEAL HIGHLIGHTS (Overrides Player)
+                            // MASTER REVEAL HIGHLIGHTS (Overrides Player)
+                            // User Request: Reveal only in card_reveal (after voting)
+                            if (gameState === 'card_reveal' || gameState === 'round_reveal') {
+                                if (isMasterAngel) { ringColor = 'border-yellow-500 opacity-100'; glow = 'shadow-[0_0_30px_rgba(234,179,8,0.6)]'; }
+                                else if (isMasterDemon) { ringColor = 'border-red-600 opacity-100'; glow = 'shadow-[0_0_30px_rgba(220,38,38,0.6)]'; }
+                            }
+
+                            // Phase 2 Visuals (Voting) - Only for non-identity cards or if we want hybrid
+                            if (gameState === 'playing' && !isSelectedAngel && !isSelectedDemon) {
+                                if (isVoted) {
+                                    ringColor = 'border-green-500 opacity-100';
+                                    glow = 'shadow-[0_0_30px_rgba(34,197,94,0.3)]';
+                                }
+                            }
+                            // Phase 3 Visuals (Revealed)
+                            else if (gameState === 'round_reveal') {
+                                // Show Master's Roles & Player Roles
+                                if (card.masterRole === 'angel') ringColor = 'border-yellow-500 shadow-[0_0_30px_rgba(234,179,8,0.5)]';
+                                else if (card.masterRole === 'demon') ringColor = 'border-red-600 shadow-[0_0_30px_rgba(239,68,68,0.5)]';
+                                else if (card.playerRole === 'angel') ringColor = 'border-blue-400';
+                                else if (card.playerRole === 'demon') ringColor = 'border-purple-500';
+                            }
+
+                            return (
+                                <motion.div
+                                    key={card.id}
+                                    layoutId={card.id}
+                                    onClick={() => handleCardClick(card.id)}
+                                    className={`relative aspect-[2/3] bg-[#0A0A0F] rounded-xl border-2 transition-all duration-300 cursor-pointer overflow-hidden group ${ringColor} ${glow}`}
+                                >
+                                    <img
+                                        src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`}
+                                        className="absolute inset-0 w-full h-full object-cover rounded-xl"
+                                        alt={`${card.rank} of ${card.suit}`}
+                                    />
+
+                                    {/* Phase 1 Selection Labels - PERSISTENT */}
+                                    {(() => {
+                                        if (isSelectedAngel || isSelectedDemon) {
+                                            console.log('[LABEL DEBUG]', { card: card.id, isSelectedAngel, isSelectedDemon, selection });
+                                        }
+                                        return null;
+                                    })()}
+                                    {isSelectedAngel && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-yellow-500 text-black font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400">MY ANGEL</div>}
+                                    {isSelectedDemon && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-red-600 text-white font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-500">MY DEMON</div>}
+
+                                    {/* Phase 2 Overlay Labels */}
+                                    {gameState === 'playing' && (
+                                        <>
+                                            {isVoted && (
+                                                <div className="absolute inset-0 flex items-center justify-center bg-green-500/10 backdrop-blur-[1px]">
+                                                    <div className="bg-green-500 text-black text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1">
+                                                        <CheckCircle2 size={10} /> TARGET
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {/* Show Global Votes Count */}
+                                            <div className="absolute top-2 right-2 z-30">
+                                                {(() => {
+                                                    // Merge local vote for instant feedback
+                                                    const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                    const effectiveVotes = { ...globalVotes, [myId]: myVote };
+                                                    const count = Object.values(effectiveVotes).filter(votes => votes.includes(card.id)).length;
+
+                                                    if (count > 0) return (
+                                                        <div className="w-5 h-5 rounded-full bg-blue-500 text-white font-bold flex items-center justify-center text-[10px] shadow-lg border border-white/20">
+                                                            {count}
+                                                        </div>
+                                                    );
+                                                    return null;
+                                                })()}
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {/* Phase 1 Live Counters */}
+                                    {(gameState === 'setup' || gameState === 'setup_phase1') && (
+                                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-30">
+                                            {/* Angel Count */}
+                                            {(() => {
+                                                const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                const effectiveVotes = { ...phase1Votes, [myId]: selection };
+                                                const angelCount = Object.values(effectiveVotes).filter(v => v.angel === card.id).length;
+
+                                                if (angelCount > 0) return (
+                                                    <div className="px-1.5 py-0.5 rounded bg-yellow-500 text-black font-bold text-[8px] shadow-lg border border-white/20 min-w-[16px] text-center">
+                                                        A:{angelCount}
+                                                    </div>
+                                                );
+                                                return null;
+                                            })()}
+                                            {/* Demon Count */}
+                                            {(() => {
+                                                const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                const effectiveVotes = { ...phase1Votes, [myId]: selection };
+                                                const demonCount = Object.values(effectiveVotes).filter(v => v.demon === card.id).length;
+
+                                                if (demonCount > 0) return (
+                                                    <div className="px-1.5 py-0.5 rounded bg-red-600 text-white font-bold text-[8px] shadow-lg border border-white/20 min-w-[16px] text-center">
+                                                        D:{demonCount}
+                                                    </div>
+                                                );
+                                                return null;
+                                            })()}
+                                        </div>
+                                    )}
+
+                                    {/* Evaluation Overlay */}
+                                    {gameState === 'round_reveal' && (
+                                        <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1">
+                                            {card.masterRole === 'angel' && <span className="text-yellow-500 font-bold uppercase text-[10px]">MASTER ANGEL</span>}
+                                            {card.masterRole === 'demon' && <span className="text-red-500 font-bold uppercase text-[10px]">MASTER DEMON</span>}
+                                            {card.playerRole === 'angel' && <span className="text-blue-400 font-bold uppercase text-[10px]">YOUR ANGEL</span>}
+                                            {card.playerRole === 'demon' && <span className="text-purple-400 font-bold uppercase text-[10px]">YOUR DEMON</span>}
+                                        </div>
+                                    )}
+
+                                </motion.div>
+                            );
+                        })}
+                    </div>
+
+                    {/* CARD REVEAL: SHOW ANGEL & DEMON */}
+                    <AnimatePresence>
+                        {gameState === 'card_reveal' && (
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-32 sm:pt-12 lg:pt-0">
+                                {/* Card Display Section */}
+                                <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 lg:gap-20 max-w-full scale-[0.65] sm:scale-85 lg:scale-90 origin-top sm:origin-center lg:origin-center pb-24 lg:pb-0 mt-8 sm:mt-0">
+                                    {/* Master's Selected Cards */}
+                                    <div className="space-y-8 sm:space-y-6 flex flex-col items-center">
+                                        <h3 className="text-xl sm:text-xl font-mono font-bold uppercase tracking-[0.5em] text-center text-yellow-500/90 drop-shadow-[0_0_10px_rgba(234,179,8,0.3)]">MASTER</h3>
+                                        <div className="flex gap-4 sm:gap-4 justify-center">
+                                            {/* MASTER ANGEL */}
+                                            {(() => {
+                                                const card = cards.find(c => c.id === masterSelection?.angel);
+                                                if (!card) return null;
+                                                return (
+                                                    <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-yellow-500 shadow-[0_0_40px_rgba(234,179,8,0.4)]">
+                                                        <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                        <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MASTER ANGEL</div>
+                                                    </div>
+                                                );
+                                            })()}
+                                            {/* MASTER DEMON */}
+                                            {(() => {
+                                                const card = cards.find(c => c.id === masterSelection?.demon);
+                                                if (!card) return null;
+                                                return (
+                                                    <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-red-600 shadow-[0_0_40px_rgba(220,38,38,0.4)]">
+                                                        <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                        <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MASTER DEMON</div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+
+                                    {/* VS SEPARATOR */}
+                                    <div className="hidden sm:block h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
+                                    <div className="sm:hidden w-64 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent my-12" />
+
+                                    {/* PLAYER SIDE */}
+                                    <div className="flex flex-col items-center gap-8 sm:gap-6">
+                                        <h3 className="text-xl sm:text-xl font-bold font-mono tracking-[0.5em] border-b border-blue-500/20 pb-3 text-blue-500/70 uppercase">PLAYERS</h3>
+                                        <div className="flex gap-2 sm:gap-6 justify-center">
+                                            {/* PLAYER ANGEL */}
+                                            {(() => {
+                                                const card = cards.find(c => c.id === selection.angel);
+                                                if (!card) return null;
+                                                return (
+                                                    <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.4)]">
+                                                        <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                        <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">YOUR ANGEL</div>
+                                                    </div>
+                                                );
+                                            })()}
+                                            {/* PLAYER DEMON */}
+                                            {(() => {
+                                                const card = cards.find(c => c.id === selection.demon);
+                                                if (!card) return null;
+                                                return (
+                                                    <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-purple-600 shadow-[0_0_30px_rgba(147,51,234,0.4)]">
+                                                        <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                        <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">YOUR DEMON</div>
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
+                                    CALCULATING ROUND OUTCOME...
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* ROUND RESULTS POPUP */}
+                    <AnimatePresence>
+                        {gameState === 'round_reveal' && roundResults && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 100 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 100 }}
+                                className="absolute bottom-0 left-0 right-0 lg:top-1/2 lg:left-1/2 lg:right-auto lg:bottom-auto lg:-translate-x-1/2 lg:-translate-y-1/2 lg:w-full lg:max-w-lg lg:max-h-[80vh] lg:rounded-2xl lg:border lg:border-white/10 bg-[#050508]/98 backdrop-blur-2xl border-t border-white/20 p-8 sm:p-12 lg:p-8 z-50 max-h-[60vh] overflow-y-auto shadow-[0_-30px_60px_rgba(0,0,0,0.9)] lg:shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-t-[2rem] lg:rounded-[2rem]"
+                            >
+                                <div className="max-w-4xl mx-auto space-y-6">
+                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                                        <h3 className="text-2xl sm:text-4xl font-cinzel font-black text-white uppercase tracking-[0.2em]">ROUND EVALUATION</h3>
+                                        <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Protocol Sync: Round {round}</span>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {roundResults.filter(res => res.team === 'player' && (!res.targetId || res.targetId === (auth.currentUser?.uid || user?.username))).map((res, i) => (
+                                            <motion.div
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: i * 0.1 }}
+                                                key={i}
+                                                className={`flex justify-between items-center p-3 sm:p-4 rounded-xl bg-transparent border border-white/10 hover:border-white/20 transition-all`}
+                                            >
+                                                <div className="space-y-1">
+                                                    <p className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-mono">Outcome Metric</p>
+                                                    <span className="text-white font-mono text-xs sm:text-base uppercase tracking-wider">{res.reason}</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-mono mb-1">Delta</p>
+                                                    <span className={`text-lg sm:text-2xl font-mono font-black ${res.change > 0 ? 'text-green-500 sm:shadow-[0_0_20px_rgba(34,197,94,0.3)]' : 'text-red-500 sm:shadow-[0_0_20px_rgba(239,68,68,0.3)]'}`}>
+                                                        {res.change > 0 ? '+' : ''}{res.change}
+                                                    </span>
+                                                </div>
+                                            </motion.div>
+                                        ))}
+                                    </div>
+
+                                    {/* Summary Footer */}
+                                    <div className="pt-6 border-t border-white/5 flex justify-between items-end">
+                                        <div className="space-y-1">
+                                            <p className="text-[9px] text-white/20 uppercase tracking-[0.3em] font-mono">Current Identity</p>
+                                            <p className="text-blue-400 font-mono text-xs uppercase">{user?.username || 'AGENT'}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[9px] text-white/20 uppercase tracking-[0.3em] font-mono">Session Score</p>
+                                            <p className="text-2xl font-mono font-black text-white">{myScore}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+
+                {/* DESKTOP CHAT SIDEBAR - Hidden on mobile, matching Master style */}
+                <div className="hidden sm:flex sm:w-80 sm:h-full bg-[#0A0A0E] sm:border-l border-white/10 flex-col">
+                    <div className="p-3 border-b border-white/10 bg-[#0F0F13]">
+                        <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS INTERCEPT</h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                        {messages.length === 0 && (
+                            <div className="text-center mt-10 opacity-30">
+                                <p className="text-xs uppercase tracking-widest font-mono">Channel Silent...</p>
+                            </div>
+                        )}
+                        {messages.map((msg) => (
+                            <div key={msg.id} className="relative group">
+                                <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-white/20 group-hover:bg-green-500/50 transition-colors" />
+                                <div className="pl-3 py-1">
+                                    <p className="text-[10px] font-black text-white/40 mb-1">
+                                        {(msg.userId && playerIdMap[msg.userId]) || msg.user || 'PLAYER'}
+                                    </p>
+                                    <p className="text-xs text-white/80 font-mono leading-relaxed">
+                                        {msg.text}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                        <div ref={chatEndRef} />
+                    </div>
+                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-[#0F0F13]">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                value={inputMessage}
+                                onChange={(e) => setInputMessage(e.target.value)}
+                                placeholder="Transmission..."
+                                className="w-full bg-black/50 border border-white/10 rounded px-3 py-2 text-xs font-mono text-cyan-500 placeholder:text-white/20 focus:outline-none focus:border-cyan-500/50 uppercase tracking-widest"
+                            />
+                            <button type="submit" className="hidden" />
+                        </div>
+                    </form>
+
+                    {/* Logs - Matching Master style */}
+                    <div className="p-3 border-t border-white/10 bg-[#050508] font-mono">
+                        <h3 className="text-[8px] font-black text-white/30 uppercase mb-2 tracking-widest">SYSTEM STATUS</h3>
+                        <div className="space-y-1">
+                            <p className="text-[7px] text-cyan-500 uppercase">ROUND {round} ARCHITECTURE SYNC COMPLETE</p>
+                            <p className="text-[7px] text-white/30 uppercase leading-tight">
+                                {gameState === 'playing' ? "HUNTING PROTOCOL ACTIVE" :
+                                    gameState === 'card_reveal' ? "SYNCING RESULTS..." :
+                                        gameState === 'setup_phase1' ? "AWAITING SYNC..." : "AUTO-SEQUENCE INITIATED..."}
+                            </p>
+                        </div>
+                    </div>
+                    {/* End of Chat Sidebar */}
+                </div>
+            </div>
+
+            {/* MOBILE CHAT BUTTON - Floating */}
+            <button
+                onClick={() => setIsChatOpen(true)}
+                className="sm:hidden fixed bottom-6 right-6 z-50 w-14 h-14 bg-green-600 hover:bg-green-500 rounded-full shadow-lg flex items-center justify-center border-2 border-green-400 transition-all duration-300 hover:scale-110"
+            >
+                <MessageSquare size={24} className="text-white" />
+                {messages.length > 0 && (
+                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white">
+                        {messages.length}
+                    </div>
+                )}
+            </button>
+
+            {/* MOBILE CHAT OVERLAY */}
+            <AnimatePresence>
+                {isChatOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="sm:hidden fixed inset-0 bg-black/95 backdrop-blur-xl z-[250] flex flex-col"
+                    >
+                        {/* Header */}
+                        <div className="p-4 pt-6 pb-4 border-b border-white/10 bg-black/90 backdrop-blur-md flex items-center justify-between sticky top-0 z-10">
+                            <span className="text-[10px] font-black text-white/80 uppercase tracking-widest">PLAYER COMMS INTERCEPT</span>
+                            <button
+                                onClick={() => setIsChatOpen(false)}
+                                className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-full shadow-lg border border-red-400/50 transition-all active:scale-95"
+                            >
+                                <X size={20} className="text-white" />
+                            </button>
+                        </div>
+
+                        {/* Messages */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+                            {messages.map((msg) => (
+                                <div key={msg.id} className={`flex flex-col ${msg.user === user?.username ? 'items-end' : 'items-start'}`}>
+                                    <div className={`px-4 py-2 rounded-xl text-xs font-mono max-w-[90%] ${msg.user === user?.username ? 'bg-green-600/20 border border-green-600/50 text-green-100' : 'bg-white/10 border border-white/20 text-gray-200'}`}>
+                                        {msg.text}
+                                    </div>
+                                    <span className="text-[8px] text-white/40 mt-1 uppercase font-mono tracking-wider">
+                                        {(msg.userId && playerIdMap[msg.userId]) || msg.user}
+                                    </span>
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                        </div>
+
+                        {/* Input */}
+                        <form onSubmit={sendMessage} className="p-4 bg-black/40 border-t border-white/10">
+                            <input
+                                type="text"
+                                value={inputMessage}
+                                onChange={(e) => setInputMessage(e.target.value)}
+                                placeholder="Strategize..."
+                                className="w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-4 pr-4 text-sm font-mono text-white placeholder:text-white/20 focus:outline-none focus:border-green-500/50 uppercase"
+                            />
+                            <button type="submit" className="hidden" />
+                        </form>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* GAME OVER OVERLAY */}
+            <AnimatePresence>
+                {gameState === 'won' && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 mt-20 bg-black/98 backdrop-blur-xl z-[200] flex items-start justify-center overflow-y-auto pt-16 sm:pt-24 scrollbar-hide"
+                    >
+                        <div className="max-w-4xl w-full mx-4 text-center space-y-6 pb-20 sm:pb-32">
+                            {/* Determine Winner */}
+                            {(() => {
+                                const playerWins = topPlayerScore > topMasterScore;
+                                const masterWins = topMasterScore > topPlayerScore;
+                                return (
+                                    <>
+                                        {/* Victory/Defeat Banner - SMALLER */}
+                                        <div className="space-y-2">
+                                            <h1 className={`text-4xl sm:text-5xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
+                                                {playerWins ? 'PLAYERS PREVAILED' : masterWins ? 'MASTERS TRIUMPH' : 'PERFECT EQUILIBRIUM'}
+                                            </h1>
+                                            <div className={`h-1 w-64 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
+                                            <p className="text-sm font-mono text-white/60 uppercase tracking-wider">
+                                                {playerWins ? 'Collective intelligence triumphed. The Borderland acknowledges their skill.' :
+                                                    masterWins ? 'The Masters\' deception proved superior. Players failed the trial.' :
+                                                        'Both sides demonstrated equal mastery. A rare occurrence.'}
+                                            </p>
+                                        </div>
+
+                                        {/* Score Display - STACKED ON MOBILE TO PREVENT OVERLAP */}
+                                        <div className="flex flex-col sm:grid sm:grid-cols-3 gap-4 sm:gap-6 w-full max-w-4xl px-4 sm:px-0 scrollbar-hide">
+                                            {/* Top Player */}
+                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP PLAYER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-2 truncate">
+                                                    {topPlayerId ? (playerIdMap[topPlayerId] || topPlayerId.slice(0, 8) + '...') : '--'}
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
+                                                {playerWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                            </div>
+
+                                            {/* My Score */}
+                                            <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
+                                                    {playerIdMap[auth.currentUser?.uid || ''] || user?.username || 'YOU'}
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
+                                                <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
+                                            </div>
+
+                                            {/* Top Master */}
+                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP MASTER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-2 text-center">
+                                                    [OVERSEER]
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topMasterScore}</p>
+                                                {masterWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                            </div>
+                                        </div>
+
+                                        {/* Game Stats - SMALLER */}
+                                        <div className="bg-white/5 border-2 border-white/10 rounded-xl p-6">
+                                            <p className="text-[10px] text-white/30 uppercase tracking-widest mb-3 font-mono">TRIAL COMPLETE</p>
+                                            <div className="grid grid-cols-3 gap-4 text-center">
+                                                <div>
+                                                    <p className="text-xl font-mono font-bold text-white">6/6</p>
+                                                    <p className="text-[8px] text-white/40 uppercase tracking-wider">ROUNDS</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-2xl font-mono font-bold text-green-500">♣ KING</p>
+                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">DIFFICULTY</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-2xl font-mono font-bold text-white">{playerWins ? '+' : masterWins ? '-' : '±'}{Math.abs(topPlayerScore - topMasterScore)}</p>
+                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">MARGIN</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Return Button */}
+                                        <button
+                                            onClick={() => window.location.href = '/home'}
+                                            className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
+                                        >
+                                            RETURN TO LOBBY
+                                        </button>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* RESET OVERRIDE OVERLAY */}
+            <AnimatePresence>
+                {showResetOverlay && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/98 backdrop-blur-lg z-[300] flex items-center justify-center animate-in fade-in duration-300"
+                    >
+                        <div className="text-center space-y-6 max-w-md px-8">
+                            <div className="mx-auto w-24 h-24 rounded-full border-4 border-red-500 flex items-center justify-center animate-pulse">
+                                <svg className="w-12 h-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <div className="space-y-2">
+                                <h1 className="text-4xl font-cinzel font-bold text-red-500 uppercase tracking-widest">
+                                    SYSTEM OVERRIDE
+                                </h1>
+                                <div className="h-px w-48 mx-auto bg-gradient-to-r from-transparent via-red-500 to-transparent" />
+                            </div>
+                            <div className="space-y-3">
+                                <p className="text-xl font-bold text-white uppercase tracking-wider">
+                                    TRIAL TERMINATED
+                                </p>
+                                <p className="text-sm text-white/60 font-mono">
+                                    Administrator Override Detected
+                                </p>
+                                <p className="text-xs text-white/40 font-mono">
+                                    Awaiting confirmation
+                                </p>
+                            </div>
+                            <div className="pt-4">
+                                <button
+                                    onClick={() => window.location.href = '/home'}
+                                    className="px-8 py-3 bg-red-500/10 border border-red-500 hover:bg-red-500 hover:text-black text-red-500 font-bold font-mono tracking-widest transition-all uppercase"
+                                >
+                                    RETURN TO LOBBY
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Background Texture */}
+            <div className="absolute inset-0 opacity-[0.03] pointer-events-none z-0" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+        </div>
+    );
+};

@@ -1,0 +1,15 @@
+﻿
+> borderland-website@0.0.0 build
+> tsc -b && vite build
+
+src/components/AdminDashboard.tsx(1894,136): error TS2345: Argument of type '"warning"' is not assignable to parameter of type '"error" | "success" | "info" | undefined'.
+src/components/games/ClubsGame.tsx(47,12): error TS6133: 'status' is declared but its value is never read.
+src/components/games/ClubsGame.tsx(47,20): error TS6133: 'setStatus' is declared but its value is never read.
+src/components/games/ClubsGame.tsx(48,12): error TS6133: 'selectedCards' is declared but its value is never read.
+src/components/games/ClubsGame.tsx(48,27): error TS6133: 'setSelectedCards' is declared but its value is never read.
+src/components/games/ClubsGame.tsx(71,23): error TS6133: 'setMobileTab' is declared but its value is never read.
+src/components/games/ClubsGame.tsx(296,56): error TS6133: 'payload' is declared but its value is never read.
+src/components/games/HeartsGameMaster.tsx(223,37): error TS6133: 'type' is declared but its value is never read.
+src/components/games/HeartsGameMaster.tsx(294,19): error TS6133: 'currentRound' is declared but its value is never read.
+src/components/games/HeartsGameMaster.tsx(297,17): error TS6133: 'newWinners' is declared but its value is never read.
+

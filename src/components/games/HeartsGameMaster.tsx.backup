@@ -1,0 +1,990 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../../supabaseClient';
+import {
+    type HeartsGameState,
+    type HeartsPhase,
+    type HeartsPlayer,
+    type Card,
+    generateDeck,
+    shuffleDeck,
+    assignGroups
+} from '../../game/hearts';
+import { HeartsGame } from './HeartsGame';
+import { X } from 'lucide-react';
+
+interface HeartsGameMasterProps {
+    user?: {
+        id: string;
+        username: string;
+        role: string;
+    };
+    onComplete?: () => void;
+}
+
+const PHASE_TIMINGS: Record<HeartsPhase, number> = {
+    idle: 0,
+    briefing: 60,
+    shuffle: 5,
+    reveal: 90,
+    choosing: 30,
+    result: 10,
+    end: 0
+};
+
+const MAX_ROUNDS = 5;
+
+export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComplete }) => {
+    // --- State Initialization ---
+    const [gameState, setGameState] = useState<HeartsGameState>({
+        id: 'hearts_main',
+        phase: 'idle',
+        current_round: 0,
+        system_start: false,
+        is_paused: false,
+        participants: [],
+        groups: {},
+        cards: {},
+        guesses: {},
+        eliminated: [],
+        winners: [],
+        chat_counts: {}
+    });
+
+    // Local UI State
+    const [phase, setPhase] = useState<HeartsPhase>('idle');
+    const [round, setRound] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+    // const [timeLeft, setTimeLeft] = useState(0); // Unused local state (ref driven)
+
+    // Refs for timer logic to avoid stale closures
+    const phaseRef = useRef<HeartsPhase>('idle');
+
+    const phaseStartedAtRef = useRef<string | null>(null);
+    const phaseDurationRef = useRef<number>(0);
+    const roundRef = useRef<number>(1);
+    const isProcessingRef = useRef(false);
+
+    // CRITICAL FIX: Stale Closure Prevention for GameState
+    // The timer loop uses closures that might capture old gameState (with empty cards/guesses).
+    // We use a Ref to ensure we always read the LATEST state during transitions.
+    const gameStateRef = useRef<HeartsGameState | null>(null);
+
+    // Always keep ref in sync with latest state
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
+
+
+    // --- State Sync ---
+    useEffect(() => { phaseRef.current = phase; }, [phase]);
+    useEffect(() => { roundRef.current = round; }, [round]);
+
+
+    // --- Supabase Subscription ---
+    useEffect(() => {
+        const fetchInitial = async () => {
+            const { data } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
+            if (data) {
+                setGameState(data);
+                setPhase(data.phase);
+                phaseRef.current = data.phase;
+                roundRef.current = data.current_round || 1;
+                phaseStartedAtRef.current = data.phase_started_at || null; // Fix: Assign string
+                phaseDurationRef.current = data.phase_duration_sec || 0;
+                if (data.is_paused !== undefined) setIsPaused(data.is_paused);
+                if (!data.active_game_id) {
+                    const generate18DigitId = () => {
+                        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                        let res = 'HRTS-';
+                        for (let i = 0; i < 13; i++) res += chars.charAt(Math.floor(Math.random() * chars.length));
+                        return res;
+                    };
+                    const firstId = generate18DigitId();
+                    await supabase.from('hearts_game_sessions').insert({ id: firstId, status: 'active', current_round: 0, total_rounds: 5 });
+                    await supabase.from('hearts_game_state').update({ active_game_id: firstId }).eq('id', 'hearts_main');
+                }
+            } else {
+                await supabase.from('hearts_game_state').upsert({ id: 'hearts_main', phase: 'idle', system_start: false });
+            }
+        };
+        fetchInitial();
+
+        const channel = supabase.channel('hearts_master_sync')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'hearts_game_state', filter: 'id=eq.hearts_main' }, (payload) => {
+                const newData = payload.new as HeartsGameState;
+                setGameState(newData);
+
+                // Admin pause/resume controls
+                if (newData.is_paused !== undefined) setIsPaused(newData.is_paused);
+
+                // Sync local tracking if updated remotely
+                if (newData.phase !== phaseRef.current) {
+                    setPhase(newData.phase);
+                    // Update timer refs on phase change from server
+                    if (newData.phase_started_at) {
+                        phaseStartedAtRef.current = newData.phase_started_at; // Fix: Assign string
+                        phaseDurationRef.current = newData.phase_duration_sec || 0;
+                    }
+                }
+                if (newData.current_round !== roundRef.current) setRound(newData.current_round);
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, []);
+
+    // --- Auto-Start / Recovery ---
+    // Detects when Admin starts the game (Phase=Briefing) but data (groups/cards) might be missing
+    // or if the Master view reloads.
+    useEffect(() => {
+        if (gameState.phase === 'briefing' && gameState.system_start && user?.role === 'master') {
+            // Self-healing ghost logic...
+            const ghostPlayers = gameState.participants.filter(p => !p.name || !/[a-zA-Z0-9]/.test(p.name));
+
+            // CLEANUP: Remove Admin from participants list if they accidentally joined (User requested Master stays)
+            // Only targeting 'admin' role or 'admin' name. 'master' is allowed to play.
+            const illegalPlayers = gameState.participants.filter(p => p.role === 'admin' || p.name === 'admin');
+
+            if (ghostPlayers.length > 0 || illegalPlayers.length > 0) {
+                console.log("[HEARTS MASTER] 🧹 CLEANUP REQUIRED: Removing ghosts or admins...", { ghosts: ghostPlayers, admins: illegalPlayers });
+
+                // Perform immediate cleanup
+                const cleanParticipants = gameState.participants.filter(p =>
+                    (p.name && /[a-zA-Z0-9]/.test(p.name)) &&
+                    p.role !== 'admin' && p.name !== 'admin'
+                );
+
+                updateState({ participants: cleanParticipants });
+            }
+        }
+    }, [gameState.phase, gameState.system_start, gameState.participants]);
+
+    const updateState = async (updates: Partial<HeartsGameState>) => {
+        const { error } = await supabase.from('hearts_game_state').update(updates).eq('id', 'hearts_main');
+        if (error) console.error("HEARTS UPDATE ERROR", error);
+    };
+
+
+    // --- Game Logic ---
+
+    const performShuffleAndDeal = async (currentPlayers: HeartsPlayer[]) => {
+        console.log('[HEARTS MASTER] Performing Shuffle & Deal...');
+        console.log('[HEARTS MASTER] Current players:', currentPlayers.map(p => ({ id: p.id, name: p.name })));
+
+        const pIds = currentPlayers.map(p => p.id);
+
+        // --- Smart Shuffle: Avoid Repeating Partners ---
+        let groups = assignGroups(pIds);
+        console.log(`[HEARTS DEBUG] assignGroups result for ${pIds.length} players:`, JSON.stringify(groups));
+        let attempts = 0;
+        const MAX_ATTEMPTS = 10;
+
+        // Helper to get partner for a player in a given group structure
+        const getPartner = (pid: string, grps: Record<string, string[]>) => {
+            const gid = Object.keys(grps).find(KEY => grps[KEY].includes(pid));
+            if (!gid) return null;
+            return grps[gid].find(m => m !== pid) || null;
+        };
+
+        // Try to reshuffle if we match previous partners
+        if (gameState.groups && Object.keys(gameState.groups).length > 0) {
+            while (attempts < MAX_ATTEMPTS) {
+                let hasRepeats = false;
+                for (const pid of pIds) {
+                    const oldPartner = getPartner(pid, gameState.groups);
+                    const newPartner = getPartner(pid, groups);
+                    if (oldPartner && newPartner && oldPartner === newPartner) {
+                        hasRepeats = true;
+                        break;
+                    }
+                }
+
+                if (!hasRepeats) {
+                    console.log(`[HEARTS MASTER] Clean shuffle found after ${attempts} retries.`);
+                    break;
+                }
+
+                console.log(`[HEARTS MASTER] Shuffle attempt ${attempts} had repeats. Retrying...`);
+                groups = assignGroups(pIds);
+                attempts++;
+            }
+        }
+        // ----------------------------------------------
+
+        console.log('[HEARTS MASTER] Assigned groups:', groups);
+        const deck = shuffleDeck(generateDeck());
+
+        console.log('[HEARTS MASTER] Generated deck (first 10):', deck.slice(0, 10));
+        console.log('[HEARTS MASTER] Total deck size:', deck.length);
+
+        const newCards: Record<string, Card> = {};
+
+        // Assign 1 unique card per player
+        currentPlayers.forEach((p, idx) => {
+            if (deck[idx]) {
+                newCards[p.id] = deck[idx];
+                console.log(`[HEARTS MASTER] Assigned to ${p.name}: ${deck[idx].rank}${deck[idx].suit}`);
+            }
+        });
+
+        // Update participants with their new group ID
+        const updatedPlayers = currentPlayers.map(p => {
+            const gId = Object.keys(groups).find(gid => groups[gid].includes(p.id));
+            console.log(`[HEARTS MASTER] Player ${p.name} assigned to GROUP ${gId}`);
+            return { ...p, groupId: gId };
+        });
+
+        return { groups, cards: newCards, players: updatedPlayers };
+    };
+
+    const transitionToPhase = async (nextPhase: HeartsPhase, nextRound: number, endReason?: 'survival' | 'master_defeat' | 'master_victory' | 'max_rounds', extraUpdates: Partial<HeartsGameState> = {}) => {
+        // --- AUTHORITATIVE FETCH ---
+        // Crucial to avoid stale local state after scoring/resets
+        const { data: authoritativeState } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
+        const currentState = authoritativeState || gameStateRef.current || gameState;
+
+        if (!currentState) {
+            console.error('[HEARTS MASTER] No GameState available for transition!');
+            return;
+        }
+
+        console.log(`[HEARTS MASTER] Transitioning to ${nextPhase} (Round ${nextRound})`);
+
+        const now = new Date();
+        const duration = PHASE_TIMINGS[nextPhase];
+        let updates: Partial<HeartsGameState> = {
+            phase: nextPhase,
+            current_round: nextRound,
+            phase_started_at: now.toISOString(),
+            phase_duration_sec: duration,
+            timer_display: `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`,
+            ...extraUpdates // Merge remote updates
+        };
+
+        // CLEAR CHAT for NEW ROUNDS (specifically at shuffle phase)
+        if (nextPhase === 'shuffle') {
+            const currentSessionId = currentState.active_game_id || 'hearts_main';
+            console.log(`[HEARTS MASTER] Clearing chat history for start of Round ${nextRound}...`);
+            await supabase.from('messages').delete().eq('game_id', currentSessionId);
+        }
+
+        if (nextPhase === 'briefing') {
+            // ONLY Round 1: Briefing phase should only occur at the start of the game
+            if (nextRound !== 1) {
+                console.warn(`[HEARTS MASTER] Briefing called for round ${nextRound}! This should only be Round 1. Skipping.`);
+                return; // Don't allow briefing for rounds > 1
+            }
+
+            // AUTO-HEALING: Clear previous elimination data if starting a new game (Round 1 Briefing)
+            // This prevents "Instant Termination" bug if Admin didn't manually Reset
+            if (nextRound === 1) {
+                const currentSessionId = currentState.active_game_id || 'hearts_main';
+                console.log('[HEARTS MASTER] New Game Detected. Purging previous elimination records...');
+                await supabase.from('hearts_eliminated').delete().eq('game_id', currentSessionId);
+            }
+
+            // Robust Check: Sync with hearts_eliminated table (Even for Round 1, to be safe)
+            // Note: Since we just deleted it, this should be empty, but good for consistency/race conditions? 
+            // Actually, if we just deleted, we should assume empty or fetch again.
+            const currentSessionId = currentState.active_game_id || 'hearts_main';
+            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId);
+            const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
+
+            // Round 1: Initialize all participants as active, excluding eliminated
+            // RELAXED FILTER: Allow players even if name is weird, just default it later
+            let activePlayers = currentState.participants.filter((p: HeartsPlayer) =>
+                p.status !== 'eliminated' &&
+                !eliminatedIds.includes(p.id)
+            );
+
+            // DEDUPE NAMES & Sanitize
+            const seenNames = new Set();
+            activePlayers = activePlayers.map((p: HeartsPlayer) => {
+                let safeName = p.name && p.name.trim() ? p.name.trim() : `Agent ${p.id.slice(0, 4)}`;
+                if (seenNames.has(safeName)) {
+                    safeName = `${safeName} ${p.id.slice(0, 3)}`;
+                }
+                seenNames.add(safeName);
+                return { ...p, name: safeName };
+            });
+
+            // Cap at a reasonable limit (e.g., 20) but don't force 4 if more want to play
+            if (activePlayers.length > 20) {
+                activePlayers = activePlayers.slice(0, 20);
+            }
+
+            // Filter out ghosts from eliminated checks too? Actually ghosts are just irrelevant. 
+            // Better to keep eliminates clean? No, eliminates are just status.
+
+            // Just for Briefing:
+            const eliminatedPlayers = currentState.participants.filter((p: HeartsPlayer) => p.status === 'eliminated' || eliminatedIds.includes(p.id));
+
+            // REMOVED DEALING: Delay grouping/dealing until 'shuffle' phase to allow all players to join
+            // const { groups, cards, players: updatedActive } = await performShuffleAndDeal(activePlayers);
+
+            // Just update participants list (clearing groups/cards for now)
+            updates.groups = {};
+            updates.cards = {};
+            // --------------------------------------------------------------------------------
+            // UPDATE: Score Synchronization (Round 1 ONLY)
+            // --------------------------------------------------------------------------------
+            if (nextRound === 1) {
+                console.log(`[HEARTS MASTER] Syncing scores from profiles for Round 1...`);
+
+                // 1. Fetch User Emails
+                const { data: userData } = await supabase
+                    .from('users')
+                    .select('id, email')
+                    .in('id', activePlayers.map((p: HeartsPlayer) => p.id));
+
+                const idEmailMap: Record<string, string> = {};
+                if (userData) {
+                    userData.forEach((u: { id: string, email: string }) => { idEmailMap[u.id] = u.email; });
+                }
+
+                // 2. Fetch Profiles for everyone who doesn't have a score yet or needs sync
+                const scoreMap: Record<string, number> = {};
+
+                // Construct a set of emails to fetch
+                const emailsToFetch = new Set<string>();
+                activePlayers.forEach((p: HeartsPlayer) => {
+                    const email = p.email || idEmailMap[p.id];
+                    if (email) emailsToFetch.add(email.toLowerCase());
+                });
+
+                if (emailsToFetch.size > 0) {
+                    const { data: profiles } = await supabase
+                        .from('profiles')
+                        .select('email, visa_points')
+                        .in('email', Array.from(emailsToFetch));
+
+                    if (profiles) {
+                        profiles.forEach(prof => {
+                            // Find which player this belongs to - Case Insensitive Match
+                            const player = activePlayers.find((ap: HeartsPlayer) =>
+                                ap.email?.toLowerCase() === prof.email.toLowerCase() ||
+                                idEmailMap[ap.id]?.toLowerCase() === prof.email.toLowerCase()
+                            );
+                            if (player) {
+                                console.log(`[HEARTS MASTER] Synced ${player.id} to score: ${prof.visa_points}`);
+                                scoreMap[player.id] = prof.visa_points;
+                            }
+                        });
+                    }
+                }
+
+                // 3. Update Participants map
+                updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => {
+                    const realScore = scoreMap[p.id];
+                    // FORCEFUL SYNC: 
+                    // 1. If we found a profile score, use it (even if it's 0 or negative).
+                    // 2. If no profile but current score is > 0, keep it.
+                    // 3. Absolute fallback: 1000.
+                    let finalScore = 1000;
+                    if (realScore !== undefined) {
+                        finalScore = realScore;
+                    } else if (p.score !== undefined && p.score !== 0) {
+                        finalScore = p.score;
+                    }
+
+                    console.log(`[HEARTS MASTER] Authoritative Sync for ${p.id}: Final Score = ${finalScore}`);
+
+                    return {
+                        ...p,
+                        score: finalScore,
+                        start_score: finalScore,
+                        last_total_score: finalScore, // CRITICAL: Initialize for delta calculation
+                        groupId: undefined,
+                        cards_visible: undefined
+                    };
+                });
+            } else {
+                console.log(`[HEARTS MASTER] Skipping profile sync for Round ${nextRound}. Using current game scores.`);
+                updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => ({
+                    ...p,
+                    groupId: undefined,
+                    cards_visible: undefined
+                }));
+            }
+        }
+        else if (nextPhase === 'shuffle') {
+            // Robust Check: Sync with hearts_eliminated table
+            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', 'hearts_main');
+            const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
+
+            let activePlayers = currentState.participants.filter((p: HeartsPlayer) =>
+                p.status !== 'eliminated' &&
+                !eliminatedIds.includes(p.id)
+            );
+
+            // DEDUPE & SANITIZE
+            const seenNames = new Set();
+            activePlayers = activePlayers.map((p: HeartsPlayer) => {
+                let safeName = p.name && p.name.trim() ? p.name.trim() : `Agent ${p.id.slice(0, 4)}`;
+                if (seenNames.has(safeName)) {
+                    safeName = `${safeName} ${p.id.slice(0, 3)}`;
+                }
+                seenNames.add(safeName);
+                return { ...p, name: safeName };
+            });
+
+            const eliminatedPlayers = currentState.participants.filter((p: HeartsPlayer) => p.status === 'eliminated' || eliminatedIds.includes(p.id));
+
+            // Just update participants list (clearing groups/cards for now)
+            updates.groups = {};
+            updates.cards = {};
+
+            // Keep participants list clean but don't assign yet
+            updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => ({
+                ...p,
+                groupId: undefined,
+                cards_visible: undefined
+            }));
+
+            // CLEANUP: Clear the persistent guesses table for this round/game to prevent stale evaluations
+            const currentSessionId = currentState.active_game_id || 'hearts_main';
+            console.log(`[HEARTS MASTER] Clearing stale guesses from database for ${currentSessionId}...`);
+            await supabase.from('hearts_guesses').delete().eq('game_id', currentSessionId);
+
+            updates.guesses = {}; // Clear local guesses state too
+        }
+        else if (nextPhase === 'reveal') {
+            // --------------------------------------------------------------------------------
+            // LOGIC CHANGE: Perform Assignment HERE (End of Shuffle -> Start of Reveal)
+            // --------------------------------------------------------------------------------
+
+            // Robust Check: Sync with hearts_eliminated table
+            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', 'hearts_main');
+            const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
+
+            // Identify active vs eliminated
+            // RELAXED FILTER
+            let activePlayers = currentState.participants.filter((p: HeartsPlayer) =>
+                p.status !== 'eliminated' &&
+                !eliminatedIds.includes(p.id)
+            );
+
+            // DEDUPE & SANITIZE
+            const seenNames = new Set();
+            activePlayers = activePlayers.map((p: HeartsPlayer) => {
+                let safeName = p.name && p.name.trim() ? p.name.trim() : `Agent ${p.id.slice(0, 4)}`;
+                if (seenNames.has(safeName)) {
+                    safeName = `${safeName} ${p.id.slice(0, 3)}`;
+                }
+                seenNames.add(safeName);
+                return { ...p, name: safeName };
+            });
+
+            // RELAXED CAP: Allow N players (Spades Logic handles grouping for 5, 6, etc.)
+            // The previous hard cap caused players > 4 to become "Singles".
+            // if (activePlayers.length > 4) {
+            //    activePlayers = activePlayers.slice(0, 4);
+            // }
+
+            const eliminatedPlayers = currentState.participants.filter((p: HeartsPlayer) => p.status === 'eliminated' || eliminatedIds.includes(p.id));
+
+            // PERFORM DEAL HERE
+            const { groups, cards, players: updatedActive } = await performShuffleAndDeal(activePlayers);
+
+
+            // Merge updates
+            const updatedEliminated = eliminatedPlayers.map((p: HeartsPlayer) => ({
+                ...p,
+                status: 'eliminated' as const,
+                groupId: undefined,
+                cards_visible: undefined
+            }));
+
+            updates.groups = groups;
+            updates.cards = cards;
+            updates.participants = [...updatedActive, ...updatedEliminated];
+        }
+        else if (nextPhase === 'result') {
+            // Fetch absolute latest state matching DB to avoid React state lag issues (Cards/Participants)
+            console.log(`[HEARTS MASTER] Fetching authoritative state for Round ${currentState.current_round} results...`);
+            const { data: freshState, error: stateError } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
+
+            if (stateError || !freshState) {
+                console.error('[HEARTS MASTER] CRITICAL: Failed to fetch fresh state for scoring!', stateError);
+                return;
+            }
+
+            const targetRound = freshState.current_round || 1;
+
+            // CRITICAL GUARD: Prevent Double-Scoring
+            // If the database state already reflects the 'result' phase for this round, we have already processed scores.
+            if (freshState.phase === 'result' && targetRound === currentState.current_round) {
+                console.warn(`[HEARTS MASTER] Results for Round ${targetRound} already processed. Skipping redundant increment.`);
+                return;
+            }
+            console.log(`[HEARTS MASTER] Fetching votes for Round ${targetRound} from hearts_guesses...`);
+
+            const currentSessionId = freshState.active_game_id || 'hearts_main';
+            const { data: guessRows, error: guessError } = await supabase
+                .from('hearts_guesses')
+                .select('*')
+                .eq('game_id', currentSessionId)
+                .eq('round', targetRound); // AUTHORITATIVE: Use both session ID and round to prevent stale matches
+
+            if (guessError) console.error('[HEARTS MASTER] Error fetching guesses:', guessError);
+
+            const fetchedGuesses: Record<string, any> = {};
+            if (guessRows) {
+                guessRows.forEach(row => { fetchedGuesses[row.player_id] = { suit: row.suit }; });
+            }
+
+            console.log(`[HEARTS MASTER] Evaluated ${guessRows?.length || 0} votes against authoritative deck.`);
+
+            const guesses = fetchedGuesses;
+            updates.guesses = fetchedGuesses;
+
+            const cards = freshState.cards || {};
+            const players = [...(freshState.participants || [])];
+            const winners: string[] = [];
+            const newEliminated: string[] = [];
+
+            const updatedPlayers = players.map(p => {
+                if (p.status === 'eliminated') return p;
+
+                const guess = guesses[p.id];
+                const card = cards[p.id]; // FRESH card data
+                let passed = false;
+
+                if (guess && card && guess.suit && card.suit) {
+                    if (guess.suit.toLowerCase() === card.suit.toLowerCase()) {
+                        passed = true;
+                    }
+                }
+
+                const currentScore = Number(p.score) || 0;
+
+                if (passed) {
+                    winners.push(p.id);
+                    return { ...p, score: currentScore + 300 };
+                } else {
+                    newEliminated.push(p.id);
+                    return { ...p, score: currentScore - 200, status: 'eliminated' as const };
+                }
+            });
+
+            // Persist Eliminations to internal table
+            if (newEliminated.length > 0) {
+                await supabase.from('hearts_eliminated').upsert(newEliminated.map(pid => ({ game_id: 'hearts_main', player_id: pid })));
+            }
+
+            // --- UNIVERSAL PROFILE SCORE PERSISTENCE (ABSOLUTE PASTE) ---
+            console.log(`[HEARTS STATS] Authoritatively syncing scores for ALL ${updatedPlayers.length} participants...`);
+
+            try {
+                const playerIds = updatedPlayers.map(p => p.id);
+                if (playerIds.length > 0) {
+                    // 1. Fetch Users (ID -> Email) for ALL players to ensure fresh data
+                    const { data: usersData, error: usersError } = await supabase
+                        .from('users')
+                        .select('id, email')
+                        .in('id', playerIds);
+
+                    if (usersError || !usersData) {
+                        console.error('[HEARTS STATS] Failed to fetch user emails:', usersError);
+                    } else {
+                        // 2. Create Map: Email -> Score
+                        const emailScoreMap: Record<string, number> = {};
+                        const internalEmailMap: Record<string, string> = {}; // Local scope map for ID->Email
+                        usersData.forEach((user: { id: string, email: string }) => {
+                            if (user.email) internalEmailMap[user.id] = user.email;
+
+                            const player = updatedPlayers.find(p => p.id === user.id);
+                            if (player && user.email) {
+                                emailScoreMap[user.email] = player.score;
+                            }
+                        });
+
+                        // 3. Update profiles by email
+                        for (const [email, score] of Object.entries(emailScoreMap)) {
+                            // Validate if eliminated THIS ROUND
+                            // Reverse lookup to find player ID for this email
+                            const associatedPlayer = updatedPlayers.find(p =>
+                                (p.email === email) || (internalEmailMap[p.id] === email)
+                            );
+
+                            let updatePayload: any = { visa_points: score };
+
+                            // ID check for elimination
+                            if (associatedPlayer && newEliminated.includes(associatedPlayer.id)) {
+                                console.log(`[HEARTS STATS] Player ${associatedPlayer.id} eliminated this round. Incrementing losses...`);
+                                const { data: currentProfile } = await supabase.from('profiles').select('losses').ilike('email', email).single();
+                                const newLosses = (currentProfile?.losses || 0) + 1;
+                                updatePayload.losses = newLosses;
+                            }
+
+                            const { error: pError } = await supabase
+                                .from('profiles')
+                                .update(updatePayload)
+                                .ilike('email', email);
+
+                            if (pError) console.error(`[HEARTS STATS] Failed sync for ${email}:`, pError);
+                            else console.log(`[HEARTS STATS] Successfully synced ${email} to ${score} (Losses updated: ${!!updatePayload.losses})`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error(`[HEARTS STATS] Global Persistence error:`, e);
+            }
+
+            const allEliminatedIds = updatedPlayers.map(p => p.status === 'eliminated' ? p.id : null).filter(Boolean) as string[];
+            // --- PERSIST ROUND SCORES TO HISTORY (Clubs Style) ---
+            if (currentSessionId) {
+                console.log(`[HEARTS STATS] Archiving Round ${targetRound} scores to history for ${currentSessionId}...`);
+                for (const p of updatedPlayers) {
+                    if (p.email) {
+                        try {
+                            const roundCol = `round_${targetRound}`;
+                            const { data: existingPoints } = await supabase
+                                .from('hearts_round_points')
+                                .select('*')
+                                .eq('game_id', currentSessionId)
+                                .eq('player_email', p.email)
+                                .maybeSingle();
+
+                            // Correct Delta: For R1, it should be p.score - p.start_score
+                            const roundScoreDelta = targetRound === 1
+                                ? (p.score - (p.start_score || p.score))
+                                : (p.score - (p.last_total_score || 0));
+
+                            if (existingPoints) {
+                                await supabase.from('hearts_round_points').update({
+                                    [roundCol]: roundScoreDelta,
+                                    total_points: p.score,
+                                    updated_at: new Date().toISOString()
+                                }).eq('id', existingPoints.id);
+                            } else {
+                                await supabase.from('hearts_round_points').insert({
+                                    game_id: currentSessionId,
+                                    player_email: p.email,
+                                    [roundCol]: p.score, // Round 1 is total bits
+                                    total_points: p.score
+                                });
+                            }
+                        } catch (err) {
+                            console.error(`[HEARTS STATS] History archive failed for ${p.email}:`, err);
+                        }
+                    }
+                }
+
+                // Update session progress
+                await supabase.from('hearts_game_sessions').update({
+                    current_round: targetRound,
+                    saved_at: new Date().toISOString()
+                }).eq('id', currentSessionId);
+            }
+
+            updates.participants = updatedPlayers.map(p => ({ ...p, last_total_score: p.score }));
+            updates.winners = winners;
+            updates.eliminated = allEliminatedIds;
+        }
+        else if (nextPhase === 'end') {
+            // FIX: Fetch authoritative state to ensure we have the +300 from the recently correctly processed 'result' phase.
+            // This prevents overwriting the +300 if 'currentState' is slightly stale.
+            const { data: latestStateForEnd } = await supabase.from('hearts_game_state').select('participants').eq('id', 'hearts_main').single();
+            // Default to current state if fetch fails, but prefer DB state
+            const baseParticipants = latestStateForEnd?.participants || currentState.participants || [];
+
+            let finalParticipants = [...baseParticipants];
+
+            if (endReason === 'master_defeat') {
+                console.log("[HEARTS MASTER] MASTERS DEFEATED! Surviving participants receive +500 bonus.");
+                finalParticipants = finalParticipants.map((p: any) => {
+                    // Bonus ONLY for non-eliminated players
+                    if (p.status !== 'eliminated' && p.role !== 'master') {
+                        // +500 Bonus (User requested 800 total, which is 300 round + 500 bonus)
+                        return { ...p, score: (p.score || 0) + 500, status: 'survived' as const };
+                    }
+                    return p;
+                });
+                updates.participants = finalParticipants;
+            } else {
+                // Master Survived (Victory OR Max Rounds) -> Penalty for ALL players
+                console.log("[HEARTS MASTER] MASTER SURVIVED! Applying -200 Penalty to all players.");
+                finalParticipants = finalParticipants.map((p: any) => {
+                    if (p.role !== 'master') {
+                        // Apply -200 penalty to ALL players (active or eliminated)
+                        return { ...p, score: (p.score || 0) - 200, status: 'eliminated' as const };
+                    }
+                    // Master survives
+                    return { ...p, status: 'survived' as const };
+                });
+                updates.participants = finalParticipants;
+            }
+
+            // --- FINAL PERSISTENCE LOGIC START ---
+            console.log('[HEARTS MASTER] Persisting FINAL Game Results...');
+            const persistFinalResults = async () => {
+                try {
+                    const playerIds = finalParticipants.map(p => p.id);
+                    if (playerIds.length === 0) return;
+
+                    // 1. Fetch Users (ID -> Email)
+                    const { data: usersData } = await supabase
+                        .from('users')
+                        .select('id, email')
+                        .in('id', playerIds);
+
+                    const idEmailMap: Record<string, string> = {};
+                    if (usersData) {
+                        usersData.forEach(u => { if (u.email) idEmailMap[u.id] = u.email; });
+                    }
+
+                    for (const p of finalParticipants) {
+                        try {
+                            const userEmail = p.email || idEmailMap[p.id];
+                            if (!userEmail) {
+                                console.warn(`[HEARTS MASTER] No email for ${p.id}. Final sync skipped.`);
+                                continue;
+                            }
+
+                            const isWin = p.status !== 'eliminated';
+
+                            // Fetch existing stats for wins/losses sync
+                            const { data: profile } = await supabase
+                                .from('profiles')
+                                .select('wins, losses')
+                                .ilike('email', userEmail)
+                                .single();
+
+                            // LOGIC CHANGE: Only increment loss if NOT ALEADY ELIMINATED
+                            // If they were eliminated in a previous round (or this round), their loss was ALREADY counted in 'result' phase logic?
+                            // Wait, 'result' phase logic covers eliminations during rounds.
+                            // 'end' phase covers:
+                            // 1. Master Defeat -> Survivors get +300 (WIN). Eliminated stay eliminated (LOSS already counted).
+                            // 2. Master Victory -> Everyone else gets penalty (-100) and is 'eliminated' (if not already).
+
+                            // So we need to distinct between:
+                            // - Players who were ALREADY eliminated before this 'end' phase transition. (Loss already counted)
+                            // - Players who are being elimination/penalized NOW (at game end). (Loss needs counting)
+
+                            // In 'end' phase block above (lines 666+), we updated `finalParticipants`.
+                            // But we didn't track *who* changed status to eliminated *just now*.
+
+                            // Let's rely on the `status` in `currentState.participants` (before update) vs `p.status` (after update)?
+                            // Or simpler: Only count loss/win calculated here.
+
+                            // If p.status === 'eliminated':
+                            // Was it eliminated *previously*? 
+                            // Check `eliminated` array in `currentState`.
+                            // If `currentState.eliminated.includes(p.id)`, they were already dead. DO NOT increment loss again.
+
+                            const wasAlreadyEliminated = currentState.eliminated?.includes(p.id) || currentState.participants.find((cp: HeartsPlayer) => cp.id === p.id)?.status === 'eliminated';
+
+                            let newWins = profile?.wins || 0;
+                            let newLosses = profile?.losses || 0;
+
+                            if (isWin) {
+                                newWins += 1;
+                            } else {
+                                // If lost, only increment if they weren't already eliminated (and thus counted)
+                                if (!wasAlreadyEliminated) {
+                                    newLosses += 1;
+                                    console.log(`[HEARTS MASTER] Applying Game-End Loss to ${p.id} (Not previously eliminated)`);
+                                } else {
+                                    console.log(`[HEARTS MASTER] Skipping Loss increment for ${p.id} (Already eliminated)`);
+                                }
+                            }
+
+                            const { error: updateError } = await supabase
+                                .from('profiles')
+                                .update({
+                                    visa_points: p.score,
+                                    wins: newWins,
+                                    losses: newLosses
+                                })
+                                .ilike('email', userEmail);
+
+                            if (updateError) console.error(`[HEARTS MASTER] Final persistence error for ${userEmail}:`, updateError);
+                            else console.log(`[HEARTS MASTER] Final persistence successful for ${userEmail} (Total: ${p.score})`);
+
+                        } catch (err) {
+                            console.error(`[HEARTS MASTER] Error processing final player ${p.id}:`, err);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[HEARTS MASTER] Global Final Persistence Failed:', err);
+                }
+            };
+
+            await persistFinalResults();
+            if (onComplete) onComplete();
+        }
+
+        await updateState(updates);
+
+        setPhase(nextPhase);
+        setRound(nextRound);
+        phaseStartedAtRef.current = now.toISOString();
+        phaseDurationRef.current = duration;
+    };
+
+    // --- Timer Loop ---
+    useEffect(() => {
+        if (!gameState.system_start || phase === 'end') return;
+
+        const timer = setInterval(() => {
+            if (gameState.is_paused || isPaused) return; // Respect pause state
+
+            const startedAt = phaseStartedAtRef.current ? new Date(phaseStartedAtRef.current) : new Date();
+            const duration = phaseDurationRef.current;
+            const now = new Date();
+            const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+            const remaining = Math.max(0, duration - elapsed);
+
+            // setTimeLeft(remaining);
+
+            if (remaining === 0 && !isProcessingRef.current && gameState.system_start) {
+                isProcessingRef.current = true;
+
+                let next: HeartsPhase = 'idle';
+                let nextRound = roundRef.current;
+                let reason: 'survival' | 'master_defeat' | 'master_victory' | 'max_rounds' | undefined; // Updated type
+
+                if (phaseRef.current === 'briefing') {
+                    next = 'shuffle';
+                } else if (phaseRef.current === 'shuffle') {
+                    next = 'reveal';
+                } else if (phaseRef.current === 'reveal') {
+                    next = 'choosing';
+                } else if (phaseRef.current === 'choosing') {
+                    next = 'result';
+                } else if (phaseRef.current === 'result') {
+                    // Check active players
+                    const participants = gameStateRef.current?.participants || [];
+                    const activeCount = participants.filter(p => p.status === 'active').length;
+                    const activeMasters = participants.filter(p => p.status === 'active' && p.role === 'master').length;
+                    const activeSubjects = participants.filter(p => p.status === 'active' && p.role !== 'master').length;
+
+                    // If NO masters are left, subjects win (Game Over)
+                    if (activeMasters === 0 && activeSubjects > 0) {
+                        console.log(`[HEARTS MASTER] MASTERS ELIMINATED! Game Ending.`);
+                        next = 'end';
+                        reason = 'master_defeat';
+                    }
+                    // If NO subjects are left but Masters survive (Master Victory)
+                    else if (activeSubjects === 0 && activeMasters > 0) {
+                        console.log(`[HEARTS MASTER] PLAYERS ELIMINATED! Master Victory.`);
+                        next = 'end';
+                        reason = 'master_victory' as any; // Cast to bypass strict type if needed, or update type
+                    }
+                    else if (roundRef.current < MAX_ROUNDS && activeCount >= 2) {
+                        nextRound++;
+                        next = 'shuffle';
+                    } else {
+                        console.log(`[HEARTS MASTER] Game Ending. Round: ${roundRef.current}/${MAX_ROUNDS}, Active Players: ${activeCount}`);
+                        next = 'end';
+                        reason = 'survival';
+                    }
+
+                }
+
+                if (next !== 'idle') {
+                    const performTransition = async () => {
+                        // --- AUTHORITATIVE END-GAME DOUBLE CHECK ---
+                        // If we are exiting 'result', we must fetch the LATEST participants 
+                        // from the DB to see who actually survived, otherwise we use stale local state.
+                        let finalNext = next;
+                        let finalReason = reason;
+
+                        if (phaseRef.current === 'result') {
+                            const { data: authoritative } = await supabase.from('hearts_game_state').select('participants, current_round').eq('id', 'hearts_main').single();
+                            if (authoritative) {
+                                const participants = authoritative.participants || [];
+                                const activeCount = participants.filter((p: any) => p.status === 'active').length;
+                                const activeMasters = participants.filter((p: any) => p.status === 'active' && p.role === 'master').length;
+                                const activeSubjects = participants.filter((p: any) => p.status === 'active' && p.role !== 'master').length;
+
+                                if (activeMasters === 0 && activeSubjects > 0) {
+                                    finalNext = 'end';
+                                    finalReason = 'master_defeat';
+                                } else if (activeSubjects === 0 && activeMasters > 0) {
+                                    finalNext = 'end';
+                                    finalReason = 'master_victory' as any;
+                                } else if (authoritative.current_round >= MAX_ROUNDS || activeCount < 2) {
+                                    finalNext = 'end';
+                                    finalReason = (activeCount >= 1) ? 'survival' : 'master_victory' as any;
+                                }
+                            }
+                        }
+
+                        // Pass extra updates (like chat reset) if next phase is shuffle
+                        const extraUpdates: Partial<HeartsGameState> = {};
+                        if (finalNext === 'shuffle') {
+                            extraUpdates.chat_counts = {};
+                        }
+
+                        transitionToPhase(finalNext, nextRound, finalReason, extraUpdates)
+                            .catch(err => {
+                                console.error('[HEARTS MASTER] Transition Error:', err);
+                            })
+                            .finally(() => {
+                                isProcessingRef.current = false;
+                            });
+                    };
+
+                    // Delay slightly if going to Result phase to allow votes to sync
+                    if (phaseRef.current === 'choosing' && next === 'result') {
+                        console.log("[HEARTS MASTER] Allowing 2.0s grace period for vote sync...");
+                        setTimeout(performTransition, 2000);
+                    } else {
+                        performTransition();
+                    }
+                } else {
+                    isProcessingRef.current = false; // No transition needed, but release lock
+                }
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [phase, gameState.system_start, gameState.is_paused]);
+
+
+    // --- Handlers ---
+    // --- RENDER ---
+    return (
+        <div className="w-full h-full relative flex flex-col bg-black text-white font-mono overflow-hidden">
+            {/* Header Info */}
+            <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-black/50 backdrop-blur-md z-50">
+                <div className="flex items-center gap-4">
+                    <div className="text-xl font-bold font-oswald text-rose-500 tracking-wider">HEARTS PROTOCOL // MASTER CONTROL</div>
+                    <div className="px-3 py-1 rounded bg-white/5 text-xs text-white/50 border border-white/10">v4.2.0-ALPHA</div>
+                </div>
+                <div className="flex items-center gap-6 text-sm">
+                    <div className="flex items-center gap-2">
+                        <span className="text-white/40">PHASE</span>
+                        <span className="text-rose-400 font-bold uppercase">{phaseRef.current}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-white/40">ROUND</span>
+                        <span className="text-white font-bold">{roundRef.current}/{MAX_ROUNDS}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-white/40">PLAYERS</span>
+                        <span className="text-white font-bold">{gameState.participants.length}</span>
+                    </div>
+                </div>
+                <button
+                    onClick={() => window.location.href = '/admin'}
+                    className="p-2 hover:bg-red-500/20 border border-transparent hover:border-red-500/50 rounded-xl transition-all text-gray-500 hover:text-red-400 group"
+                    title="Exit Master Control"
+                >
+                    <X size={20} className="group-hover:rotate-90 transition-transform" />
+                </button>
+            </div>
+
+            <div className="flex-1 flex relative">
+                {/* Main Game View */}
+                <div className="flex-1 relative">
+                    <HeartsGame user={user} />
+                </div>
+            </div>
+
+        </div>
+    );
+};
+

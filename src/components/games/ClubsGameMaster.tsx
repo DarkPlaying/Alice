@@ -1,0 +1,2338 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { collection, getDocs } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
+import { supabase } from '../../supabaseClient';
+
+import { Timer } from 'lucide-react';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { Loader } from '../Loader';
+
+
+interface ClubsGameMasterProps {
+    onComplete: (score: number) => void;
+    onFail: (score: number) => void;
+    user?: any;
+    onProfileClick?: () => void;
+}
+
+interface Card {
+    id: string;
+    suit: 'clubs' | 'diamonds' | 'hearts' | 'spades';
+    rank: string;
+    playerRole: 'angel' | 'demon' | null;
+    masterRole: 'angel' | 'demon' | null;
+    isRevealed: boolean;
+    isRemoved: boolean;
+}
+
+
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q']; // No King
+
+// Helper: Generate Clubs 24 Cards (Set 1: A-Q, Set 2: A-Q)
+const generateRandomDeck = () => {
+    // Set 1: Clubs A-Q
+    const set1: Card[] = RANKS.map(rank => ({
+        id: `clubs-${rank}-1`,
+        suit: 'clubs',
+        rank,
+        playerRole: null,
+        masterRole: null,
+        isRevealed: false,
+        isRemoved: false
+    }));
+
+    // Set 2: Clubs A-Q
+    const set2: Card[] = RANKS.map(rank => ({
+        id: `clubs-${rank}-2`,
+        suit: 'clubs',
+        rank,
+        playerRole: null,
+        masterRole: null,
+        isRevealed: false,
+        isRemoved: false
+    }));
+
+    // Shuffle each set independently
+    const shuffle = (deck: Card[]) => {
+        for (let i = deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        return deck;
+    };
+
+    const shuffledSet1 = shuffle(set1);
+    const shuffledSet2 = shuffle(set2);
+
+    // Return combined (Set 1 active first, Set 2 reserve)
+    return [...shuffledSet1, ...shuffledSet2];
+};
+
+export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
+    const [gameState, setGameState] = useState<'idle' | 'briefing' | 'setup' | 'setup_phase1' | 'selection_reveal' | 'playing' | 'card_reveal' | 'round_reveal' | 'won' | 'lost'>('idle');
+    const [round, setRound] = useState(1);
+    const [timeLeft, setTimeLeft] = useState(0);
+    const [playerScore, setPlayerScore] = useState(0);
+    const [masterScore, setMasterScore] = useState(0);
+
+    // Detailed Score Tracking
+    const [myScore, setMyScore] = useState(0);
+    const [topPlayerScore, setTopPlayerScore] = useState(0);
+    const [topPlayerId, setTopPlayerId] = useState<string | null>(null);
+    const [topMasterScore, setTopMasterScore] = useState(0);
+
+    const [cards, setCards] = useState<Card[]>([]);
+    const [messages, setMessages] = useState<any[]>([]);
+    const [inputMessage, setInputMessage] = useState('');
+
+    const sendMessage = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        if (!inputMessage.trim()) return;
+        const senderName = user?.username || 'MASTER';
+        const tempContent = inputMessage;
+        setInputMessage('');
+
+        try {
+            const { error } = await supabase.from('messages').insert({
+                game_id: 'clubs_king',
+                user_name: senderName,
+                user_id: user?.id,
+                content: tempContent,
+                is_system: false,
+                channel: 'master'
+            });
+
+            if (error) {
+                console.error('Error sending message:', error);
+            }
+        } catch (err) {
+            console.error('Exception sending message:', err);
+        }
+    };
+
+    // Selection & Voting
+    const [mySelection, setMySelection] = useState<{ angel: string | null; demon: string | null }>({ angel: null, demon: null });
+    const [playerSelection, setPlayerSelection] = useState<{ angel: string | null; demon: string | null }>({ angel: null, demon: null }); // NEW
+    const [playerLocked, setPlayerLocked] = useState(false);
+    const [playersVotes, setPlayersVotes] = useState<Record<string, string[]>>({});
+
+    // Individual Master Voting
+    const [masterVotes, setMasterVotes] = useState<Record<string, string[]>>({});
+    const [showResetOverlay, setShowResetOverlay] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
+
+    const MAX_ROUNDS = 6; // 6 Rounds * 4 Cards/Round = 24 Cards
+    const channelRef = useRef<RealtimeChannel | null>(null);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+
+    const isProcessing = useRef(false);
+
+    // Score Refs (for Timer access)
+    const playerScoreRef = useRef(playerScore);
+    playerScoreRef.current = playerScore;
+    const masterScoreRef = useRef(masterScore);
+    masterScoreRef.current = masterScore;
+
+    // Vote Refs
+    const playersVotesRef = useRef<Record<string, string[]>>({});
+    playersVotesRef.current = playersVotes;
+    const masterVotesRef = useRef<Record<string, string[]>>({});
+    masterVotesRef.current = masterVotes;
+
+    // Helper: Identify if a UID belongs to a Master
+    const isMasterUid = (uid: string) => {
+        if (!uid) return false;
+        const upper = uid.toUpperCase();
+        return upper === 'MASTER' ||
+            upper.includes('MASTER') ||
+            upper === 'SYSTEM_ARCHITECT' ||
+            uid === user?.id ||
+            uid === user?.uid ||
+            uid === auth.currentUser?.uid;
+    };
+
+    // Player ID Mapping (UID → #PLAYER_XXX)
+    const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
+
+    // Fetch Player ID Mapping from Firestore
+    useEffect(() => {
+        const fetchPlayerIds = async () => {
+            try {
+                const querySnapshot = await getDocs(collection(db, 'users'));
+                const users = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+
+                // Sort users: Admins first, then by Join Date
+                users.sort((a: any, b: any) => {
+                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin' || a.username?.toLowerCase().includes('architect');
+                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin' || b.username?.toLowerCase().includes('architect');
+
+                    if (isMasterA && !isMasterB) return -1;
+                    if (!isMasterA && isMasterB) return 1;
+
+                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
+                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+                    return timeA - timeB;
+                });
+
+                const mapping: Record<string, string> = {};
+                users.forEach((user: any, index) => {
+                    const pid = `#PLAYER_${(index + 1).toString().padStart(3, '0')}`;
+                    if (user.id) mapping[user.id] = pid;
+                    if (user.username) mapping[user.username] = pid;
+                });
+
+                console.log('[CLUBS MASTER] Player ID Mapping Synchronized:', mapping);
+                setPlayerIdMap(mapping);
+            } catch (error) {
+                console.error('[CLUBS MASTER] Error fetching Player ID Map:', error);
+            }
+        };
+        fetchPlayerIds();
+    }, []);
+
+    // --- SCORE INTEGRITY CHECK (Master) ---
+    // Fixes the issue where Master syncs with a default 0 score from the DB
+    // but actually has a different score in their profile.
+    const hasCorrectedScoreRef = useRef(false);
+
+    useEffect(() => {
+        const checkIntegrity = async () => {
+            const user = auth.currentUser;
+            if (!user?.uid) return;
+
+            // Only run if we haven't corrected yet
+            if (!hasCorrectedScoreRef.current) {
+                console.log('[CLUBS MASTER] Verifying score integrity...');
+
+                // Check if current start scores are missing or 0
+                const { data: latestState } = await supabase
+                    .from('clubs_game_status')
+                    .select('scores')
+                    .eq('id', 'clubs_king')
+                    .single();
+
+                const startScores = latestState?.scores?.start || {};
+                const currentStartScore = Number(startScores[user.uid] || 0);
+
+                if (currentStartScore === 0) {
+                    console.log('[CLUBS MASTER] Start score is 0. Fetching from profile...');
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('visa_points')
+                        .eq('email', user.email)
+                        .single();
+
+                    if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
+                        console.log(`[CLUBS MASTER] SYNCING SCORE: Game(0) -> Profile(${profile.visa_points})`);
+
+                        hasCorrectedScoreRef.current = true;
+
+                        // Force update the DB with correct start AND current scores
+                        const newStartScores = { ...startScores, [user.uid]: profile.visa_points };
+                        const currentScores = latestState?.scores?.current || {};
+                        const newCurrentScores = { ...currentScores, [user.uid]: profile.visa_points };
+
+                        await supabase
+                            .from('clubs_game_status')
+                            .update({
+                                scores: {
+                                    ...latestState?.scores,
+                                    start: newStartScores,
+                                    current: newCurrentScores
+                                }
+                            })
+                            .eq('id', 'clubs_king');
+
+                        console.log('[CLUBS MASTER] Score Synced & Start Score Recorded.');
+                    } else {
+                        console.log('[CLUBS MASTER] Profile score is also 0 or missing.');
+                        hasCorrectedScoreRef.current = true; // Mark checked
+                    }
+                } else {
+                    console.log('[CLUBS MASTER] Start score seems valid:', currentStartScore);
+                    hasCorrectedScoreRef.current = true;
+                }
+            }
+        };
+
+        // Run check after a short delay to ensure auth is ready and initial sync happened
+        const timer = setTimeout(checkIntegrity, 2000);
+        return () => clearTimeout(timer);
+    }, [round]);
+
+    // Timer Sync
+    const [phaseExpiry, setPhaseExpiry] = useState<Date | null>(null);
+
+    // Detailed Score Helper
+    const updateDetailedScores = useCallback((status: any) => {
+        if (status.scores && status.scores.current) {
+            const currentScores = status.scores.current;
+            // const myUid = user?.id || ''; // Unused variable removed
+
+            // Update My Score (as Master)
+            const myUId = user?.uid || user?.id || auth.currentUser?.uid;
+            if (myUId && currentScores[myUId] !== undefined) {
+                setMyScore(Number(currentScores[myUId]));
+            } else {
+                setMyScore(status.master_score || 0);
+            }
+
+            // Calculate Tops
+            let maxPScore = -Infinity;
+            let maxPId = '';
+            let maxMScore = -Infinity;
+
+            // USE WHITELIST for Player Identification
+            const playerIds = new Set(status.allowed_players?.map((id: any) => String(id)) || []);
+
+            console.log('[CLUBS MASTER updateDetailedScores] Debug Info:', {
+                allowed_players: status.allowed_players,
+                playerIds: Array.from(playerIds),
+                currentScores,
+                myUId
+            });
+
+            Object.entries(currentScores).forEach(([uid, score]) => {
+                const s = typeof score === 'number' ? score : 0;
+                const isPlayer = playerIds.has(uid);
+
+                console.log(`  [CLUBS MASTER] UID: ${uid}, Score: ${s}, IsPlayer: ${isPlayer}`);
+
+                if (isPlayer) {
+                    // This is a PLAYER
+                    if (s > maxPScore) {
+                        maxPScore = s;
+                        maxPId = uid;
+                    }
+                } else {
+                    // This is a MASTER or non-whitelisted user
+                    if (s > maxMScore) maxMScore = s;
+                }
+            });
+
+            console.log('[CLUBS MASTER] Calculated Top Scores:', {
+                maxPScore,
+                maxPId,
+                maxMScore
+            });
+
+            // Use calculated scores (trust our whitelist-based calculation)
+            // Only fall back to DB if we have no score data at all
+            if (maxPScore !== -Infinity) {
+                setTopPlayerScore(maxPScore);
+                setTopPlayerId(maxPId);
+            } else {
+                // No player scores found, try DB fallback
+                const dbHighP = status.scores?.high_player;
+                setTopPlayerScore(dbHighP?.score ?? 0);
+                setTopPlayerId(dbHighP?.uid ?? null);
+            }
+
+            if (maxMScore !== -Infinity) {
+                setTopMasterScore(maxMScore);
+            } else {
+                const dbHighM = status.scores?.high_master;
+                setTopMasterScore(dbHighM?.score ?? 0);
+            }
+        } else {
+            // Fallback
+            setTopPlayerScore(status.player_score || 0);
+            setTopMasterScore(status.master_score || 0);
+            setMyScore(status.master_score || 0);
+        }
+    }, [user]);
+
+    // --- SELF-PERSISTENCE (BACKUP) FOR MASTER ---
+    // Ensure master score is saved to profile when game ends.
+    const hasPersistedRef = useRef(false);
+
+    // --- FINAL PERSISTENCE (Self-Sync) ---
+    // Mirrors the Player component logic for guaranteed absolute pasting.
+    useEffect(() => {
+        if ((gameState === 'won' || gameState === 'lost') && !hasPersistedRef.current) {
+            const syncMyProfileScore = async () => {
+                if (!user?.email) return;
+                console.log('[CLUBS MASTER] Triggering self-sync (Paste Logic)...');
+                hasPersistedRef.current = true;
+
+                try {
+                    // Fetch finalized totals from database
+                    const { data: gameStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
+                    const finalScores = gameStatus?.scores || {};
+                    const currentScores = finalScores.current || {};
+                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+
+                    // Absolute Total reached in game (including bonuses)
+                    const myFinalTotal = Number(currentScores[mUid || '']) || myScore;
+
+                    console.log(`[CLUBS MASTER] Pasting final score ${myFinalTotal} to profile ${user.email}`);
+
+                    await supabase.from('profiles').update({ visa_points: myFinalTotal }).eq('email', user.email);
+                    console.log('[CLUBS MASTER] ✅ Self-sync complete.');
+                } catch (err) {
+                    console.error('[CLUBS MASTER] Self-sync failed:', err);
+                }
+            };
+            syncMyProfileScore();
+        }
+        if (gameState !== 'won' && gameState !== 'lost') hasPersistedRef.current = false;
+    }, [gameState]);
+
+    // Master Score Initialization - Sync from Profile if 0
+    const hasSyncedScoreRef = useRef(false);
+    useEffect(() => {
+        const syncMasterScore = async () => {
+            if (myScore === 0 && !hasSyncedScoreRef.current &&
+                gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost' &&
+                auth.currentUser?.email) {
+                console.log('[CLUBS MASTER] My score is 0, checking profile...');
+                hasSyncedScoreRef.current = true;
+
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('visa_points')
+                    .eq('email', auth.currentUser.email)
+                    .single();
+
+                if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
+                    console.log(`[CLUBS MASTER] Syncing score from profile: ${profile.visa_points}`);
+
+                    // Fetch latest status to get current scores object
+                    const { data: latestStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
+                    const currentScores = latestStatus?.scores || { current: {}, history: {}, start: {} };
+                    const myUid = auth.currentUser?.uid || 'MASTER';
+
+                    const newScores = {
+                        ...currentScores,
+                        start: { ...currentScores.start, [myUid]: profile.visa_points },
+                        current: { ...currentScores.current, [myUid]: profile.visa_points }
+                    };
+
+                    // Update game's status in database
+                    await supabase
+                        .from('clubs_game_status')
+                        .update({
+                            master_score: profile.visa_points,
+                            scores: newScores
+                        })
+                        .eq('id', 'clubs_king');
+
+                    setMyScore(profile.visa_points);
+                }
+            }
+        };
+
+        syncMasterScore();
+    }, [myScore, gameState]);
+
+    // Initial Board Setup
+    const initializeBoard = useCallback((_currentRound: number, currentCards: Card[]) => {
+        const expectedSuffix = _currentRound >= 4 ? '-2' : '-1';
+
+        if (currentCards.length > 0 && currentCards[0].id.endsWith(expectedSuffix)) return currentCards;
+
+        // Fallback: Generate based on Round
+        const suffix = _currentRound >= 4 ? '-2' : '-1';
+
+        return RANKS.map(rank => ({
+            id: `clubs-${rank}${suffix}`,
+            suit: 'clubs' as const,
+            rank,
+            playerRole: null,
+            masterRole: null,
+            isRevealed: false,
+            isRemoved: false
+        }));
+    }, []);
+
+    // Load Initial State - Fetch Player IDs
+    useEffect(() => {
+        const fetchPlayerIds = async () => {
+            try {
+                const querySnapshot = await getDocs(collection(db, 'users'));
+                const users = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+
+                // Sort users to match Admin Dashboard logic
+                users.sort((a: any, b: any) => {
+                    // 1. Force Admin/Game Master to ALWAYS be the first element
+                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
+                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+
+                    if (isMasterA && !isMasterB) return -1;
+                    if (!isMasterA && isMasterB) return 1;
+
+                    // 2. Sort remaining players by Join Date (Oldest to Newest)
+                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
+                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+
+                    return timeA - timeB;
+                });
+
+                const mapping: Record<string, string> = {};
+                let mCount = 1;
+                let pCount = 1;
+
+                users.forEach((u: any) => {
+                    const isMaster = u.role === 'master' || u.role === 'admin' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
+                    if (isMaster) {
+                        const mid = `#MASTER_${mCount.toString().padStart(3, '0')}`;
+                        if (u.id) mapping[u.id] = mid;
+                        if (u.username) mapping[u.username] = mid;
+                        mCount++;
+                    } else {
+                        const pid = `#PLAYER_${pCount.toString().padStart(3, '0')}`;
+                        if (u.id) mapping[u.id] = pid;
+                        if (u.username) mapping[u.username] = pid;
+                        pCount++;
+                    }
+                });
+
+                console.log('Role Standardisation (Master):', { mapping });
+                setPlayerIdMap(mapping);
+            } catch (error) {
+                console.error('Error fetching player IDs:', error);
+            }
+        };
+        fetchPlayerIds();
+    }, []);
+
+    // --- SYNC PLAYER START SCORES (Ensure Game Score = Visa Balance) ---
+    const hasSyncedPlayersRef = useRef(false);
+    useEffect(() => {
+        const syncPlayerScores = async () => {
+            if (!hasSyncedPlayersRef.current &&
+                gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost') {
+
+                // Check if we need to sync (if start scores are empty or missing for players)
+                const { data: statusData } = await supabase.from('clubs_game_status').select('scores, allowed_players').eq('id', 'clubs_king').single();
+                const currentStart = statusData?.scores?.start || {};
+                const playerIds: string[] = statusData?.allowed_players?.map((p: any) => String(p)) || [];
+
+                // Filter IDs that need syncing (not in start scores) -- OR force sync if it looks like 0
+                const idsToSync = playerIds.filter(id => currentStart[id] === undefined || currentStart[id] === 0);
+
+                if (idsToSync.length > 0) {
+                    console.log(`[SCORE SYNC] Found ${idsToSync.length} players needing start score sync...`);
+                    hasSyncedPlayersRef.current = true;
+
+                    try {
+                        // 1. Get Emails from Users
+                        const { data: usersData } = await supabase
+                            .from('users')
+                            .select('id, email')
+                            .in('id', idsToSync);
+
+                        if (usersData && usersData.length > 0) {
+                            const emails = usersData.map(u => u.email);
+                            // 2. Get Visa Points from Profiles
+                            const { data: profilesData } = await supabase
+                                .from('profiles')
+                                .select('email, visa_points')
+                                .in('email', emails);
+
+                            if (profilesData) {
+                                const newStart = { ...currentStart };
+                                const newCurrent = { ...(statusData?.scores?.current || {}) };
+                                let updated = false;
+
+                                usersData.forEach(user => {
+                                    const profile = profilesData.find(p => p.email === user.email);
+                                    if (profile) {
+                                        const points = profile.visa_points || 1000; // Default 1000 if null
+                                        // Only update if current game score is 0 (to avoid overwriting progress)
+                                        // OR if we are in early rounds/setup
+                                        if (newStart[user.id] !== points) {
+                                            newStart[user.id] = points;
+
+                                            // Initialize current if it's 0/undefined, otherwise keep the delta logic (current = start + delta)
+                                            // Ideally, if we change start, we should adjust current to maintain the same DELTA? 
+                                            // User Request implies: Game Score SHOULD MATCH Profile. 
+                                            // So we set Current = Points (assuming no gameplay happened yet, or we resync balance)
+                                            // If mid-game, this is risky. But for "Fix this", we assume the current game score is 'wrong' (0-based).
+                                            if (!newCurrent[user.id] || newCurrent[user.id] === 0) {
+                                                newCurrent[user.id] = points;
+                                            } else {
+                                                // If they have a score (e.g. 870), and start was 0.
+                                                // We want to shift the baseline.
+                                                // Old: Start 0, Current 870. Delta +870.
+                                                // New: Start 1000. Current ??
+                                                // If we want Final to be 870. Current must be 870.
+                                                // New Start 1000. New Current 870. Delta -130.
+                                                // This effectively "corrects" the Delta history too? No, history is just log.
+                                                // We just leave Current as is (870) and update Start (1000).
+                                                // Future Deltas will be calculated from 1000 -> 870.
+                                            }
+                                            updated = true;
+                                            console.log(`[SCORE SYNC] Synced ${user.email} -> Start: ${points}`);
+                                        }
+                                    }
+                                });
+
+                                if (updated) {
+                                    await supabase.from('clubs_game_status').update({
+                                        scores: {
+                                            ...(statusData?.scores || {}),
+                                            start: newStart,
+                                            current: newCurrent
+                                        }
+                                    }).eq('id', 'clubs_king');
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error('[SCORE SYNC ERROR]', err);
+                    }
+                }
+            }
+        };
+
+        syncPlayerScores();
+    }, [gameState]);
+
+
+
+    useEffect(() => {
+        const fetchState = async () => {
+            const { data } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
+            if (data && data.system_start) {
+                const resolvedState = data.gameState || 'setup_phase1';
+                setGameState(resolvedState);
+                setRound(data.current_round);
+                setPlayerScore(data.player_score);
+                setMasterScore(data.master_score);
+                updateDetailedScores(data);
+
+                // Check round_data first if column is missing (Sync Fix)
+                const phaseExpirySource = data.phase_expiry || data.round_data?.phase_expiry;
+
+                if (phaseExpirySource) {
+                    const expiry = new Date(phaseExpirySource);
+                    setPhaseExpiry(expiry);
+                    const now = new Date();
+                    const diff = Math.floor((expiry.getTime() - now.getTime()) / 1000);
+                    setTimeLeft(Math.max(0, diff));
+                } else {
+                    // Fallback check using resolvedState
+                    let expiryDate = null;
+                    const now = new Date();
+                    if (resolvedState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
+                    else if (resolvedState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
+                    else if (resolvedState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
+                    else if (resolvedState === 'playing') expiryDate = new Date(now.getTime() + 60000);
+                    else if (resolvedState === 'card_reveal') expiryDate = new Date(now.getTime() + 30000);
+                    else if (resolvedState === 'round_reveal') expiryDate = new Date(now.getTime() + 10000);
+
+                    if (expiryDate) {
+                        setPhaseExpiry(expiryDate);
+                        const diff = Math.floor((expiryDate.getTime() - now.getTime()) / 1000);
+                        setTimeLeft(Math.max(0, diff));
+                    }
+                }
+
+                const removed = data.removed_cards_m || [];
+                setCards(prev => prev.map(c => ({ ...c, isRemoved: removed.includes(c.id) })));
+
+                if (data.round_data) {
+                    // Load Active Deck if exists
+                    if (data.round_data.decks?.active) {
+                        const loadedDeck = data.round_data.decks.active;
+                        setCards(loadedDeck.map((c: Card) => ({
+                            ...c,
+                            isRemoved: removed.includes(c.id)
+                        })));
+                    }
+                    if (data.round_data.master_selection) setMySelection(data.round_data.master_selection);
+                    if (data.round_data.player_selection) {
+                        setPlayerSelection(data.round_data.player_selection);
+                        setPlayerLocked(true);
+                    }
+                }
+
+                // RECOVERY: If game is active but no deck exists in DB
+                if (data.system_start && (!data.round_data?.decks?.active || data.round_data.decks.active.length === 0)) {
+                    console.warn('RECOVERY: System Started but No Deck Found. Generating...');
+                    const fullDeck = generateRandomDeck();
+                    const activeDeck = fullDeck.slice(0, 12);
+                    const reserveDeck = fullDeck.slice(12, 24);
+
+                    setCards(activeDeck);
+                    // Update DB
+                    const nextRoundData = { ...(data.round_data || {}), decks: { active: activeDeck, reserve: reserveDeck } };
+
+                    await supabase.from('clubs_game_status').update({
+                        round_data: nextRoundData,
+                        gameState: data.gameState || 'setup_phase1'
+                    }).eq('id', 'clubs_king');
+                }
+
+                // AUTO-START: If system_start is true but gameState is idle, start the game
+                if (data.system_start && (!data.gameState || data.gameState === 'idle') && (!data.round_data?.decks?.active)) {
+                    console.log('⚠️ Auto-starting game (system_start=true but gameState=idle)');
+
+                    // Generate Random Deck
+                    const fullDeck = generateRandomDeck();
+                    const activeDeck = fullDeck.slice(0, 12);
+                    const reserveDeck = fullDeck.slice(12, 24);
+
+                    const now = new Date();
+                    const expiry = new Date(now.getTime() + 60000);  // 60s briefing
+
+                    await supabase
+                        .from('clubs_game_status')
+                        .update({
+                            gameState: 'briefing',  // Start with briefing for Round 1
+                            current_round: 1,
+                            phase_expiry: expiry.toISOString(),
+                            round_data: {
+                                decks: { active: activeDeck, reserve: reserveDeck },
+                                phase_expiry: expiry.toISOString() // Redundant but safe
+                            }
+                        })
+                        .eq('id', 'clubs_king');
+
+                    setGameState('briefing');
+                    setRound(1);
+                    setPhaseExpiry(expiry);
+                }
+            }
+        };
+        fetchState();
+    }, [initializeBoard]);
+
+
+    // Timer & Auto-Advance Logic
+    useEffect(() => {
+        if (gameState === 'won' || gameState === 'lost') return;
+
+        const timer = setInterval(() => {
+            // Don't countdown if game is paused
+            if (isPaused) return;
+
+            if (phaseExpiry) {
+                const now = new Date();
+                const diff = Math.floor((phaseExpiry.getTime() - now.getTime()) / 1000);
+                const secondsLeft = Math.max(0, diff);
+
+                // Debug log every 5 seconds or if near zero
+                if (secondsLeft % 5 === 0 || secondsLeft < 5) {
+                    console.log(`TIMER DEBUG: Expiry=${phaseExpiry.toISOString()}, Now=${now.toISOString()}, Diff=${diff}, Display=${secondsLeft}`);
+                }
+
+                // REMOVED: Forced timer sync was causing glitches
+                // Each client now calculates their own countdown from phaseExpiry
+                // This results in smooth timers without jumps
+
+                setTimeLeft(secondsLeft);
+
+                // AUTO-ADVANCE MECHANISM (Master-only) - Don't advance if paused
+                if (secondsLeft <= 0 && !isPaused) {
+                    console.log('⏰ TIME\'S UP! Advancing to next phase...');
+                    advancePhase();
+                }
+            } else {
+                // Fallback: Decrement if no phaseExpiry
+                setTimeLeft((prev) => Math.max(0, prev - 1));
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [gameState, phaseExpiry, isPaused]);
+
+    // Subscriptions
+    useEffect(() => {
+        const fetchMessages = async () => {
+            const { data } = await supabase.from('messages').select('*').eq('game_id', 'clubs_king').eq('channel', 'master').order('created_at', { ascending: false }).limit(50);
+            if (data) setMessages([...data].reverse());
+        };
+        fetchMessages();
+
+        const channel = supabase.channel('clubs_king_game', {
+            config: { presence: { key: 'master' } }
+        });
+        channelRef.current = channel;
+
+        channel
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, (payload) => {
+                const status = payload.new;
+                updateDetailedScores(status);
+
+                // CRITICAL: Check for force reset
+                if (status.round_data?.force_reset) {
+                    console.log('!!! FORCE RESET DETECTED IN DATABASE !!!');
+                    // Show themed overlay instead of alert
+                    setShowResetOverlay(true);
+                    return; // Exit early
+                }
+
+                let expiryDate: Date | null = null;
+                const phaseExpirySource = status.phase_expiry || status.round_data?.phase_expiry;
+
+                if (phaseExpirySource) {
+                    expiryDate = new Date(phaseExpirySource);
+                } else if (!phaseExpiry && status.gameState) {
+                    const now = new Date();
+                    if (status.gameState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
+                    else if (status.gameState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
+                    else if (status.gameState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
+                    else if (status.gameState === 'playing') expiryDate = new Date(now.getTime() + 60000);
+                    else if (status.gameState === 'round_reveal') expiryDate = new Date(now.getTime() + 10000);
+                }
+
+                if (expiryDate) {
+                    setPhaseExpiry(expiryDate);
+                    const now = new Date();
+                    const diff = Math.floor((expiryDate.getTime() - now.getTime()) / 1000);
+                    setTimeLeft(Math.max(0, diff));
+                }
+
+                if (status.gameState) setGameState(status.gameState);
+                if (status.is_paused !== undefined) setIsPaused(status.is_paused);
+                // Prevent regression: Only update if server round is >= local round
+                if (status.current_round !== undefined && status.current_round >= round) {
+                    setRound(status.current_round);
+                }
+                if (status.player_score !== undefined) {
+                    const ps = typeof status.player_score === 'number' ? status.player_score : parseInt(status.player_score);
+                    setPlayerScore(isNaN(ps) ? 0 : ps);
+                }
+                if (status.master_score !== undefined) {
+                    const ms = typeof status.master_score === 'number' ? status.master_score : parseInt(status.master_score);
+                    setMasterScore(isNaN(ms) ? 0 : ms);
+                }
+
+                if (status.removed_cards_m) {
+                    setCards(prev => prev.map(c => ({ ...c, isRemoved: status.removed_cards_m.includes(c.id) })));
+                }
+
+                if (status.round_data?.player_selection) {
+                    setPlayerSelection(status.round_data.player_selection);
+                    if (!playerLocked) setPlayerLocked(true);
+                }
+
+                // --- SYNC DETAILED SCORES (HUD) ---
+                if (status.scores) {
+                    const currentScores = status.scores.current || {};
+                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+
+                    // Update local Master score
+                    if (mUid && currentScores[mUid] !== undefined) {
+                        setMyScore(Number(currentScores[mUid]));
+                    }
+
+                    // Update Top Scores
+                    if (status.scores.high_player) {
+                        setTopPlayerScore(status.scores.high_player.score || 0);
+                        setTopPlayerId(status.scores.high_player.uid || null);
+                    }
+                    if (status.scores.high_master) {
+                        setTopMasterScore(status.scores.high_master.score || 0);
+                    }
+                }
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'game_id=eq.clubs_king' }, (payload) => {
+                if (payload.new.channel === 'master') setMessages(prev => [...prev, payload.new]);
+            })
+            .on('broadcast', { event: 'force_exit' }, () => {
+                setShowResetOverlay(true);
+            })
+            .on('broadcast', { event: 'vote_cast' }, async (p: any) => {
+                const { userId, votes, team } = p.payload;
+                console.log('=== MASTER RECEIVED VOTE ===', { userId, votes, team });
+                if (team === 'player' || team === 'participants') {
+                    setPlayersVotes(prev => ({ ...prev, [userId]: votes }));
+                    console.log('Player votes updated:', userId, votes);
+
+                    // PERSIST VOTES for Late Joiners
+                    try {
+                        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
+                        const currentData = data?.round_data || {};
+                        const currentVotes = currentData.player_votes || {};
+
+                        await supabase.from('clubs_game_status').update({
+                            round_data: {
+                                ...currentData,
+                                player_votes: {
+                                    ...currentVotes,
+                                    [userId]: votes
+                                }
+                            }
+                        }).eq('id', 'clubs_king');
+                    } catch (err) {
+                        console.error("Master failed to persist player vote:", err);
+                    }
+                }
+            })
+            .on('broadcast', { event: 'phase1_vote' }, async (p: any) => {
+                const { userId, selection } = p.payload;
+                console.log('=== MASTER RECEIVED PHASE 1 SELECTION ===', { userId, selection });
+
+                // Master acts as the central authority to persist these to avoid race conditions
+                // We fetch current, merge, and write back.
+                // Since only Master does this (and we assume 1 master or they race less frequently), it's safer.
+                try {
+                    const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
+                    const currentData = data?.round_data || {};
+                    const currentSelections = currentData.phase1_selections || {};
+
+                    // Only update if changed to save writes? No, safety first.
+                    await supabase.from('clubs_game_status').update({
+                        round_data: {
+                            ...currentData,
+                            phase1_selections: {
+                                ...currentSelections,
+                                [userId]: selection
+                            }
+                        }
+                    }).eq('id', 'clubs_king');
+                } catch (err) {
+                    console.error("Master failed to persist phase1 vote:", err);
+                }
+            })
+
+            .on('broadcast', { event: 'master_vote' }, (p: any) => {
+                const { votes } = p.payload;
+                // Sync other masters
+                setMasterVotes(votes);
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [playerLocked]);
+
+    // Chat Auto-Scroll
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+
+
+    // --- ACTION HANDLERS ---
+
+    const handleCardClick = (cardId: string) => {
+        if (gameState === 'setup_phase1') {
+            const card = cards.find(c => c.id === cardId);
+            if (!card || card.isRemoved) return;
+
+            setMySelection(prev => {
+                const isAngel = prev.angel === cardId;
+                const isDemon = prev.demon === cardId;
+                let next = { ...prev };
+
+                if (isAngel) next.angel = null;
+                else if (isDemon) next.demon = null;
+                else {
+                    if (!next.angel) next.angel = cardId;
+                    else if (!next.demon) next.demon = cardId;
+                    else next.angel = cardId;
+                }
+                updateMasterSelection(next);
+                return next;
+            });
+        }
+        if (gameState === 'playing') {
+            const card = cards.find(c => c.id === cardId);
+            if (!card || card.isRemoved) return;
+
+            // INDIVIDUAL VOTING LOGIC
+            const myId = user?.id || 'MASTER'; // Use Auth ID or Fallback
+            const currentVotes = masterVotes[myId] || [];
+            let newVotes = [...currentVotes];
+
+            if (newVotes.includes(cardId)) {
+                newVotes = newVotes.filter(id => id !== cardId);
+            } else {
+                if (newVotes.length >= 2) return;
+                newVotes.push(cardId);
+            }
+
+            const updatedMap = { ...masterVotes, [myId]: newVotes };
+            setMasterVotes(updatedMap);
+
+            // Broadcast Master Vote
+            channelRef.current?.send({
+                type: 'broadcast',
+                event: 'master_vote',
+                payload: { votes: updatedMap } // Send FULL map? Or just delta? Let's send full map for sync simplicity
+            });
+        }
+    };
+
+    const updateMasterSelection = async (sel: any) => {
+        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
+        const currentData = data?.round_data || {};
+        await supabase.from('clubs_game_status').update({
+            round_data: { ...currentData, master_selection: sel }
+        }).eq('id', 'clubs_king');
+    };
+
+    const advancePhase = async () => {
+        if (isProcessing.current) return;
+        isProcessing.current = true;
+        console.log("ADVANCE PHASE TRIGGERED", gameState, round);
+
+        try {
+            const now = new Date();
+
+            if (gameState === 'briefing') {
+                const duration = 60;
+                const expiry = new Date(now.getTime() + duration * 1000);
+                await supabase.from('clubs_game_status').update({
+                    gameState: 'setup_phase1',
+                    current_round: 1,
+                    phase_expiry: expiry.toISOString()
+                }).eq('id', 'clubs_king');
+                setGameState('setup_phase1');
+                setPhaseExpiry(expiry);
+            }
+            else if (gameState === 'setup_phase1' || gameState === 'setup') {
+                console.log('🎬 PHASE 1 TRANSITION TRIGGERED');
+                console.log('Current time:', new Date().toISOString());
+                console.log('Phase expiry:', phaseExpiry?.toISOString());
+
+                // FETCH & AUTO-FILL SELECTIONS
+                const { data: currentStatus } = await supabase.from('clubs_game_status').select('round_data, removed_cards_m, removed_cards_p').eq('id', 'clubs_king').single();
+                let rData = currentStatus?.round_data || {};
+                const dbRemoved = currentStatus?.removed_cards_m || [];
+                let pSel = rData.player_selection || { angel: null, demon: null };
+                const mSel = rData.master_selection || mySelection || { angel: null, demon: null };
+
+                console.log('Player selection before auto-pick:', pSel);
+                console.log('Master selection before auto-pick:', mSel);
+                console.log('DB Removed Cards:', dbRemoved);
+
+                // Helper to get random unpicked card - STRICT VALIDATION
+                const getAvailableCard = (excludeIds: (string | null)[]) => {
+                    // 1. Get truly removed cards from DB state (Combine ALL removal sources)
+                    const effectivelyRemoved = new Set([
+                        ...(dbRemoved || []),
+                        ...(currentStatus?.removed_cards_p || []),
+                        ...(currentStatus?.removed_cards_m || []),
+                        ...cards.filter(c => c.isRemoved).map(c => c.id)
+                    ]);
+
+                    // 2. Filter available cards
+                    const validCards = cards.filter(c =>
+                        !c.isRemoved &&
+                        !effectivelyRemoved.has(c.id) &&
+                        !excludeIds.includes(c.id)
+                    );
+
+                    if (validCards.length === 0) {
+                        console.warn("[AUTO-PICK] No valid cards left! Returning null.");
+                        return null;
+                    }
+
+                    const picked = validCards[Math.floor(Math.random() * validCards.length)].id;
+                    console.log(`[AUTO-PICK] Selected ${picked} from ${validCards.length} candidates.`);
+                    return picked;
+                };
+
+                // NEW: Calculate Top Votes from Individual Selections
+                const pSelections = rData.phase1_selections || {};
+                const angelVotes: Record<string, number> = {};
+                const demonVotes: Record<string, number> = {};
+
+                Object.values(pSelections).forEach((sel: any) => {
+                    if (sel.angel) angelVotes[sel.angel] = (angelVotes[sel.angel] || 0) + 1;
+                    if (sel.demon) demonVotes[sel.demon] = (demonVotes[sel.demon] || 0) + 1;
+                });
+
+                // Helper to get top card id (with tie-breaking)
+                const getTopCard = (votesMap: Record<string, number>, excludeIds: (string | null)[]) => {
+                    let maxVotes = -1;
+                    let candidates: string[] = [];
+
+                    Object.entries(votesMap).forEach(([cardId, count]) => {
+                        if (excludeIds.includes(cardId)) return;
+                        if (count > maxVotes) {
+                            maxVotes = count;
+                            candidates = [cardId];
+                        } else if (count === maxVotes) {
+                            candidates.push(cardId);
+                        }
+                    });
+
+                    if (candidates.length > 0) {
+                        // Tie-Breaker: Randomly pick one of the top voted cards
+                        return candidates[Math.floor(Math.random() * candidates.length)];
+                    }
+                    return null;
+                };
+
+                // Determine Locked Selections
+                // First lock Angel, then Demon (excluding Angel)
+                let lockedAngel = getTopCard(angelVotes, []);
+                let lockedDemon = getTopCard(demonVotes, [lockedAngel]);
+
+                // Fallback: If no votes or invalid, pick random available
+                if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
+                // If still null (e.g. no available cards?? unlikely), just keep null or try again
+                if (!lockedDemon) lockedDemon = getAvailableCard([lockedAngel, mSel.angel, mSel.demon]);
+
+                // Final Check to ensure we have selections
+                if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
+
+                pSel = { angel: lockedAngel, demon: lockedDemon };
+
+                // Auto-Pick for Master (unchanged)
+                if (!mSel.angel) mSel.angel = getAvailableCard([mSel.demon]);
+                if (!mSel.demon) mSel.demon = getAvailableCard([mSel.angel]);
+
+                console.log('Final Locked Player Selection (Vote Based):', pSel);
+                console.log('Master selection after auto-pick:', mSel);
+
+                // NEW: Assign Marks (Roles) to the card objects
+                const updatedActiveDeck = cards.map(c => {
+                    let playerRole = null;
+                    let masterRole = null;
+                    if (c.id === pSel.angel) playerRole = 'angel';
+                    else if (c.id === pSel.demon) playerRole = 'demon';
+
+                    if (c.id === mSel.angel) masterRole = 'angel';
+                    else if (c.id === mSel.demon) masterRole = 'demon';
+
+                    return { ...c, playerRole, masterRole };
+                });
+
+                // Update Round Data with Calculated Locks AND Updated Deck
+                rData = {
+                    ...rData,
+                    player_selection: pSel,
+                    master_selection: mSel,
+                    decks: {
+                        ...rData.decks,
+                        active: updatedActiveDeck
+                    }
+                };
+
+                // NEW: Go to Selection Reveal (Interim Phase)
+                const duration = 10;
+                const expiry = new Date(now.getTime() + duration * 1000);
+                console.log('⏭️ Transitioning to selection_reveal');
+                await supabase.from('clubs_game_status').update({
+                    gameState: 'selection_reveal',
+                    phase_expiry: expiry.toISOString(),
+                    round_data: rData
+                }).eq('id', 'clubs_king');
+
+                setGameState('selection_reveal');
+                setPhaseExpiry(expiry);
+            }
+            else if (gameState === 'selection_reveal') {
+                // NEW: Go to Hunter Play
+                const duration = 60;
+                const expiry = new Date(now.getTime() + duration * 1000);
+                await supabase.from('clubs_game_status').update({
+                    gameState: 'playing',
+                    phase_expiry: expiry.toISOString()
+                }).eq('id', 'clubs_king');
+
+                setGameState('playing');
+                setPhaseExpiry(expiry);
+                setMasterVotes({});
+            }
+            else if (gameState === 'playing') {
+                const duration = 12; // 12s Card Reveal Animation
+                const expiry = new Date(now.getTime() + duration * 1000);
+                await supabase.from('clubs_game_status').update({
+                    gameState: 'card_reveal',
+                    phase_expiry: expiry.toISOString()
+                }).eq('id', 'clubs_king');
+
+                setGameState('card_reveal');
+                setPhaseExpiry(expiry);
+            }
+            else if (gameState === 'card_reveal') {
+                await performEvaluation();
+            }
+            else if (gameState === 'round_reveal') {
+                const nextRound = round + 1;
+                if (nextRound > MAX_ROUNDS) {
+                    // GAME COMPLETE - Apply final bonus based on top player vs top master
+                    const { data: finalData } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
+                    const finalScores = finalData?.scores || { current: {}, history: {} };
+                    const finalCurrent = finalScores.current || {};
+
+                    // NEW: Identify Players using allowed_players array from DB status
+                    const { data: statusData } = await supabase.from('clubs_game_status').select('allowed_players').eq('id', 'clubs_king').single();
+                    const playerIds = new Set(statusData?.allowed_players?.map((id: any) => String(id)) || []);
+
+                    // Find highest player and master scores
+                    let maxPlayerScore = -Infinity;
+                    let maxMasterScore = -Infinity;
+
+                    Object.entries(finalCurrent).forEach(([uid, score]) => {
+                        const numScore = typeof score === 'number' ? score : 0;
+                        const isPlayer = playerIds.has(uid);
+                        const isMasterId = uid === 'MASTER' || uid.includes('MASTER') || uid.startsWith('master_');
+
+                        // Standardized Role Check
+                        if (!isPlayer || isMasterId || uid === user?.id || uid === auth.currentUser?.uid) {
+                            if (numScore > maxMasterScore) maxMasterScore = numScore;
+                        } else {
+                            if (numScore > maxPlayerScore) maxPlayerScore = numScore;
+                        }
+                    });
+
+                    // Handle edge cases
+                    if (maxPlayerScore === -Infinity) maxPlayerScore = 0;
+                    if (maxMasterScore === -Infinity) maxMasterScore = 0;
+
+                    // Determine final bonus - MATCHING PLAYER VIEW (500 pts)
+                    const playersWon = maxPlayerScore > maxMasterScore;
+                    const mastersWon = maxMasterScore > maxPlayerScore;
+
+                    const adjustedCurrent: Record<string, number> = {};
+                    Object.entries(finalCurrent).forEach(([uid, score]) => {
+                        const numScore = typeof score === 'number' ? score : 0;
+                        const isMaster = isMasterUid(uid);
+
+                        // Apply win/loss bonus (+500/-500)
+                        if (playersWon) {
+                            adjustedCurrent[uid] = numScore + (isMaster ? -500 : 500);
+                        } else if (mastersWon) {
+                            adjustedCurrent[uid] = numScore + (isMaster ? 500 : -500);
+                        } else {
+                            adjustedCurrent[uid] = numScore; // Tie
+                        }
+                    });
+
+                    const playerScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => !isMasterUid(k)).map(([, v]) => v);
+                    const masterScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => isMasterUid(k)).map(([, v]) => v);
+
+                    const newLegacyPScore = playerScoresEnd.length > 0 ? Math.max(...playerScoresEnd) : 0;
+                    const newLegacyMScore = masterScoresEnd.length > 0 ? Math.max(...masterScoresEnd) : 0;
+
+                    // UPDATED: Identify the TOP IDs again from the adjusted total list for final HUD sync
+                    let topPlayerIdEnd = 'TBD';
+                    let topMasterIdEnd = 'MASTER';
+
+                    Object.entries(adjustedCurrent).forEach(([uid, s]) => {
+                        const score = Number(s) || 0;
+                        if (isMasterUid(uid)) {
+                            if (score === newLegacyMScore) topMasterIdEnd = uid;
+                        } else {
+                            if (score === newLegacyPScore) topPlayerIdEnd = uid;
+                        }
+                    });
+
+                    // Sync local HUD immediately
+                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+                    if (mUid && adjustedCurrent[mUid] !== undefined) {
+                        setMyScore(adjustedCurrent[mUid]);
+                    }
+                    setTopPlayerScore(newLegacyPScore);
+                    setTopMasterScore(newLegacyMScore);
+                    setTopPlayerId(topPlayerIdEnd);
+
+                    console.log('[CLUBS MASTER] Persisting stats...');
+                    const persistClubsStats = async () => {
+                        try {
+                            const playersWon = maxPlayerScore > maxMasterScore;
+                            const masterWon = maxMasterScore > maxPlayerScore;
+                            // AUTHORITATIVE LOOP: Update ALL participants who have game entries (Master included)
+                            const participantIds = Object.keys(adjustedCurrent);
+
+                            console.log('[CLUBS MASTER] Starting authoritative profile sync for all:', participantIds);
+
+                            for (const uid of participantIds) {
+                                try {
+                                    const { data: userData, error: userError } = await supabase
+                                        .from('users')
+                                        .select('email, role')
+                                        .eq('id', uid)
+                                        .single();
+
+                                    if (userError || !userData?.email) continue;
+                                    const userEmail = userData.email;
+
+                                    const finalTotalScore = adjustedCurrent[uid] || 0;
+
+                                    const { data: profile, error: profileError } = await supabase
+                                        .from('profiles')
+                                        .select('wins, losses, role, email')
+                                        .ilike('email', userEmail)
+                                        .single();
+
+                                    if (profileError) continue;
+
+                                    const targetEmail = profile.email || userEmail;
+                                    const isTie = maxPlayerScore === maxMasterScore;
+                                    const isMaster = (userData.role === 'master' || userData.role === 'admin' || profile.role === 'master');
+                                    let isWin = false;
+                                    if (!isTie) {
+                                        if (isMaster) isWin = masterWon;
+                                        else isWin = playersWon;
+                                    }
+
+                                    const currentWins = profile.wins || 0;
+                                    const currentLosses = profile.losses || 0;
+
+                                    const { error: updateError } = await supabase
+                                        .from('profiles')
+                                        .update({
+                                            visa_points: finalTotalScore, // PASTE logic: Overwrite with the absolute HUD total
+                                            wins: isWin ? currentWins + 1 : currentWins,
+                                            losses: (!isWin && !isTie) ? currentLosses + 1 : currentLosses
+                                        })
+                                        .eq('email', targetEmail);
+
+                                    if (updateError) {
+                                        console.error(`[CLUBS MASTER] Failed to update stats for ${targetEmail}:`, updateError);
+                                    }
+                                } catch (innerErr) {
+                                    console.error(`[CLUBS MASTER] Error processing user ${uid}:`, innerErr);
+                                }
+                            }
+                        } catch (err) {
+                            console.error('[CLUBS MASTER] Stats persistence global error:', err);
+                        }
+                    };
+
+                    persistClubsStats();
+
+                    await supabase.from('clubs_game_status').update({
+                        gameState: 'won',
+                        player_score: newLegacyPScore,
+                        master_score: newLegacyMScore,
+                        scores: {
+                            ...finalScores,
+                            current: adjustedCurrent,
+                            high_player: { score: newLegacyPScore, uid: topPlayerIdEnd },
+                            high_master: { score: newLegacyMScore, uid: topMasterIdEnd }
+                        },
+                        phase_expiry: null
+                    }).eq('id', 'clubs_king');
+
+                    onComplete(newLegacyPScore);
+                } else {
+                    const duration = 60;
+                    const expiry = new Date(now.getTime() + duration * 1000);
+                    const { data: currentStatus } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
+                    let nextRoundData = currentStatus?.round_data || {};
+
+                    const pSel = nextRoundData.player_selection || { angel: null, demon: null };
+                    const mSel = nextRoundData.master_selection || { angel: null, demon: null };
+                    const cardsToRemove = [mSel.angel, mSel.demon, pSel.angel, pSel.demon].filter(Boolean);
+                    const prevRemovedP = currentStatus.removed_cards_p || [];
+                    const prevRemovedM = currentStatus.removed_cards_m || [];
+
+                    // FIXED: Accumulate removed cards properly
+                    const finalRemovedP = Array.from(new Set([...prevRemovedP, ...cardsToRemove]));
+                    const finalRemovedM = Array.from(new Set([...prevRemovedM, ...cardsToRemove]));
+
+                    if (nextRoundData.player_selection) nextRoundData.player_selection = null;
+                    if (nextRoundData.master_selection) nextRoundData.master_selection = null;
+
+                    if (nextRound === 4) {
+                        console.log('=== DECK SCENARIO: SWAPPING TO SET 2 ===');
+                        if (nextRoundData.decks?.reserve && nextRoundData.decks.reserve.length > 0) {
+                            nextRoundData.decks.active = nextRoundData.decks.reserve;
+                            nextRoundData.decks.reserve = [];
+                            setCards(nextRoundData.decks.active);
+                        }
+                    }
+
+                    setRound(nextRound);
+                    setGameState('setup_phase1');
+                    setPhaseExpiry(expiry);
+                    setMySelection({ angel: null, demon: null });
+                    setPlayerLocked(false);
+                    setMasterVotes({});
+                    setPlayersVotes({});
+
+                    await supabase.from('clubs_game_status').update({
+                        gameState: 'setup_phase1',
+                        current_round: nextRound,
+                        round_data: nextRoundData,
+                        phase_expiry: expiry.toISOString(),
+                        removed_cards_p: finalRemovedP,
+                        removed_cards_m: finalRemovedM
+                    }).eq('id', 'clubs_king');
+                }
+            }
+        } catch (err) {
+            console.error("ADVANCE PHASE ERROR:", err);
+            alert("SYSTEM ERROR: PHASE TRANSITION FAILED");
+            setShowResetOverlay(true);
+        } finally {
+            setTimeout(() => { isProcessing.current = false; }, 1000);
+        }
+    };
+
+    const performEvaluation = async () => {
+        try {
+            const now = new Date();
+            const duration = 10; // 10s Eval
+            const expiry = new Date(now.getTime() + duration * 1000);
+
+            const { data } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
+            const rData = data.round_data || {};
+
+            let activeGameId = data.active_game_id;
+            if (!activeGameId) {
+                console.error("[CRITICAL] No active_game_id found! Attempting recovery...");
+
+                // 1. Try to find an existing active session
+                const { data: latestSession } = await supabase
+                    .from('clubs_game_sessions')
+                    .select('id')
+                    .eq('status', 'active')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                if (latestSession) {
+                    activeGameId = latestSession.id;
+                    console.log(`[RECOVERY] Found existing active session: ${activeGameId}`);
+                } else {
+                    // 2. If no session exists, CREATE ONE
+                    console.warn("[RECOVERY] No active session found. Creating new session...");
+                    const { data: newSession, error: createError } = await supabase
+                        .from('clubs_game_sessions')
+                        .insert([{
+                            status: 'active',
+                            total_rounds: 6,
+                            current_round: round,
+                            metadata: { created_via: 'auto_recovery' }
+                        }])
+                        .select()
+                        .single();
+
+                    if (newSession) {
+                        activeGameId = newSession.id;
+                        console.log(`[RECOVERY] Created new session: ${activeGameId}`);
+                    } else {
+                        console.error("[RECOVERY FAILED] Could not create session:", createError);
+                    }
+                }
+
+                // Update the game status with whatever we found/created
+                if (activeGameId) {
+                    await supabase.from('clubs_game_status').update({ active_game_id: activeGameId }).eq('id', 'clubs_king');
+                }
+            }
+
+            const pSel = rData.player_selection || { angel: null, demon: null };
+            const mSel = rData.master_selection || { angel: null, demon: null };
+            const currentScores = data.scores || { current: {}, history: {} };
+
+            // Use Refs for latest values
+            const currentPVotesMap = playersVotesRef.current;
+            const currentMVotesMap = masterVotesRef.current;
+
+            const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+
+            const allParticipants = new Set<string>();
+            if (data?.allowed_players && Array.isArray(data.allowed_players)) {
+                data.allowed_players.forEach((uid: any) => { if (uid) allParticipants.add(String(uid)); });
+            }
+            if (currentScores?.start) {
+                Object.keys(currentScores.start).forEach(uid => allParticipants.add(uid));
+            }
+            if (mUid) allParticipants.add(mUid);
+
+            const participantIds = Array.from(allParticipants);
+            const roundScores: Record<string, number> = {};
+            const resList: any[] = [];
+            const masterIds = new Set(Object.keys(currentMVotesMap));
+            if (mUid) masterIds.add(mUid);
+            if (user?.id) masterIds.add(user.id);
+            masterIds.add('MASTER');
+            masterIds.add('SYSTEM_ARCHITECT');
+
+            console.log(`[CLUBS EVAL] Master IDs:`, Array.from(masterIds), "mUid:", mUid);
+
+            const angelReward = 300 - ((round - 1) * 50);
+
+            const voteCount: Record<string, number> = {};
+            Object.values(currentPVotesMap).forEach((votes) => {
+                votes.forEach((cardId) => {
+                    voteCount[cardId] = (voteCount[cardId] || 0) + 1;
+                });
+            });
+
+            const sortedCards = Object.entries(voteCount).sort((a, b) => b[1] - a[1]);
+            const topVotedCards: string[] = [];
+            if (sortedCards.length > 0) {
+                topVotedCards.push(sortedCards[0][0]);
+                if (sortedCards.length > 1 && sortedCards[1][1] > 0) {
+                    topVotedCards.push(sortedCards[1][0]);
+                }
+            }
+
+            participantIds.forEach(uid => {
+                let score = 0;
+                const reasons: string[] = [];
+                const isMaster = isMasterUid(uid);
+                const votes = isMaster ? currentMVotesMap[uid] : currentPVotesMap[uid];
+
+                if (!votes || votes.length === 0) {
+                    score = -30;
+                    reasons.push('DID NOT VOTE');
+                } else {
+                    topVotedCards.forEach((consensusCard) => {
+                        if (votes.includes(consensusCard)) {
+                            const targetRole = isMaster ? pSel : mSel;
+                            if (consensusCard === targetRole.angel) {
+                                score += angelReward;
+                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''}ANGEL`);
+                            } else if (consensusCard === targetRole.demon) {
+                                score -= 50;
+                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''}DEMON`);
+                            }
+                        }
+                    });
+                    if (score === 0) reasons.push('NO TARGET ACQUIRED');
+                }
+
+                roundScores[uid] = score;
+                resList.push({
+                    targetId: uid,
+                    team: isMaster ? 'master' : 'player',
+                    change: score,
+                    reason: reasons.join(' + ')
+                });
+            });
+
+            const newHistory = { ...currentScores.history };
+            const newCurrent = { ...currentScores.current };
+
+            participantIds.forEach(uid => {
+                const delta = roundScores[uid] || 0;
+                const baseline = Number(currentScores.start?.[uid] || 0);
+                const currentTotal = newCurrent[uid] !== undefined ? Number(newCurrent[uid]) : baseline;
+
+                newCurrent[uid] = currentTotal + delta;
+
+                if (!newHistory[uid]) newHistory[uid] = [];
+                newHistory[uid].push({ round, score: delta, total: newCurrent[uid] });
+            });
+
+            // Calculate Top Scores from NEW TOTALS
+            let maxPScore = -Infinity;
+            let maxMScore = -Infinity;
+            let topPId = '';
+
+            Object.entries(newCurrent).forEach(([uid, s]) => {
+                const isMaster = isMasterUid(uid);
+                const score = Number(s) || 0;
+                if (isMaster) {
+                    if (score > maxMScore) maxMScore = score;
+                } else {
+                    if (score > maxPScore) {
+                        maxPScore = score;
+                        topPId = uid;
+                    }
+                }
+            });
+
+            if (maxPScore === -Infinity) maxPScore = 0;
+            if (maxMScore === -Infinity) maxMScore = 0;
+
+            const highPlayer = { score: maxPScore, uid: topPId || 'TBD' };
+            const highMaster = { score: maxMScore, uid: mUid || 'MASTER' };
+
+            const playerScoresList = Object.entries(newCurrent).filter(([k]) => !isMasterUid(k)).map(([, v]) => v as number);
+            const masterScoresList = Object.entries(newCurrent).filter(([k]) => isMasterUid(k)).map(([, v]) => v as number);
+
+            const newLegacyPScore = playerScoresList.length > 0 ? Math.max(...playerScoresList) : 0;
+            const newLegacyMScore = masterScoresList.length > 0 ? Math.max(...masterScoresList) : 0;
+
+            await supabase.from('clubs_game_status').update({
+                gameState: 'round_reveal',
+                phase_expiry: expiry.toISOString(),
+                scores: {
+                    start: currentScores.start,
+                    current: newCurrent,
+                    history: newHistory,
+                    high_player: highPlayer,
+                    high_master: highMaster
+                },
+                player_score: newLegacyPScore,
+                master_score: newLegacyMScore,
+                round_data: {
+                    ...rData,
+                    evaluation_results: resList,
+                    top_votes: topVotedCards
+                }
+            }).eq('id', 'clubs_king');
+
+            // --- PERSIST ROUND SCORES ---
+            try {
+                if (activeGameId) {
+                    // Fetch IDs specifically to map to emails
+                    // Master might not be in the participants list if they are just observing, but if they are playing (have a score), they should be in participantIds
+                    const { data: profiles, error: pErr } = await supabase
+                        .from('profiles')
+                        .select('id, email')
+                        .in('id', participantIds);
+
+                    if (!pErr && profiles) {
+                        console.log(`[ROUND PERSIST] Storing results for Game ${activeGameId}, Participants: ${profiles.length}`);
+
+                        for (const profile of profiles) {
+                            const roundDelta = roundScores[profile.id] || 0;
+                            const totalPoints = newCurrent[profile.id] || 0;
+
+                            // Use the Secure RPC to upsert points (Handles variable column names safely)
+                            const { error: rpcError } = await supabase.rpc('upsert_round_points', {
+                                p_game_id: activeGameId,
+                                p_email: profile.email,
+                                p_round_num: round,
+                                p_points: roundDelta,
+                                p_total: totalPoints
+                            });
+
+                            if (rpcError) {
+                                console.error(`[PERSIST ERROR] Failed to save for ${profile.email}:`, rpcError);
+                            } else {
+                                // console.log(`[PERSIST SUCCESS] Saved R${round} for ${profile.email}`);
+                            }
+                        }
+                    } else {
+                        console.error('[ROUND PERSIST] Could not fetch profiles for persistence:', pErr);
+                    }
+
+                    // Explicitly Handle MASTER Persistence if not in profiles (Backup)
+                    if (user?.email && (masterIds.has(user.id) || roundScores[user.id] !== undefined)) {
+                        const mDelta = roundScores[user.id] || 0;
+                        const mTotal = newCurrent[user.id] || 0;
+                        // Try to persist for Master directly
+                        await supabase.rpc('upsert_round_points', {
+                            p_game_id: activeGameId,
+                            p_email: user.email,
+                            p_round_num: round,
+                            p_points: mDelta,
+                            p_total: mTotal
+                        });
+                    }
+
+                } else {
+                    console.warn('[ROUND PERSIST] Skipped - No Active Game ID');
+                }
+            } catch (persistErr) {
+                console.error("[CLUBS PERSISTENCE ERROR]:", persistErr);
+            }
+
+            // --- SAVE ROUND SCORES TO HISTORY TABLE ---
+            console.log(`[ROUND SCORES] Saving round ${round} scores to history table...`);
+            try {
+                const roundScoreRecords = [];
+
+                for (const uid of participantIds) {
+                    try {
+                        // Skip system IDs
+                        if (uid === 'SYSTEM_ARCHITECT') continue;
+
+                        const pointsEarned = roundScores[uid] || 0;
+                        const totalScore = newCurrent[uid] || 0;
+
+                        // Fetch email for this user
+                        let userEmail = null;
+                        if (uid.includes('MASTER') || uid === user?.id) {
+                            userEmail = user?.email;
+                        } else {
+                            const { data: userData } = await supabase
+                                .from('users')
+                                .select('email')
+                                .eq('id', uid)
+                                .single();
+                            userEmail = userData?.email;
+                        }
+
+                        if (userEmail) {
+                            roundScoreRecords.push({
+                                game_id: 'clubs_king',
+                                player_email: userEmail,
+                                player_uid: uid,
+                                round_number: round,
+                                points_earned: pointsEarned,
+                                total_score: totalScore
+                            });
+                        }
+                    } catch (err) {
+                        console.error(`[ROUND SCORES] Error preparing record for ${uid}:`, err);
+                    }
+                }
+
+                // Batch insert all round scores
+                if (roundScoreRecords.length > 0) {
+                    const { error: insertError } = await supabase
+                        .from('clubs_round_scores')
+                        .upsert(roundScoreRecords, {
+                            onConflict: 'game_id,player_email,round_number'
+                        });
+
+                    if (insertError) {
+                        console.error('[ROUND SCORES] Error saving round scores:', insertError);
+                    } else {
+                        console.log(`[ROUND SCORES] Successfully saved ${roundScoreRecords.length} round score records`);
+                    }
+                }
+            } catch (roundScoreErr) {
+                console.error('[ROUND SCORES] Critical error:', roundScoreErr);
+            }
+
+            // BROADCAST RESULTS (Critical for Player View)
+            await channelRef.current?.send({
+                type: 'broadcast',
+                // Use 'round_reveal' to match the gameState - ensure ClubsGame.tsx listens for this!
+                event: 'round_results',
+                payload: {
+                    playerAngel: pSel.angel, playerDemon: pSel.demon, masterAngel: mSel.angel, masterDemon: mSel.demon,
+                    playerScore: newLegacyPScore, masterScore: newLegacyMScore, resList: resList,
+                    // Fix for HUD not updating: Send the RAW points for the specific player to handle locally if needed
+                    currentScores: newCurrent
+                }
+            });
+
+            /* 
+            // --- 6. REMOVED REAL-TIME PROFILE VISA POINTS SYNC (To avoid double-counting) ---
+            // Profile points are now updated authoritatively at the end of the game in advancePhase -> persistClubsStats.
+            console.log(`[PERSISTENCE] Starting Profile Visa Point Sync...`);
+            for (const uid of participantIds) {
+                try {
+                    // Skip Master/System IDs for profile updates
+                    if (uid.includes('MASTER') || uid === 'SYSTEM_ARCHITECT') continue;
+    
+                    // Fetch email if we don't have it (we should from earlier step, but re-fetch to be safe or use map)
+                    const { data: userData } = await supabase.from('users').select('email').eq('id', uid).single();
+                    if (userData?.email) {
+                        const roundDelta = roundScores[uid] || 0;
+                        if (roundDelta !== 0) {
+                            const { error: rpcError } = await supabase.rpc('adjust_visa_points', {
+                                p_email: userData.email,
+                                p_adjustment: roundDelta
+                            });
+    
+                            if (rpcError) console.error(`[PROFILE SYNC ERROR] ${userData.email}:`, rpcError);
+                            else console.log(`[PROFILE SYNC] Adjusted ${userData.email} by ${roundDelta}`);
+                        }
+                    }
+                } catch (err) {
+                    console.error(`[PROFILE SYNC FAIL] UID ${uid}`, err);
+                }
+            }
+            */
+
+            // Local Updates
+            setGameState('round_reveal');
+            setPhaseExpiry(expiry);
+            setPlayerScore(newLegacyPScore);
+            setMasterScore(newLegacyMScore);
+            if (user?.id) setMyScore(newCurrent[user.id] || 0);
+            setTopPlayerScore(newLegacyPScore);
+            setTopPlayerId(topPId);
+            setTopMasterScore(newLegacyMScore);
+
+            console.log("=== EVALUATION COMPLETE ===");
+        } catch (evalErr) {
+            console.error("CRITICAL EVALUATION ERROR:", evalErr);
+            alert("SYSTEM ERROR DURING EVALUATION. CHECK CONSOLE.");
+        }
+    };
+
+
+
+    if ((!cards || cards.length === 0) && gameState !== 'idle') return <Loader />;
+
+    return (
+        <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+            {/* HEADER HUB - Consolidated with Main Header */}
+            <div className={`px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0`}>
+                <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
+                    <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
+                        {/* ROUND */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{round}/6</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TOP PLAYER */}
+                        <div className="text-center min-w-[70px] sm:min-w-[100px]">
+                            <p className="text-[7px] text-yellow-500/50 uppercase tracking-widest mb-0.5">TOP PLAYER</p>
+                            <div className="flex flex-col items-center leading-none">
+                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId || '--')}</p>
+                                <p className="text-xs sm:text-lg font-mono font-black text-white">{topPlayerScore}</p>
+                            </div>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TOP MASTER */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{topMasterScore}</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* MY SCORE */}
+                        <div className="text-center min-w-[40px]">
+                            <p className="text-[7px] text-blue-500/50 uppercase tracking-widest mb-0.5">MY SCORE</p>
+                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{myScore}</p>
+                        </div>
+
+                        <div className="w-px h-6 bg-white/10" />
+
+                        {/* TIMER */}
+                        <div className="text-center min-w-[60px]">
+                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
+                            <div className="flex items-center justify-center gap-1">
+                                <Timer size={12} className="text-red-500" />
+                                <p className="text-xs sm:text-lg font-mono font-black text-red-500 leading-none">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* MAIN AREA */}
+            <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative z-10">
+
+                {/* GAME BOARD */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-black/40">
+
+                    {/* INFO HUD */}
+                    <div className="max-w-6xl mx-auto mb-8 flex justify-between items-end">
+                        <div className="space-y-1">
+                            <h2 className="text-2xl font-cinzel font-bold text-white uppercase tracking-widest">
+                                {gameState === 'playing' ? "HUNTING PHASE" :
+                                    gameState === 'card_reveal' ? "CARD REVEAL" :
+                                        gameState === 'selection_reveal' ? "CARD REVEAL" : "SETUP PHASE"}
+                            </h2>
+                            <p className="text-white/40 font-mono text-xs uppercase tracking-widest">
+                                {gameState === 'setup_phase1' ? "SELECT YOUR HIDDEN AGENTS. PLAYER CONSENSUS PENDING." :
+                                    gameState === 'selection_reveal' ? "REVEALING SELECTIONS..." :
+                                        gameState === 'playing' ? "GUESS PLAYER'S CARDS. PLAYERS ARE VOTING." :
+                                            gameState === 'card_reveal' ? "REVEALING SELECTIONS..." :
+                                                gameState === 'round_reveal' ? "EVALUATING ROUND OUTCOME..." : "AWAITING ACTION..."}
+                            </p>
+                        </div>
+
+                        {/* Master Selection Display */}
+                        {(gameState === 'setup_phase1' || gameState === 'setup' || gameState === 'selection_reveal') && (
+                            <div className="flex items-center gap-4">
+                                <div className={`px-4 py-2 rounded border ${mySelection.angel ? 'border-yellow-500 bg-yellow-500/10' : 'border-white/10 bg-white/5'} text-center w-24`}>
+                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">SECRET ANGEL</p>
+                                    <p className="text-[6px] text-green-500 uppercase tracking-widest mb-1 leading-none">THEY HUNT THIS</p>
+                                    <p className="text-lg font-black text-yellow-500">{cards.find(c => c.id === mySelection.angel)?.rank || '-'}</p>
+                                </div>
+                                <div className={`px-4 py-2 rounded border ${mySelection.demon ? 'border-red-500 bg-red-500/10' : 'border-white/10 bg-white/5'} text-center w-24`}>
+                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">SECRET DEMON</p>
+                                    <p className="text-[6px] text-red-500 uppercase tracking-widest mb-1 leading-none">THEY AVOID THIS</p>
+                                    <p className="text-lg font-black text-red-500">{cards.find(c => c.id === mySelection.demon)?.rank || '-'}</p>
+                                </div>
+
+                                <div className="h-8 w-px bg-white/10 mx-2" />
+
+                                <div className={`px-4 py-2 rounded border ${playerLocked ? 'border-green-500/50 bg-green-900/10' : 'border-white/10 bg-white/5'} text-center w-32`}>
+                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">PLAYER STATUS</p>
+                                    <p className="text-xs font-bold text-white">{playerLocked ? 'READY' : 'DECIDING...'}</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* START GAME BUTTON - Only show when idle */}
+                        {gameState === 'idle' && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        const now = new Date();
+                                        const expiry = new Date(now.getTime() + 60000); // 60s for setup
+
+                                        // FORCE NEW DECK GENERATION
+                                        const fullDeck = generateRandomDeck();
+                                        const activeDeck = fullDeck.slice(0, 12);
+                                        const reserveDeck = fullDeck.slice(12, 24);
+
+                                        // -----------------------------------------------------
+                                        // ROBUST SCORE INITIALIZATION (Case-Insensitive)
+                                        // -----------------------------------------------------
+                                        console.log('[CLUBS MASTER] Initializing Scores...');
+                                        const { data: statusData } = await supabase.from('clubs_game_status').select('allowed_players').eq('id', 'clubs_king').single();
+                                        const allowedIds = statusData?.allowed_players || [];
+
+                                        let initialStartScores: Record<string, number> = {};
+
+                                        if (allowedIds.length > 0) {
+                                            // 1. Fetch Emails
+                                            const { data: userData } = await supabase.from('users').select('id, email').in('id', allowedIds);
+                                            const idEmailMap: Record<string, string> = {};
+                                            const emails: string[] = [];
+
+                                            // 2. Build Maps
+                                            if (userData) {
+                                                userData.forEach((u: any) => {
+                                                    if (u.email) {
+                                                        idEmailMap[u.id] = u.email;
+                                                        emails.push(u.email);
+                                                    }
+                                                });
+                                            }
+
+                                            // 3. Fetch Profiles & Map (Case-Insensitive)
+                                            if (emails.length > 0) {
+                                                const orFilter = emails.map(e => `email.ilike.${e}`).join(',');
+                                                const { data: profileData } = await supabase.from('profiles').select('email, visa_points').or(orFilter);
+
+                                                if (profileData) {
+                                                    const emailPoints: Record<string, number> = {};
+                                                    profileData.forEach((p: any) => {
+                                                        if (p.email) emailPoints[p.email.toLowerCase()] = p.visa_points;
+                                                    });
+
+                                                    Object.entries(idEmailMap).forEach(([uid, email]) => {
+                                                        const lower = email.toLowerCase();
+                                                        if (emailPoints[lower] !== undefined) {
+                                                            initialStartScores[uid] = emailPoints[lower];
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        console.log('[CLUBS MASTER] Captured Start Scores:', initialStartScores);
+                                        // -----------------------------------------------------
+
+                                        const { error } = await supabase
+                                            .from('clubs_game_status')
+                                            .update({
+                                                system_start: true,
+                                                gameState: 'briefing',  // Start with briefing for Round 1
+                                                current_round: 1,
+                                                phase_expiry: expiry.toISOString(),
+                                                round_data: {
+                                                    decks: { active: activeDeck, reserve: reserveDeck },
+                                                    // Clear previous selections if any
+                                                    player_selection: null,
+                                                    master_selection: null
+                                                },
+                                                // Reset scores and removed cards on fresh start
+                                                player_score: 0,
+                                                master_score: 0,
+                                                removed_cards_p: [],
+                                                removed_cards_m: [],
+                                                scores: { current: {}, history: {}, start: initialStartScores, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }
+                                            })
+                                            .eq('id', 'clubs_king');
+
+                                        if (error) {
+                                            console.error('Failed to start game:', error);
+                                            alert('FAILED TO START GAME: ' + error.message);
+                                        } else {
+                                            console.log('✓ Game started successfully with NEW DECK');
+                                            console.log('✓ Scores reset to 0');
+                                            console.log('✓ Vote maps cleared');
+                                            setGameState('setup_phase1');
+                                            setRound(1);
+                                            setPhaseExpiry(expiry);
+                                            setCards(activeDeck);
+                                            setPlayerScore(0);
+                                            setMasterScore(0);
+                                            // Clear local vote state to prevent stale triggers
+                                            setPlayersVotes({});
+                                            setMasterVotes({});
+                                            playersVotesRef.current = {};
+                                            masterVotesRef.current = {};
+                                        }
+                                    } catch (err: any) {
+                                        console.error('START GAME ERROR:', err);
+                                        alert('ERROR: ' + err.message);
+                                    }
+                                }}
+                                className="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold uppercase tracking-widest text-sm rounded-lg transition-all"
+                            >
+                                ▶ START GAME
+                            </button>
+                        )}
+                    </div>
+
+                    {/* CARDS GRID */}
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-4 max-w-6xl mx-auto">
+                        {cards.map((card) => {
+                            if (card.isRemoved) return <div key={card.id} className="aspect-[2/3] opacity-0 pointer-events-none" />;
+
+                            const isMyAngel = mySelection.angel === card.id;
+                            const isMyDemon = mySelection.demon === card.id;
+                            const isPlayerAngel = playerSelection.angel === card.id;
+                            const isPlayerDemon = playerSelection.demon === card.id;
+                            const myId = user?.id || 'MASTER';
+                            const myVotes = masterVotes[myId] || [];
+                            const isVoted = gameState === 'playing' && myVotes.includes(card.id);
+
+                            let borderColor = 'border-white/10 opacity-60 hover:opacity-100';
+                            let glow = '';
+
+                            // Dim others during reveal
+                            if (gameState === 'selection_reveal') {
+                                if (!isMyAngel && !isMyDemon) borderColor = 'border-white/5 opacity-20';
+                            }
+
+                            // Big 4 Dimming (Card Reveal)
+                            if (gameState === 'card_reveal') {
+                                borderColor = 'border-white/5 opacity-10'; // Dim everything by default, overrides below
+                            }
+
+                            if (isMyAngel) { borderColor = 'border-yellow-500 opacity-100'; glow = 'shadow-[0_0_30px_rgba(234,179,8,0.3)]'; }
+                            else if (isMyDemon) { borderColor = 'border-red-500 opacity-100'; glow = 'shadow-[0_0_30px_rgba(220,38,38,0.3)]'; }
+                            else if (isVoted) { borderColor = 'border-green-500 opacity-100'; glow = 'shadow-[0_0_30px_rgba(34,197,94,0.3)]'; }
+
+                            // PLAYER REVEAL HIGHLIGHTS (In Master View) - MOVED TO CARD REVEAL AND ROUND RESULTS
+                            if (gameState === 'card_reveal' || gameState === 'round_reveal') {
+                                if (isPlayerAngel) { borderColor = 'border-blue-500 opacity-100'; glow = 'shadow-[0_0_30px_rgba(59,130,246,0.6)]'; }
+                                else if (isPlayerDemon) { borderColor = 'border-purple-600 opacity-100'; glow = 'shadow-[0_0_30px_rgba(147,51,234,0.6)]'; }
+                            }
+
+                            return (
+                                <div
+                                    key={card.id}
+                                    onClick={() => handleCardClick(card.id)}
+                                    className={`relative aspect-[2/3] bg-[#0A0A0F] rounded-xl border-2 transition-all duration-300 cursor-pointer overflow-hidden group ${borderColor} ${glow}`}
+                                >
+                                    <img
+                                        src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`}
+                                        className="absolute inset-0 w-full h-full object-cover rounded-xl"
+                                        alt={`${card.rank} of ${card.suit}`}
+                                    />
+
+                                    {isMyAngel && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-yellow-500 text-black font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400">MY ANGEL</div>}
+                                    {isMyDemon && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-red-600 text-white font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-500">MY DEMON</div>}
+
+
+
+                                    {isVoted && <div className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] bg-green-500 text-black font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(34,197,94,0.5)] border border-green-400">VOTED</div>}
+
+                                    {gameState === 'playing' && (
+                                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-20">
+                                            {/* Master Self Count (Green) */}
+                                            {isVoted && (
+                                                <div className="px-1.5 py-0.5 rounded bg-green-500 text-black font-bold text-[8px] shadow-lg border border-white/20 min-w-[16px] text-center">
+                                                    1
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Phase 1 Master Self Counters */}
+                                    {(gameState === 'setup' || gameState === 'setup_phase1') && (
+                                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-20">
+                                            {/* Master Angel Count */}
+                                            {isMyAngel && (
+                                                <div className="px-1.5 py-0.5 rounded bg-yellow-500 text-black font-bold text-[8px] shadow-lg border border-white/20 min-w-[16px] text-center">
+                                                    A:1
+                                                </div>
+                                            )}
+                                            {/* Master Demon Count */}
+                                            {isMyDemon && (
+                                                <div className="px-1.5 py-0.5 rounded bg-red-600 text-white font-bold text-[8px] shadow-lg border border-white/20 min-w-[16px] text-center">
+                                                    D:1
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* BIG 4 REVEAL ANIMATION OVERLAY */}
+                <AnimatePresence>
+                    {gameState === 'card_reveal' && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-8 backdrop-blur-xl"
+                        >
+                            <h1 className="text-4xl font-black text-white font-cinzel tracking-[0.5em] mb-12 animate-pulse">IDENTITY REVEAL</h1>
+
+                            <div className="flex items-center gap-12">
+                                {/* MASTER SIDE */}
+                                <div className="flex flex-col items-center gap-6">
+                                    <h3 className="text-xl font-bold text-yellow-500/50 uppercase tracking-widest border-b border-yellow-500/20 pb-2">MASTER</h3>
+                                    <div className="flex gap-6">
+                                        {/* MASTER ANGEL */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === mySelection.angel);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.5)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">MY ANGEL</div>
+                                                </div>
+                                            );
+                                        })()}
+                                        {/* MASTER DEMON */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === mySelection.demon);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.5)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">MY DEMON</div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+
+                                {/* VS SEPARATOR */}
+                                <div className="h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
+
+                                {/* PLAYER SIDE */}
+                                <div className="flex flex-col items-center gap-6">
+                                    <h3 className="text-xl font-bold text-blue-500/50 uppercase tracking-widest border-b border-blue-500/20 pb-2">PLAYERS</h3>
+                                    <div className="flex gap-6">
+                                        {/* PLAYER ANGEL */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === playerSelection.angel);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-blue-500 shadow-[0_0_50px_rgba(59,130,246,0.5)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER ANGEL</div>
+                                                </div>
+                                            );
+                                        })()}
+                                        {/* PLAYER DEMON */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === playerSelection.demon);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-purple-600 shadow-[0_0_50px_rgba(147,51,234,0.5)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER DEMON</div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
+                                CALCULATING ROUND OUTCOME...
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* SIDEBAR (Bottom on mobile, Right on desktop) */}
+                <div className="w-full sm:w-80 h-[30vh] sm:h-full border-t sm:border-t-0 sm:border-l border-white/10 flex flex-col bg-[#0A0A0E]">
+                    {/* Chat */}
+                    <div className="flex-1 flex flex-col min-h-0 bg-[#0A0A0E] border-b border-white/5">
+                        <div className="p-3 border-b border-white/10 bg-[#0F0F13]">
+                            <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS INTERCEPT</h3>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                            {messages.length === 0 && (
+                                <div className="text-center mt-10 opacity-30">
+                                    <p className="text-xs uppercase tracking-widest font-mono">Channel Silent...</p>
+                                </div>
+                            )}
+                            {messages.map((msg) => (
+                                <div key={msg.id} className="relative group">
+                                    <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-white/20 group-hover:bg-cyan-500/50 transition-colors" />
+                                    <div className="pl-3 py-1">
+                                        <p className="text-[10px] font-black text-white/40 mb-1">
+                                            {msg.user_id === user?.id ? '#MASTER' : (playerIdMap[msg.user_id] || (msg.user_id || 'SYS').slice(0, 8).toUpperCase())}
+                                        </p>
+                                        <p className="text-xs text-white/80 font-mono leading-relaxed">{msg.content || msg.text}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                        </div>
+                    </div>
+
+                    {/* Chat Input */}
+                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-[#0F0F13]">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                value={inputMessage}
+                                onChange={(e) => setInputMessage(e.target.value)}
+                                placeholder="Transmission..."
+                                className="w-full bg-black/50 border border-white/10 rounded px-3 py-2 text-xs font-mono text-cyan-500 placeholder:text-white/20 focus:outline-none focus:border-cyan-500/50 uppercase tracking-widest"
+                            />
+                            <button type="submit" className="hidden" />
+                        </div>
+                    </form>
+
+                    {/* Status Footer */}
+                    <div className="p-4 border-t border-white/10 bg-black/40">
+                        <div className="flex flex-col gap-2">
+                            <div className="text-[10px] uppercase tracking-widest text-white/30">SYSTEM STATUS</div>
+                            <div className="text-xs font-mono text-cyan-500/80">
+                                ROUND {round} ARCHITECTURE SYNC COMPLETE.
+                            </div>
+                            <div className="text-xs font-mono text-white/40">
+                                AUTO-SEQUENCE INITIATED.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* GAME OVER OVERLAY */}
+            {
+                gameState === 'won' && (
+                    <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center">
+                        <div className="max-w-4xl w-full mx-4 text-center space-y-8">
+                            {/* Determine Winner */}
+                            {(() => {
+                                const playerWins = topPlayerScore > topMasterScore;
+                                const masterWins = topMasterScore > topPlayerScore;
+
+                                return (
+                                    <>
+                                        {/* Victory/Defeat Banner */}
+                                        <div className="space-y-4">
+                                            <h1 className={`text-7xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
+                                                {playerWins ? 'PLAYERS PREVAILED' : masterWins ? 'MASTERS TRIUMPH' : 'PERFECT EQUILIBRIUM'}
+                                            </h1>
+                                            <div className={`h-1 w-96 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
+                                            <p className="text-lg font-mono text-white/60 uppercase tracking-wider">
+                                                {playerWins ? 'Collective intelligence triumphed. The Borderland acknowledges their skill.' :
+                                                    masterWins ? 'The Masters\' deception proved superior. Players failed the trial.' :
+                                                        'Both sides demonstrated equal mastery. A rare occurrence.'}
+                                            </p>
+                                        </div>
+
+                                        {/* Score Display - STACKED ON MOBILE TO PREVENT OVERLAP */}
+                                        <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 sm:gap-6 w-full max-w-4xl px-4 sm:px-0">
+                                            {/* Top Player */}
+                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP PLAYER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-2 truncate">
+                                                    {topPlayerId ? (playerIdMap[topPlayerId] || topPlayerId.slice(0, 8) + '...') : '--'}
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
+                                                {playerWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                            </div>
+
+                                            {/* My Score (Master) */}
+                                            <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
+                                                    MASTER (YOU)
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
+                                                <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
+                                            </div>
+
+                                            {/* Top Master */}
+                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP MASTER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-2">
+                                                    {(topMasterScore > 0 && topMasterScore === myScore) ? 'YOU' : '[IDENTITY CONCEALED]'}
+                                                </p>
+                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topMasterScore}</p>
+                                                {masterWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                            </div>
+                                        </div>
+
+                                        {/* Game Stats */}
+                                        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+                                            <p className="text-xs text-white/30 uppercase tracking-widest mb-4 font-mono">TRIAL COMPLETE</p>
+                                            <div className="grid grid-cols-3 gap-4 text-center">
+                                                <div>
+                                                    <p className="text-2xl font-mono font-bold text-white">6/6</p>
+                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">ROUNDS</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-2xl font-mono font-bold text-green-500">♣ KING</p>
+                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">DIFFICULTY</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-2xl font-mono font-bold text-white">{playerWins ? '+' : masterWins ? '-' : '±'}{Math.abs(topPlayerScore - topMasterScore)}</p>
+                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">MARGIN</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Return Button */}
+                                        <button
+                                            onClick={() => window.location.href = '/home'}
+                                            className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
+                                        >
+                                            RETURN TO LOBBY
+                                        </button>
+
+                                        <p className="text-xs text-white/20 font-mono uppercase tracking-widest">
+                                            GAME ID: CLUBS_KING • ROUND: 6/6
+                                        </p>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* RESET OVERRIDE OVERLAY */}
+            {
+                showResetOverlay && (
+                    <div className="fixed inset-0 bg-black/98 backdrop-blur-lg z-[2000] flex items-center justify-center animate-in fade-in duration-300">
+                        <div className="text-center space-y-6 max-w-md px-8">
+                            {/* Warning Icon */}
+                            <div className="mx-auto w-24 h-24 rounded-full border-4 border-red-500 flex items-center justify-center animate-pulse">
+                                <svg className="w-12 h-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+
+                            {/* Title */}
+                            <div className="space-y-2">
+                                <h1 className="text-4xl font-cinzel font-bold text-red-500 uppercase tracking-widest">
+                                    SYSTEM OVERRIDE
+                                </h1>
+                                <div className="h-px w-48 mx-auto bg-gradient-to-r from-transparent via-red-500 to-transparent" />
+                            </div>
+
+                            {/* Message */}
+                            <div className="space-y-3">
+                                <p className="text-xl font-bold text-white uppercase tracking-wider">
+                                    PROTOCOL TERMINATED
+                                </p>
+                                <p className="text-sm text-white/60 font-mono">
+                                    Game Master Reset Initiated
+                                </p>
+                                <p className="text-xs text-white/40 font-mono">
+                                    Awaiting confirmation
+                                </p>
+                            </div>
+
+                            {/* Button */}
+                            <div className="pt-4">
+                                <button
+                                    onClick={() => window.location.href = '/home'}
+                                    className="px-8 py-3 bg-red-500/10 border border-red-500 hover:bg-red-500 hover:text-black text-red-500 font-bold font-mono tracking-widest transition-all uppercase"
+                                >
+                                    RETURN TO LOBBY
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* DEBUG OVERLAY */}
+            <div className="fixed bottom-0 right-0 p-2 bg-black/80 text-[8px] font-mono text-green-500 pointer-events-none z-[9999]">
+                <p>STATE: {gameState}</p>
+                <p>ROUND: {round}</p>
+                <p>EXPIRY: {phaseExpiry?.toISOString() || 'NULL'}</p>
+                <p>TIMELEFT: {timeLeft}</p>
+            </div>
+        </div >
+    );
+};
