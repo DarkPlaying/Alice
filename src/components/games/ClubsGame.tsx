@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timer, Shield, CheckCircle2, MessageSquare, X } from 'lucide-react';
+import { Timer, Shield, CheckCircle2, MessageSquare, X, FileText } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { ClubsGameMaster } from './ClubsGameMaster';
 import { Loader } from '../Loader';
+import { ClubsPointsTable } from './ClubsPointsTable';
 
 interface ClubsGameProps {
     onComplete: (score: number) => void;
@@ -78,6 +79,39 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     const [topPlayerScore, setTopPlayerScore] = useState(0);
     const [topPlayerId, setTopPlayerId] = useState<string | null>(null);
     const [topMasterScore, setTopMasterScore] = useState(0);
+
+    // Points Table State
+    const [showPointsTable, setShowPointsTable] = useState(false);
+
+    // Hint Cards State (Tactical Intel)
+    const [hintCards, setHintCards] = useState<string[]>([]);
+
+    useEffect(() => {
+        if ((round === 1 || round === 4) && masterSelection && masterSelection.angel && masterSelection.demon && cards.length > 0) {
+            const targets = masterSelection;
+            const otherCards = cards.filter(c =>
+                c.id !== targets.angel &&
+                c.id !== targets.demon &&
+                !c.isRemoved
+            );
+
+            // True Random Decoy Selection (Shuffle then Pick)
+            const shuffledOthers = [...otherCards].sort(() => Math.random() - 0.5);
+            const randoms = shuffledOthers.slice(0, 2);
+
+            const combinedIds = [
+                targets.angel!,
+                targets.demon!,
+                ...randoms.map(c => c.id)
+            ];
+
+            // True Random Display Order
+            const finalHintList = [...combinedIds].sort(() => Math.random() - 0.5);
+            setHintCards(finalHintList);
+        } else {
+            setHintCards([]);
+        }
+    }, [round, masterSelection?.angel, masterSelection?.demon, cards.length]);
 
     // Player ID Mapping (UID → #PLAYER_XXX)
     const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
@@ -196,6 +230,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
         if (status.scores && status.scores.current) {
             const currentScores = status.scores.current;
+
             const myUid = auth.currentUser?.uid || '';
 
             // Get my own score - TOTAL ACCUMULATED POINTS
@@ -1013,7 +1048,16 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             </AnimatePresence>
 
             {/* HEADER HUB - Consolidated with Main Header */}
-            <div className="px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0">
+            <div className="px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0 relative">
+                {/* POINTS TABLE BUTTON */}
+                <button
+                    onClick={() => setShowPointsTable(true)}
+                    className="sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[10px] font-bold uppercase tracking-widest transition-all mb-2 sm:mb-0"
+                >
+                    <FileText size={14} />
+                    <span>Rules & Points</span>
+                </button>
+
                 <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
                     <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
                         {/* ROUND */}
@@ -1100,29 +1144,83 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         {/* My Selection Display Setup */}
                         {(gameState === 'setup' || gameState === 'setup_phase1' || gameState === 'selection_reveal') && (
                             <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${selection.angel ? 'border-yellow-500 bg-yellow-500/10' : 'border-white/10 bg-white/5'} text-center w-20 sm:w-24`}>
-                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1 leading-none">TEAM ANGEL</p>
-                                    <p className="text-[5px] sm:text-[6px] text-red-500 uppercase tracking-widest mb-1 leading-none">MASTER HUNTS</p>
-                                    <p className="text-base sm:text-lg font-black text-yellow-500">{cards.find(c => c.id === selection.angel)?.rank || '-'}</p>
+                                <div className={`relative px-3 py-2 sm:px-4 sm:py-3 rounded-lg border transition-all duration-300 ${selection.angel ? 'border-yellow-500/50 bg-yellow-500/10 shadow-[0_0_15px_rgba(234,179,8,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[80px] sm:min-w-[100px]`}>
+                                    <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-yellow-500/30 to-transparent" />
+                                    <p className="text-[7px] sm:text-[8px] text-yellow-500/70 font-black uppercase tracking-[0.2em] mb-1 leading-none">TEAM ANGEL</p>
+                                    <p className="text-[5px] sm:text-[6px] text-white/30 uppercase tracking-widest mb-1 leading-none">MASTER HUNTS</p>
+                                    <p className="text-base sm:text-lg font-mono font-black text-white">{cards.find(c => c.id === selection.angel)?.rank || '-'}</p>
                                 </div>
-                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${selection.demon ? 'border-red-500 bg-red-500/10' : 'border-white/10 bg-white/5'} text-center w-20 sm:w-24`}>
-                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1 leading-none">TEAM DEMON</p>
-                                    <p className="text-[5px] sm:text-[6px] text-green-500 uppercase tracking-widest mb-1 leading-none">MASTER AVOIDS</p>
-                                    <p className="text-base sm:text-lg font-black text-red-500">{cards.find(c => c.id === selection.demon)?.rank || '-'}</p>
+                                <div className={`relative px-3 py-2 sm:px-4 sm:py-3 rounded-lg border transition-all duration-300 ${selection.demon ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[80px] sm:min-w-[100px]`}>
+                                    <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-red-500/30 to-transparent" />
+                                    <p className="text-[7px] sm:text-[8px] text-red-500/70 font-black uppercase tracking-[0.2em] mb-1 leading-none">TEAM DEMON</p>
+                                    <p className="text-[5px] sm:text-[6px] text-white/30 uppercase tracking-widest mb-1 leading-none">MASTER AVOIDS</p>
+                                    <p className="text-base sm:text-lg font-mono font-black text-white">{cards.find(c => c.id === selection.demon)?.rank || '-'}</p>
                                 </div>
 
-                                <div className="hidden sm:block h-8 w-px bg-white/10 mx-2" />
+                                <div className="hidden sm:block h-8 w-px bg-white/5 mx-2" />
 
-                                <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded border ${masterLocked ? 'border-red-500/50 bg-red-900/10' : 'border-white/10 bg-white/5'} text-center min-w-[90px] sm:w-32`}>
-                                    <p className="text-[7px] sm:text-[8px] text-white/30 uppercase tracking-widest mb-1">MASTER STATUS</p>
+                                <div className={`px-3 py-2 sm:px-4 sm:py-3 rounded-lg border transition-all duration-300 ${masterLocked ? 'border-red-500/30 bg-red-500/5 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[100px] sm:min-w-[120px]`}>
+                                    <p className="text-[7px] sm:text-[8px] text-white/30 font-black uppercase tracking-[0.2em] mb-1.5">MASTER STATUS</p>
                                     <div className="flex items-center justify-center gap-2">
                                         {masterLocked ? <Shield size={14} className="text-red-500" /> : <div className="w-3 h-3 rounded-full border border-white/20 border-t-white animate-spin" />}
-                                        <p className="text-[9px] sm:text-xs font-bold text-white">{masterLocked ? 'LOCKED' : 'DECIDING...'}</p>
+                                        <p className="text-[9px] sm:text-xs font-mono font-bold text-white/60">{masterLocked ? 'LOCKED' : 'HYPOTHESIZING...'}</p>
                                     </div>
                                 </div>
                             </div>
                         )}
+
+
+
                     </div>
+
+                    {/* Tactical Intel Section - Placed between HUD and Grid */}
+                    <AnimatePresence>
+                        {(round === 1 || round === 4) && gameState === 'playing' && hintCards.length > 0 && (
+                            <div className="flex justify-center mb-8 px-4">
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                    className="relative px-6 py-4 bg-[#0F0F15]/90 border border-purple-500/30 rounded-2xl backdrop-blur-2xl shadow-[0_0_50px_rgba(168,85,247,0.15)] flex flex-col items-center gap-4 overflow-hidden group max-w-sm w-full"
+                                >
+                                    {/* Scanline Effect */}
+                                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-purple-500/10 to-transparent h-[200%] -translate-y-full group-hover:animate-scan-slow pointer-events-none" />
+
+                                    <div className="flex items-center justify-between w-full z-10 px-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)] animate-pulse" />
+                                            <span className="text-[11px] font-black text-purple-400 tracking-[0.4em] uppercase">TACTICAL_INTEL_SYSTEM</span>
+                                        </div>
+                                        <span className="text-[9px] font-mono text-white/30 tracking-[0.2em] uppercase">V_2.4.0</span>
+                                    </div>
+
+                                    <div className="flex gap-3 z-10">
+                                        {hintCards.map(hId => {
+                                            const card = cards.find(c => c.id === hId);
+                                            const rank = card?.rank || '?';
+                                            const suit = card?.suit || 'clubs';
+                                            const symbol = suit === 'hearts' ? '♥' : suit === 'diamonds' ? '♦' : suit === 'spades' ? '♠' : '♣';
+                                            const color = (suit === 'hearts' || suit === 'diamonds') ? 'text-red-500' : 'text-white';
+
+                                            return (
+                                                <div key={hId} className="w-12 h-16 rounded-xl bg-white/[0.04] border border-white/10 flex flex-col items-center justify-center shadow-2xl transition-all duration-500 hover:border-purple-500/60 hover:bg-white/[0.08] hover:scale-110 group/card">
+                                                    <span className={`text-lg font-mono font-black ${color} leading-none mb-1 group-hover/card:scale-110 transition-transform`}>{rank}</span>
+                                                    <span className={`text-[10px] ${color} opacity-60`}>{symbol}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="w-full h-px bg-gradient-to-r from-transparent via-purple-500/20 to-transparent" />
+
+                                    <div className="flex flex-col items-center gap-1 z-10">
+                                        <p className="text-[9px] text-white/50 font-mono uppercase tracking-[0.1em] text-center">SYSTEM ANALYSIS: MASTER CHOICE INTERCEPTED</p>
+                                        <p className="text-[7px] text-purple-500/60 font-mono uppercase tracking-[0.3em] font-bold">CONTAINS: 1A | 1D | 2 DECOYS</p>
+                                    </div>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
 
                     {/* CARDS GRID */}
                     <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-4 max-w-6xl mx-auto">
@@ -1193,13 +1291,6 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                         alt={`${card.rank} of ${card.suit}`}
                                     />
 
-                                    {/* Phase 1 Selection Labels - PERSISTENT */}
-                                    {(() => {
-                                        if (isSelectedAngel || isSelectedDemon) {
-                                            console.log('[LABEL DEBUG]', { card: card.id, isSelectedAngel, isSelectedDemon, selection });
-                                        }
-                                        return null;
-                                    })()}
                                     {isSelectedAngel && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-yellow-500 text-black font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(234,179,8,0.5)] border border-yellow-400">MY ANGEL</div>}
                                     {isSelectedDemon && <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] bg-red-600 text-white font-black px-3 py-1 rounded-full uppercase tracking-widest z-20 whitespace-nowrap shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-500">MY DEMON</div>}
 
@@ -1216,7 +1307,6 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             {/* Show Global Votes Count */}
                                             <div className="absolute top-2 right-2 z-30">
                                                 {(() => {
-                                                    // Merge local vote for instant feedback
                                                     const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
                                                     const effectiveVotes = { ...globalVotes, [myId]: myVote };
                                                     const count = Object.values(effectiveVotes).filter(votes => votes.includes(card.id)).length;
@@ -1273,7 +1363,6 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             {card.playerRole === 'demon' && <span className="text-purple-400 font-bold uppercase text-[10px]">YOUR DEMON</span>}
                                         </div>
                                     )}
-
                                 </motion.div>
                             );
                         })}
@@ -1508,7 +1597,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                         {msg.text}
                                     </div>
                                     <span className="text-[8px] text-white/40 mt-1 uppercase font-mono tracking-wider">
-                                        {(msg.userId && playerIdMap[msg.userId]) || msg.user}
+                                        {(msg.userId && playerIdMap[msg.userId as string]) || msg.user}
                                     </span>
                                 </div>
                             ))}
@@ -1529,6 +1618,13 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* POINTS TABLE MODAL */}
+            <ClubsPointsTable
+                isOpen={showPointsTable}
+                onClose={() => setShowPointsTable(false)}
+                currentRound={round}
+            />
 
             {/* GAME OVER OVERLAY */}
             <AnimatePresence>
@@ -1565,7 +1661,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             <div className={`p-4 sm:p-8 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
                                                 <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP PLAYER</p>
                                                 <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-2 truncate">
-                                                    {topPlayerId ? (playerIdMap[topPlayerId] || topPlayerId.slice(0, 8) + '...') : '--'}
+                                                    {topPlayerId ? (playerIdMap[topPlayerId as string] || topPlayerId.slice(0, 8) + '...') : '--'}
                                                 </p>
                                                 <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
                                                 {playerWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
@@ -1575,7 +1671,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
                                                 <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
                                                 <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
-                                                    {playerIdMap[auth.currentUser?.uid || ''] || user?.username || 'YOU'}
+                                                    {playerIdMap[(auth.currentUser?.uid || '') as string] || user?.username || 'YOU'}
                                                 </p>
                                                 <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
                                                 <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
@@ -1671,8 +1767,11 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 )}
             </AnimatePresence>
 
+
             {/* Background Texture */}
             <div className="absolute inset-0 opacity-[0.03] pointer-events-none z-0" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
         </div>
     );
 };
+
+export default ClubsGame;

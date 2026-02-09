@@ -38,6 +38,11 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     const [detectorActive, setDetectorActive] = useState(false);
     const [hasUsedRefreshSession, setHasUsedRefreshSession] = useState(false);
     const [hasUsedDetectorSession, setHasUsedDetectorSession] = useState(false);
+    const [powerUsage, setPowerUsage] = useState({
+        hasUsedRefresh: false,
+        hasUsedDetector: false,
+        hasUsedFiveSlots: false
+    });
     const [protocolToasts, setProtocolToasts] = useState<{ id: string, message: string, type: 'info' | 'error' | 'success' }[]>([]);
 
     const addToast = (message: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -48,6 +53,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // Drag and Drop refs
     const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
+    const handScrollerRef = useRef<HTMLDivElement | null>(null);
 
     // Refs
     const gameStateRef = useRef<DiamondsGameState | null>(null);
@@ -60,6 +66,22 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         gameStateRef.current = gameState;
     }, [gameState]);
 
+    // Wheel-to-Scroll Logic for Deployment Hand
+    useEffect(() => {
+        const scroller = handScrollerRef.current;
+        if (!scroller) return;
+
+        const handleWheel = (e: WheelEvent) => {
+            if (e.deltaY !== 0) {
+                e.preventDefault();
+                scroller.scrollLeft += e.deltaY;
+            }
+        };
+
+        scroller.addEventListener('wheel', handleWheel, { passive: false });
+        return () => scroller.removeEventListener('wheel', handleWheel);
+    }, [gameState?.phase]);
+
     // Reset Detector Power UI between rounds
     useEffect(() => {
         if (gameState?.current_round) {
@@ -68,8 +90,8 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
     }, [gameState?.current_round]);
 
-    const isMaster = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'master' || user?.username?.toLowerCase() === 'admin' || user?.username?.toUpperCase() === 'SANJAY';
-    const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.username?.toLowerCase() === 'admin' || user?.username?.toUpperCase() === 'SANJAY';
+    const isMaster = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'master' || user?.username?.toLowerCase() === 'admin' || user?.username?.toLowerCase() === 'sanjay';
+    const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.username?.toLowerCase() === 'admin' || user?.username?.toLowerCase() === 'sanjay';
     const isMasterRole = user?.role?.toLowerCase() === 'master';
 
     // Log roles once
@@ -84,6 +106,12 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             });
         }
     }, [user, isAdmin, isMaster, isMasterRole]);
+
+    // Debug tracking for assets
+    useEffect(() => {
+        const available = myHand.filter(c => !mySlots.some(s => s?.id === c.id));
+        console.log(`[DIAMONDS_DEBUG] Phase: ${gameState?.phase}, Total: ${myHand.length}, Available: ${available.length}`);
+    }, [gameState?.phase, myHand, mySlots]);
 
     // Fetch Player ID Mapping from Firebase (Consistent Anonymity)
     useEffect(() => {
@@ -141,6 +169,31 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
     }, [isMasterRole]);
 
+    // Distributed Heartbeat Keeper: If paused, the engine needs to "slide" the start time forward
+    // to preserve the remaining time. Only one client does this.
+    useEffect(() => {
+        if (!gameState?.is_paused || isProcessingRef.current) return;
+
+        const keepAlivePause = async () => {
+            // Election: only one browser updates to move the start time forward by 2s
+            const now = new Date().toISOString();
+            const nextStart = new Date(new Date(gameState.phase_started_at!).getTime() + 2000).toISOString();
+
+            const { count } = await supabase.from('diamonds_game_state')
+                .update({ phase_started_at: nextStart, updated_at: now }, { count: 'exact' })
+                .eq('id', GAME_ID)
+                .eq('is_paused', true)
+                .eq('phase_started_at', gameState.phase_started_at);
+
+            if (count && count > 0) {
+                console.log("[DIAMONDS_ENGINE] Pause Keeper: Sliding start time forward to freeze timer.");
+            }
+        };
+
+        const interval = setInterval(keepAlivePause, 2000);
+        return () => clearInterval(interval);
+    }, [gameState?.is_paused, gameState?.phase_started_at]);
+
     const PHASE_TIMINGS: Record<DiamondsPhase, number> = {
         idle: 0,
         briefing: 10,
@@ -171,11 +224,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         console.log(`[DIAMONDS_ENGINE] Phase Timeout detected: ${current}. Round: ${round}. Admin: ${isAdmin}.`);
 
         try {
-            if (!isAdmin) {
-                console.log("[DIAMONDS_ENGINE] Not an Admin/Master. Skipping authoritative transition.");
-                isProcessingRef.current = false;
-                return;
-            }
+            console.log(`[DIAMONDS_ENGINE] Attempting distributed transition...`);
 
             console.log(`[DIAMONDS_ENGINE] ---------------------------------------`);
             console.log(`[DIAMONDS_ENGINE] STARTING TRANSITION FROM ${current.toUpperCase()}`);
@@ -215,21 +264,31 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     };
 
     const transitionTo = async (nextPhase: DiamondsPhase, nextRound: number = gameState?.current_round || 1) => {
-        if (!isAdmin) {
+        const currentState = gameStateRef.current;
+        if (!currentState) {
             isProcessingRef.current = false;
             return;
         }
 
-        const currentState = gameStateRef.current;
-        if (currentState?.phase === nextPhase && currentState?.current_round === nextRound && nextPhase !== 'briefing') {
-            console.log(`[DIAMONDS_ENGINE] Already in phase ${nextPhase} (Round ${nextRound}). Skipping.`);
+        // --- DISTRIBUTED ELECTION SYSTEM ---
+        // Only one browser can "win" the transition master role by successfully updating the record 
+        // with the specific current phase/round constraint.
+        const now = new Date().toISOString();
+        const { count, error: electionError } = await supabase.from('diamonds_game_state')
+            .update({ updated_at: now }, { count: 'exact' })
+            .eq('id', GAME_ID)
+            .eq('phase', currentState.phase)
+            .eq('current_round', currentState.current_round);
+
+        if (electionError || count === 0) {
+            console.log(`[DIAMONDS_ENGINE] Election Lost (Count: ${count}). Transition to ${nextPhase} handled by another browser.`);
             isProcessingRef.current = false;
             return;
         }
+
+        console.log(`[DIAMONDS_ENGINE] Election WON. Executing transition to ${nextPhase} (Round ${nextRound})...`);
 
         console.log(`[DIAMONDS_ENGINE] Transitioning to ${nextPhase} (Round ${nextRound})`);
-
-        const now = new Date().toISOString();
 
         try {
             // 1. Robust Participant Fetch
@@ -290,7 +349,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     .filter(u => {
                         const isCandidate = candidateIds.length > 0 ? candidateIds.includes(u.id) : true;
                         const isMaster = u.role === 'master' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
-                        const isAllowed = isCandidate && (!isMaster || u.username === 'SANJAY');
+                        const isAllowed = isCandidate && (!isMaster || u.username?.toLowerCase() === 'sanjay');
                         if (!isAllowed) console.log(`[DIAMONDS_BRIEFING] Filtered out: ${u.username} (CandidateMatch: ${isCandidate}, IsMaster: ${isMaster})`);
                         return isAllowed;
                     })
@@ -313,6 +372,13 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                 console.log(`[DIAMONDS_BRIEFING] Final Initial Participants Count: ${initialParticipants.length}`);
 
+                // USER REQUEST: Reset local powers state for immediate UI feedback
+                setPowerUsage({
+                    hasUsedRefresh: false,
+                    hasUsedDetector: false,
+                    hasUsedFiveSlots: false
+                });
+
                 // ENGINE RESET
                 roundRef.current = 0;
 
@@ -321,6 +387,22 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 await supabase.from('diamonds_hands').delete().eq('game_id', GAME_ID);
                 await supabase.from('diamonds_slots').delete().eq('game_id', GAME_ID);
                 console.log("[DIAMONDS_BRIEFING] DB State Purged.");
+
+                // 6. SYNC PARTICIPANTS TO DB (For authoritative round handling)
+                const participantsToSync = initialParticipants.map(p => ({
+                    id: p.id,
+                    game_id: GAME_ID,
+                    username: p.username,
+                    score: p.score,
+                    status: p.status,
+                    groupId: p.groupId || null,
+                    // USER REQUEST: Reset power flags in DB for new game session
+                    hasUsedRefresh: false,
+                    hasUsedDetector: false,
+                    hasUsedFiveSlots: false
+                }));
+                const { error: syncError } = await supabase.from('diamonds_participants').upsert(participantsToSync);
+                if (syncError) console.error("[DIAMONDS_ENGINE] Participants Sync Failed:", syncError);
 
                 updates.participants = initialParticipants;
                 updates.round_data = {}; // Reset data
@@ -346,7 +428,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                             const pSlotRecord = lastSlots.find(s => s.player_id === p.id);
                             if (!pSlotRecord?.slots) continue;
 
-                            const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).single();
+                            const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
                             if (!handData) continue;
 
                             let updatedHand = handData.cards as DiamondsCard[];
@@ -447,25 +529,38 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                     // USER REQUEST: Auto-pick logic
                     // If not authorized OR 0 cards slotted, we force 1 card.
-                    const isAuthorized = p.hasUsedFiveSlots;
+                    // REFINED: Only force 1 card if they HAHA haven't slotted ANYTHING OR they are NOT authorized for 5 slots.
+                    // But if they HAVE slotted cards, we should respect them up to their auth limit.
+                    const isAuthorized = p.hasUsedFiveSlots || (slotsMap.get(p.id)?.length || 0) > 1; // If they have > 1, they likely intended to use power
+
+                    // Actually, the real logic should be: 
+                    // 1. If slots are empty -> pick 1 random.
+                    // 2. If slots have >1 but p.hasUsedFiveSlots is false (from PREVIOUS rounds) -> this is their 5-slot turn!
+                    // 3. If p.hasUsedFiveSlots is TRUE (already used power in past round) -> force 1 card.
+
+                    const alreadyUsedPower = p.hasUsedFiveSlots;
                     const cardsCount = pSlots.filter(s => s !== null).length;
 
-                    if (!isAuthorized || cardsCount === 0) {
-                        console.log(`[DIAMONDS_ENGINE] AUTO-PICK: ${p.username} (Auth: ${isAuthorized}, Cards: ${cardsCount}). Enforcing 1-card limit.`);
+                    if (cardsCount === 0) {
+                        console.log(`[DIAMONDS_ENGINE] AUTO-PICK: ${p.username} (Empty slots). Enforcing 1-card.`);
                         const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).single();
                         if (handData?.cards && handData.cards.length > 0) {
                             const hand = handData.cards as DiamondsCard[];
-                            // If they had cards but weren't auth, maybe one of them was the one they wanted? 
-                            // Take the first manually slotted if it exists, else random.
-                            const manualUsed = pSlots.find(s => s !== null);
-                            const finalCard = manualUsed || hand[Math.floor(Math.random() * hand.length)];
-
+                            const finalCard = hand[Math.floor(Math.random() * hand.length)];
                             const newSlots = [finalCard, null, null, null, null];
                             slotsMap.set(p.id, newSlots);
                             await supabase.from('diamonds_slots').upsert({
                                 game_id: GAME_ID, player_id: p.id, round: nextRound, slots: newSlots, updated_at: now
                             });
                         }
+                    } else if (cardsCount > 1 && alreadyUsedPower) {
+                        console.log(`[DIAMONDS_ENGINE] AUTO-PICK: ${p.username} (Power Depleted, tried >1). Forcing 1-card.`);
+                        const firstCard = pSlots.find(s => s !== null);
+                        const newSlots = [firstCard, null, null, null, null];
+                        slotsMap.set(p.id, newSlots);
+                        await supabase.from('diamonds_slots').upsert({
+                            game_id: GAME_ID, player_id: p.id, round: nextRound, slots: newSlots, updated_at: now
+                        });
                     }
                 }
 
@@ -483,27 +578,46 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                 for (const p of updatedParticipants) {
 
-                    const { data: currentHandData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).single();
+                    const { data: currentHandData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
 
                     if (currentHandData) {
                         let hand = currentHandData.cards as DiamondsCard[];
                         let updatedHand = [...hand];
 
 
-                        // 1. Process Transformations (Cures) only in this phase
+                        // 1. Process Transformations (Cures or Shotgun Shatters) only in this phase
                         // NOTE: Cards are fully "spent" (removed) at the end of the Picking phase to allow for stealing.
                         results.forEach(res => {
                             res.effects?.forEach((ef: any) => {
                                 if (ef.type === 'cured' && ef.playerId === p.id) {
-                                    // Use p.slots because evaluateRound transformed it
-                                    const transformedSlot = p.slots[ef.slotIndex];
-                                    if (transformedSlot) {
-                                        const hIdx = updatedHand.findIndex(c => c.id === ef.originalCardId);
-                                        if (hIdx !== -1) {
-                                            // Permanently replace the Zombie with the new card in the hand
-                                            updatedHand[hIdx] = { ...transformedSlot };
-                                            console.log(`[DIAMONDS_ENGINE] TRANSFORMED HAND: ${p.username} cured. Asset ID ${ef.originalCardId} is now ${transformedSlot.rank}.`);
-                                        }
+                                    // EXTRACT: New rank value and optional slot index from description
+                                    const newValMatch = ef.desc?.match(/TO (\d+)/);
+                                    const newVal = newValMatch ? parseInt(newValMatch[1]) : (Math.floor(Math.random() * 8) + 2);
+
+                                    const hIdx = updatedHand.findIndex(c => c.id === ef.originalCardId);
+                                    if (hIdx !== -1) {
+                                        // Create replacement card
+                                        const ts = Date.now().toString().slice(-4);
+                                        const replacement: DiamondsCard = {
+                                            id: `trans_${ts}_${p.id.slice(0, 3)}_${hIdx}`,
+                                            type: 'standard',
+                                            rank: newVal.toString(),
+                                            suit: 'hearts', // Standard theme
+                                            value: newVal,
+                                            isRevealed: true
+                                        };
+
+                                        // Permanently replace the Zombie with the new card in the hand
+                                        updatedHand[hIdx] = replacement;
+
+                                        // If it's in a slot, update that too (even if not explicitly mentioned by slotIndex)
+                                        p.slots.forEach((s, sIdx) => {
+                                            if (s?.id === ef.originalCardId) {
+                                                p.slots[sIdx] = replacement;
+                                            }
+                                        });
+
+                                        console.log(`[DIAMONDS_ENGINE] NEUTRALIZED ASSET: ${p.username} zombie replaced with ${newVal}.`);
                                     }
                                 }
                             });
@@ -564,7 +678,8 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             if (nextPhase === 'scoring') {
                 // MODULAR: Apply Scores
                 const battleResults = gameStateRef.current?.round_data?.results || [];
-                const { updatedParticipants } = updateScores(participants, battleResults);
+                const isFinalRound = (gameStateRef.current?.current_round || 0) === 5;
+                const { updatedParticipants } = updateScores(participants, battleResults, isFinalRound);
 
                 // --- POST-COMBAT RESOURCE AUDIT ---
                 // If any player has 0 cards, they are eliminated
@@ -575,7 +690,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         continue;
                     }
 
-                    const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).single();
+                    const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
                     const handSize = (handData?.cards as any[])?.length || 0;
 
                     if (handSize === 0) {
@@ -587,6 +702,18 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 }
 
                 updates.participants = finalParticipants;
+
+                // CRITICAL: Synchronize scores with persistent diamonds_participants table
+                // This prevents fetchMyParticipantStatus from overwriting scores with stale data
+                for (const p of finalParticipants) {
+                    await supabase.from('diamonds_participants')
+                        .update({
+                            score: p.score,
+                            status: p.status,
+                            roundAdjustment: p.roundAdjustment
+                        })
+                        .eq('id', p.id);
+                }
             }
 
             if (nextPhase === 'idle' || nextPhase === 'briefing') {
@@ -629,6 +756,13 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     useEffect(() => {
         const syncTimer = () => {
             if (!gameState?.phase_started_at) return;
+
+            // PAUSE LOGIC: Freeze UI timer if game is paused
+            if (gameState.is_paused) {
+                if (gameState.phase_duration_sec !== undefined) setTimeLeft(gameState.phase_duration_sec);
+                return;
+            }
+
             const start = new Date(gameState.phase_started_at).getTime();
             const duration = gameState.phase_duration_sec || 0;
             const now = Date.now();
@@ -637,7 +771,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             setTimeLeft(remaining);
 
             // AUTHORITY TRIGGER
-            if (remaining <= 0 && isMaster && !gameState.is_paused) {
+            if (remaining <= 0) {
                 if (isProcessingRef.current) {
                     console.log(`[DIAMONDS_ENGINE] Heartbeat: Timer at ${remaining}s. Engine BUSY.`);
                 } else {
@@ -658,6 +792,11 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
         const handleUpdate = (data: any) => {
             console.log("[DIAMONDS_PLAYER] Game State Received:", data);
+            if (gameState?.phase !== data.phase) {
+                if (['evaluation', 'picking', 'scoring'].includes(data.phase)) {
+                    fetchMySlots(data);
+                }
+            }
             setGameState(data);
             setIsLoading(false);
 
@@ -677,7 +816,21 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             if (!me && user.username) {
                 me = participants.find((p: any) => p.username?.toLowerCase() === user.username.toLowerCase());
             }
-            setMyPlayer(me);
+
+            // PRIORITY: Prioritize the dedicated participant status over the game state snapshot to prevent "flexing"
+            setMyPlayer(prev => {
+                if (!prev) return me;
+                if (!me) return prev;
+                // Merge critical group/identity info but keep the score/adj from the fresher source
+                return {
+                    ...me,
+                    score: prev.score,
+                    roundAdjustment: prev.roundAdjustment,
+                    status: prev.status,
+                    isZombie: prev.isZombie ?? me.isZombie,
+                    groupId: me.groupId // Snapshots are good for group assignments
+                };
+            });
 
             // CRITICAL: Refresh Hand and Slots on every state change
             fetchMyHand();
@@ -726,10 +879,14 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         };
 
         fetchInitial();
+        fetchMyParticipantStatus();
 
         // 2s POLLING FALLBACK (Resilient Sync)
         const pollInterval = setInterval(() => {
-            if (!document.hidden) fetchInitial();
+            if (!document.hidden) {
+                fetchInitial();
+                fetchMyParticipantStatus();
+            }
         }, 2000);
 
         const channel = supabase
@@ -755,15 +912,51 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // Auto-Start Feature: Trigger briefing if game is idle but active (Admin only)
     useEffect(() => {
-        if (isAdmin && gameState?.phase === 'idle' && gameState?.system_start === true && !isProcessingRef.current) {
-            console.log("[DIAMONDS_ENGINE] Auto-Starting Game from IDLE...");
+        if (gameState?.phase === 'idle' && gameState?.system_start === true && !isProcessingRef.current) {
+            console.log("[DIAMONDS_ENGINE] Detecting system start. Triggering briefing...");
             isProcessingRef.current = true;
             transitionTo('briefing').catch(err => {
-                console.error("[DIAMONDS_ENGINE] Auto-start failed:", err);
+                console.error("[DIAMONDS_ENGINE] Initial start failed:", err);
                 isProcessingRef.current = false;
             });
+        } else if (gameState?.phase === 'idle') {
+            console.log("[DIAMONDS_ENGINE] Idle, waiting for SystemStart signal...", { systemStart: gameState?.system_start });
         }
-    }, [isAdmin, gameState?.phase, gameState?.system_start]);
+    }, [gameState?.phase, gameState?.system_start]);
+
+    // Distributed Ready Check (Skip timers if everyone has slotted)
+    useEffect(() => {
+        if (!gameState || gameState.phase !== 'slotting' || isProcessingRef.current) return;
+
+        const checkAllReady = async () => {
+            const activeParticipants = (gameState.participants || []).filter(p => p.status === 'active');
+            const activeCount = activeParticipants.length;
+            if (activeCount === 0) return;
+
+            const { data: slots, error } = await supabase
+                .from('diamonds_slots')
+                .select('player_id')
+                .eq('game_id', GAME_ID)
+                .eq('round', gameState.current_round);
+
+            if (!error && slots) {
+                // Ensure all active participants have a slot record
+                const slottedIds = new Set(slots.map(s => s.player_id));
+                const allReady = activeParticipants.every(p => slottedIds.has(p.id));
+
+                if (allReady) {
+                    console.log(`[DIAMONDS_ENGINE] All ${activeCount} active players ready. Transitioning...`);
+                    // We don't set isProcessingRef here because transitionTo handles the election
+                    transitionTo('evaluation').catch(err => {
+                        console.error("[DIAMONDS_ENGINE] Ready-check transition failed:", err);
+                    });
+                }
+            }
+        };
+
+        const interval = setInterval(checkAllReady, 3000); // Check every 3s
+        return () => clearInterval(interval);
+    }, [gameState?.phase, gameState?.current_round, gameState?.participants]);
 
     // Safety watchdog for isProcessingRef
     useEffect(() => {
@@ -794,16 +987,40 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
     }, [myHand, gameState?.phase]);
 
+    const fetchMyParticipantStatus = async () => {
+        if (!user?.id) return;
+        const { data, error } = await supabase
+            .from('diamonds_participants')
+            .select('*')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        if (!error && data) {
+            console.log("[DIAMONDS_SYNC] Participant status updated:", data);
+            setMyPlayer(data);
+            setPowerUsage({
+                hasUsedRefresh: data.hasUsedRefresh || false,
+                hasUsedDetector: data.hasUsedDetector || false,
+                hasUsedFiveSlots: data.hasUsedFiveSlots || false
+            });
+        }
+    };
+
     const fetchMyHand = async () => {
-        const { data } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', user.id).single();
+        const { data } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', user.id).maybeSingle();
         if (data) setMyHand(data.cards || []);
     };
 
     const fetchMySlots = async (passedState?: DiamondsGameState) => {
         const round = passedState?.current_round || gameState?.current_round || 1;
         const { data } = await supabase.from('diamonds_slots').select('slots').eq('game_id', GAME_ID).eq('player_id', user.id).eq('round', round).maybeSingle();
-        if (data) setMySlots(data.slots || [null, null, null, null, null]);
-        else setMySlots([null, null, null, null, null]);
+        if (data) {
+            const newSlots = data.slots || [null, null, null, null, null];
+            // Only update if different to prevent animation triggers
+            setMySlots(prev => JSON.stringify(prev) === JSON.stringify(newSlots) ? prev : newSlots);
+        } else {
+            setMySlots(prev => prev.every(s => s === null) ? prev : [null, null, null, null, null]);
+        }
     };
 
     const fetchOpponentSlots = async (passedState?: DiamondsGameState, passedMe?: DiamondsPlayer) => {
@@ -840,13 +1057,13 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         setIsLoading(true);
 
         try {
-            const { data: oppHand } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', targetId).single();
+            const { data: oppHand } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', targetId).maybeSingle();
             if (oppHand) {
                 const newCards = (oppHand.cards as DiamondsCard[]).filter(c => c.id !== card.id);
                 await supabase.from('diamonds_hands').update({ cards: newCards }).eq('id', oppHand.id);
             }
 
-            const { data: myHandData } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', user.id).single();
+            const { data: myHandData } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', user.id).maybeSingle();
             if (myHandData) {
                 const hasAlready = (myHandData.cards as DiamondsCard[]).some(c => c.id === card.id);
                 if (!hasAlready) {
@@ -958,7 +1175,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
 
         if (slottedCount === 5) {
-            if (myPlayer?.hasUsedFiveSlots) {
+            if (powerUsage.hasUsedFiveSlots) {
                 alert("CRITICAL: FULL ARRAY ALREADY DEPLOYED ONCE. YOU ALREADY USED 5 SLOTTED. REDUCE DEPLOYMENT ARRAY.");
                 return;
             }
@@ -982,6 +1199,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 await supabase.from('diamonds_participants')
                     .update({ hasUsedFiveSlots: true })
                     .eq('id', user.id);
+
+                // USER REQUEST: Persistent lock for power limits
+                setTimeout(fetchMyParticipantStatus, 500);
             }
             setIsLocked(true);
         }
@@ -989,7 +1209,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     const handleRefreshHand = async () => {
         if (!user || gameState?.phase !== 'slotting' || isLocked) return;
-        if (myPlayer?.hasUsedRefresh || hasUsedRefreshSession) {
+        if (powerUsage.hasUsedRefresh) {
             addToast("PROTOCOL ERROR: REFRESH CAPABILITIES DEPLETED", "error");
             return;
         }
@@ -1025,6 +1245,10 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             setMyHand(newHand);
             setMySlots([null, null, null, null, null]);
             await supabase.from('diamonds_slots').upsert({ game_id: GAME_ID, player_id: user.id, round: gameState.current_round, slots: [null, null, null, null, null] });
+
+            // USER REQUEST: Core limit enforcement
+            setTimeout(fetchMyParticipantStatus, 500);
+
             addToast("ASSETS REGENERATED. SPECIAL PROTOCOLS PRESERVED.", "success");
         } catch (err) {
             console.error("Refresh failed:", err);
@@ -1036,7 +1260,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     const handleUseDetector = async () => {
         if (!user || gameState?.phase !== 'slotting' || isLocked) return;
-        if (myPlayer?.hasUsedDetector || hasUsedDetectorSession) {
+        if (powerUsage.hasUsedDetector) {
             addToast("PROTOCOL ERROR: DETECTOR CHARGE DEPLETED", "error");
             return;
         }
@@ -1051,6 +1275,10 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 setOpponentHandCounts(counts);
                 setDetectorActive(true);
                 await supabase.from('diamonds_participants').update({ hasUsedDetector: true }).eq('id', user.id);
+
+                // USER REQUEST: Core limit enforcement
+                setTimeout(fetchMyParticipantStatus, 500);
+
                 addToast("SENSOR SWEEP COMPLETE. ASSET COUNTS ACQUIRED.", "success");
             }
         } catch (err) {
@@ -1249,18 +1477,24 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 )}
             </AnimatePresence>
 
-            {/* PAUSE OVERLAY */}
             <AnimatePresence>
                 {gameState?.is_paused && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="absolute inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center"
+                        className="fixed inset-0 w-screen h-screen z-[10000] bg-black/98 backdrop-blur-2xl flex items-center justify-center pointer-events-auto left-0 top-0"
                     >
-                        <div className="text-center space-y-4">
-                            <h2 className="text-4xl font-bold text-yellow-500 tracking-widest">SYSTEM PAUSED</h2>
-                            <p className="text-white/60 font-mono text-sm uppercase">AWAITING MASTER AUTHORIZATION</p>
+                        <div className="text-center space-y-6 p-8">
+                            <div className="relative inline-block">
+                                <div className="absolute inset-0 bg-yellow-500/20 blur-3xl rounded-full animate-pulse" />
+                                <h2 className="text-6xl lg:text-8xl font-black text-yellow-500 tracking-[0.2em] italic relative drop-shadow-[0_0_30px_rgba(234,179,8,0.5)]">
+                                    SYSTEM PAUSED
+                                </h2>
+                            </div>
+                            <p className="text-white/60 font-mono text-lg lg:text-xl uppercase tracking-[0.5em] animate-pulse">
+                                AWAITING MASTER AUTHORIZATION
+                            </p>
                         </div>
                     </motion.div>
                 )}
@@ -1273,179 +1507,181 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[1000] bg-[#050508]/98 backdrop-blur-2xl flex items-center justify-start p-4 sm:p-8 overflow-y-auto"
+                        className="fixed inset-0 z-[1000] bg-[#050508]/98 backdrop-blur-2xl overflow-y-auto custom-scrollbar p-6 lg:p-12"
                     >
-                        {/* High-Tech Background Elements */}
-                        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
-                            <div className="absolute top-0 left-0 w-full h-full bg-[linear-gradient(to_right,#16161a_1px,transparent_1px),linear-gradient(to_bottom,#16161a_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
+                        <div className="min-h-full w-full flex items-start justify-center">
+                            {/* High-Tech Background Elements */}
+                            <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
+                                <div className="absolute top-0 left-0 w-full h-full bg-[linear-gradient(to_right,#16161a_1px,transparent_1px),linear-gradient(to_bottom,#16161a_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
 
-                            {/* Global Scanner Sweep Effect */}
-                            <motion.div
-                                animate={{ top: ["-10%", "110%"] }}
-                                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-                                className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent shadow-[0_0_20px_rgba(168,85,247,1)] z-[1001] opacity-50"
-                            />
-
-                            <motion.div
-                                animate={{ top: ["100%", "-20%"] }}
-                                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-                                className="absolute left-0 right-0 h-40 bg-gradient-to-b from-transparent via-purple-500/10 to-transparent blur-3xl"
-                            />
-                        </div>
-
-                        <div className="relative max-w-[1600px] w-full mx-auto space-y-8 sm:space-y-12 pt-32 sm:pt-48 pb-12 px-4 sm:px-6">
-                            {/* Header Section */}
-                            <motion.div
-                                initial={{ y: -30, opacity: 0 }}
-                                animate={{ y: 0, opacity: 1 }}
-                                className="text-center space-y-4 relative mb-16"
-                            >
-                                {/* Decorative Ring */}
-                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none" />
-
-                                <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full border border-purple-400/20 bg-purple-950/40 text-[10px] font-black text-purple-300 uppercase tracking-[0.4em] mb-4 backdrop-blur-md">
-                                    <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
-                                    <span>Security Update: Advanced Asset Protocol</span>
-                                    <span className="ml-4 pl-4 border-l border-purple-500/30 text-white animate-pulse">
-                                        System Ready: {timeLeft}s
-                                    </span>
-                                </div>
-
-                                <h1 className="font-cinzel text-3xl md:text-8xl text-white uppercase tracking-tighter leading-none relative z-10 transition-all">
-                                    LOGIC <span className="text-transparent bg-clip-text bg-gradient-to-b from-purple-300 via-purple-500 to-purple-800 drop-shadow-[0_0_20px_rgba(168,85,247,0.5)] animate-pulse">PROTOCOL</span>
-                                    <motion.div
-                                        animate={{ opacity: [0, 0.05, 0], x: [-5, 5, -2, 0] }}
-                                        transition={{ duration: 0.2, repeat: Infinity, repeatDelay: 5 }}
-                                        className="absolute inset-0 text-purple-500 blur-sm -z-10 select-none font-cinzel text-3xl md:text-8xl"
-                                    >
-                                        LOGIC PROTOCOL
-                                    </motion.div>
-                                </h1>
-
-                                <div className="flex items-center justify-center gap-3">
-                                    <div className="h-px w-12 bg-gradient-to-r from-transparent to-purple-500/30" />
-                                    <p className="text-purple-300/40 font-cinzel text-[10px] tracking-[0.4em] font-black uppercase">
-                                        [CORE LOGIC STABILIZED] :: Authorized Blueprint
-                                    </p>
-                                    <div className="h-px w-12 bg-gradient-to-l from-transparent to-purple-500/30" />
-                                </div>
-                            </motion.div>
-
-                            {/* MAIN BRIEFING CONTENT GRID */}
-                            <div className="flex flex-col xl:flex-row items-stretch justify-center gap-8 relative z-10">
-                                {/* LEFT: Array Constraints */}
+                                {/* Global Scanner Sweep Effect */}
                                 <motion.div
-                                    initial={{ x: -50, opacity: 0 }}
-                                    animate={{ x: 0, opacity: 1 }}
-                                    transition={{ delay: 0.2 }}
-                                    className="w-full xl:w-[280px] shrink-0 self-stretch"
-                                >
-                                    <TerminalBox title="Array Constraints" icon={<Scan size={16} />}>
-                                        <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/40 h-full">
-                                            <table className="w-full text-left font-cinzel text-[11px] border-collapse h-full">
-                                                <thead>
-                                                    <tr className="bg-purple-500/10 border-b border-purple-500/20">
-                                                        <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest border-r border-purple-500/10">Protocol</th>
-                                                        <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest">Constraint</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-purple-500/10">
-                                                    <tr className="hover:bg-purple-500/5 transition-colors">
-                                                        <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold leading-tight">VARIABLE DEPLOYMENT</td>
-                                                        <td className="px-3 py-4 text-white/50 leading-tight">1-5 ASSETS PER ROUND REQ.</td>
-                                                    </tr>
-                                                    <tr className="hover:bg-orange-500/5 transition-colors">
-                                                        <td className="px-3 py-4 text-orange-400/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Overload Principle</td>
-                                                        <td className="px-3 py-4 text-white/50 uppercase leading-tight">ONE 5-CARD DEPLOYMENT SESSION.</td>
-                                                    </tr>
-                                                    <tr className="hover:bg-purple-500/5 transition-colors">
-                                                        <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Asset Recovery</td>
-                                                        <td className="px-3 py-4 text-white/50 uppercase leading-tight">WINNERS STEAL 1 FROM DEFEATED.</td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </TerminalBox>
-                                </motion.div>
+                                    animate={{ top: ["-10%", "110%"] }}
+                                    transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                                    className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent shadow-[0_0_20px_rgba(168,85,247,1)] z-[1001] opacity-50"
+                                />
 
-                                {/* CENTER COLUMN: Cards + Point Table */}
-                                <div className="flex-1 flex flex-col">
-                                    {/* Asset Cards Grid */}
-                                    <div className="flex flex-wrap lg:flex-nowrap justify-center items-stretch gap-4 pb-0">
-                                        <BriefingCard
-                                            title="ZOMBIE"
-                                            id="28472A"
-                                            desc="OFFENSIVE OVERRIDE. Beats any numeric card. Overrides standard defenses instantly. Vulnerable to tactical serums."
-                                            delay={0.1}
-                                            color="red"
-                                        />
-                                        <BriefingCard
-                                            title="INJECTION"
-                                            id="DVL291"
-                                            desc="NUMERIC STABILIZER. Resets infected arrays to baseline (2-9). Counteracts viral load and stabilizes volatility."
-                                            delay={0.2}
-                                            color="green"
-                                        />
-                                        <BriefingCard
-                                            title="SHOTGUN"
-                                            id="A683BF"
-                                            desc="TARGET ELIMINATION. Instantly neutralizes active threats. High-priority asset for stopping imminent signatures."
-                                            delay={0.3}
-                                            color="orange"
-                                        />
+                                <motion.div
+                                    animate={{ top: ["100%", "-20%"] }}
+                                    transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                                    className="absolute left-0 right-0 h-40 bg-gradient-to-b from-transparent via-purple-500/10 to-transparent blur-3xl"
+                                />
+                            </div>
+
+                            <div className="relative max-w-[1600px] w-full mx-auto space-y-8 sm:space-y-12 pt-16 pb-24 px-4 sm:px-6">
+                                {/* Header Section */}
+                                <motion.div
+                                    initial={{ y: -30, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    className="text-center space-y-4 relative mb-16"
+                                >
+                                    {/* Decorative Ring */}
+                                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none" />
+
+                                    <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full border border-purple-400/20 bg-purple-950/40 text-[10px] font-black text-purple-300 uppercase tracking-[0.4em] mb-4 backdrop-blur-md">
+                                        <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
+                                        <span>Security Update: Advanced Asset Protocol</span>
+                                        <span className="ml-4 pl-4 border-l border-purple-500/30 text-white animate-pulse">
+                                            System Ready: {timeLeft}s
+                                        </span>
                                     </div>
 
-                                    {/* Point Table Reference - Tightly packed */}
-                                    <div className="mt-0">
-                                        <TerminalBox title="Numeric Asset Reference Matrix" icon={<Activity size={16} />}>
-                                            <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/60">
-                                                <div className="flex divide-x divide-purple-500/10">
-                                                    {[
-                                                        { rank: '2-10', val: 'FACE VALUE' },
-                                                        { rank: 'J', val: '11 PT' },
-                                                        { rank: 'Q', val: '12 PT' },
-                                                        { rank: 'K', val: '13 PT' },
-                                                        { rank: 'A', val: '14 PT' }
-                                                    ].map((item, idx) => (
-                                                        <div key={idx} className="flex-1 flex flex-col items-center justify-center py-4 px-2 group hover:bg-purple-500/5 transition-all">
-                                                            <span className="text-[7px] font-mono text-purple-500/40 mb-1 group-hover:text-purple-400 uppercase tracking-widest">ASSET_CLASS</span>
-                                                            <span className="font-cinzel text-xl text-white font-black mb-1">{item.rank}</span>
-                                                            <div className="h-[1px] w-4 bg-purple-500/20 mb-2 group-hover:w-8 transition-all" />
-                                                            <span className="text-[10px] font-cinzel font-black text-white/60 group-hover:text-purple-400">{item.val}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                                    <h1 className="font-cinzel text-3xl md:text-8xl text-white uppercase tracking-tighter leading-none relative z-10 transition-all">
+                                        LOGIC <span className="text-transparent bg-clip-text bg-gradient-to-b from-purple-300 via-purple-500 to-purple-800 drop-shadow-[0_0_20px_rgba(168,85,247,0.5)] animate-pulse">PROTOCOL</span>
+                                        <motion.div
+                                            animate={{ opacity: [0, 0.05, 0], x: [-5, 5, -2, 0] }}
+                                            transition={{ duration: 0.2, repeat: Infinity, repeatDelay: 5 }}
+                                            className="absolute inset-0 text-purple-500 blur-sm -z-10 select-none font-cinzel text-3xl md:text-8xl"
+                                        >
+                                            LOGIC PROTOCOL
+                                        </motion.div>
+                                    </h1>
+
+                                    <div className="flex items-center justify-center gap-3">
+                                        <div className="h-px w-12 bg-gradient-to-r from-transparent to-purple-500/30" />
+                                        <p className="text-purple-300/40 font-cinzel text-[10px] tracking-[0.4em] font-black uppercase">
+                                            [CORE LOGIC STABILIZED] :: Authorized Blueprint
+                                        </p>
+                                        <div className="h-px w-12 bg-gradient-to-l from-transparent to-purple-500/30" />
+                                    </div>
+                                </motion.div>
+
+                                {/* MAIN BRIEFING CONTENT GRID */}
+                                <div className="flex flex-col xl:flex-row items-stretch justify-center gap-8 relative z-10">
+                                    {/* LEFT: Array Constraints */}
+                                    <motion.div
+                                        initial={{ x: -50, opacity: 0 }}
+                                        animate={{ x: 0, opacity: 1 }}
+                                        transition={{ delay: 0.2 }}
+                                        className="w-full xl:w-[280px] shrink-0 self-stretch"
+                                    >
+                                        <TerminalBox title="Array Constraints" icon={<Scan size={16} />}>
+                                            <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/40 h-full">
+                                                <table className="w-full text-left font-cinzel text-[11px] border-collapse h-full">
+                                                    <thead>
+                                                        <tr className="bg-purple-500/10 border-b border-purple-500/20">
+                                                            <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest border-r border-purple-500/10">Protocol</th>
+                                                            <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest">Constraint</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-purple-500/10">
+                                                        <tr className="hover:bg-purple-500/5 transition-colors">
+                                                            <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold leading-tight">VARIABLE DEPLOYMENT</td>
+                                                            <td className="px-3 py-4 text-white/50 leading-tight">1-5 ASSETS PER ROUND REQ.</td>
+                                                        </tr>
+                                                        <tr className="hover:bg-orange-500/5 transition-colors">
+                                                            <td className="px-3 py-4 text-orange-400/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Overload Principle</td>
+                                                            <td className="px-3 py-4 text-white/50 uppercase leading-tight">ONE 5-CARD DEPLOYMENT SESSION.</td>
+                                                        </tr>
+                                                        <tr className="hover:bg-purple-500/5 transition-colors">
+                                                            <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Asset Recovery</td>
+                                                            <td className="px-3 py-4 text-white/50 uppercase leading-tight">WINNERS STEAL 1 FROM DEFEATED.</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
                                             </div>
                                         </TerminalBox>
-                                    </div>
-                                </div>
+                                    </motion.div>
 
-                                {/* RIGHT: Conflict Summary */}
-                                <motion.div
-                                    initial={{ x: 50, opacity: 0 }}
-                                    animate={{ x: 0, opacity: 1 }}
-                                    transition={{ delay: 0.2 }}
-                                    className="w-full xl:w-[320px] shrink-0 self-stretch"
-                                >
-                                    <TerminalBox title="Conflict Summary" icon={<Info size={16} />}>
-                                        <div className="space-y-3 p-2 h-full flex flex-col">
-                                            {[
-                                                { label: "WINNER", value: "SUM(ASSETS) > OPPONENT SUM", accent: "purple" },
-                                                { label: "ZOMBIE", value: "OVERRIDES SLOT REGARDLESS OF SUM", accent: "purple" },
-                                                { label: "LIMITS", value: "1Z, 2I, 2S PER TOTAL SESSION", accent: "orange" },
-                                                { label: "SCORING", value: "SURVIVAL: +200CR | LOSS: -100CR", accent: "purple" }
-                                            ].map((item, idx) => (
-                                                <div key={idx} className="flex items-center gap-4 bg-white/[0.02] border border-white/5 p-3 rounded-lg group hover:border-purple-500/30 transition-all flex-1">
-                                                    <div className={`w-1 h-full bg-${item.accent === 'purple' ? 'purple-500' : 'orange-500'} rounded-full opacity-50 group-hover:opacity-100 transition-opacity`} />
-                                                    <div className="flex-1">
-                                                        <p className={`font-cinzel text-[10px] font-black uppercase tracking-[0.2em] text-${item.accent === 'purple' ? 'purple-400' : 'orange-400'} mb-1`}>{item.label}</p>
-                                                        <p className="font-cinzel text-[11px] text-white/50 group-hover:text-white/80 transition-colors uppercase leading-tight">{item.value}</p>
+                                    {/* CENTER COLUMN: Cards + Point Table */}
+                                    <div className="flex-1 flex flex-col">
+                                        {/* Asset Cards Grid */}
+                                        <div className="flex flex-wrap lg:flex-nowrap justify-center items-stretch gap-4 pb-0">
+                                            <BriefingCard
+                                                title="ZOMBIE"
+                                                id="28472A"
+                                                desc="OFFENSIVE OVERRIDE. Beats any numeric card. Overrides standard defenses instantly. Vulnerable to tactical serums."
+                                                delay={0.1}
+                                                color="purple"
+                                            />
+                                            <BriefingCard
+                                                title="INJECTION"
+                                                id="DVL291"
+                                                desc="NUMERIC STABILIZER. Resets infected arrays to baseline (2-9). Counteracts viral load and stabilizes volatility."
+                                                delay={0.2}
+                                                color="green"
+                                            />
+                                            <BriefingCard
+                                                title="SHOTGUN"
+                                                id="A683BF"
+                                                desc="TARGET ELIMINATION. Instantly neutralizes active threats. High-priority asset for stopping imminent signatures."
+                                                delay={0.3}
+                                                color="orange"
+                                            />
+                                        </div>
+
+                                        {/* Point Table Reference - Tightly packed */}
+                                        <div className="mt-0">
+                                            <TerminalBox title="Numeric Asset Reference Matrix" icon={<Activity size={16} />}>
+                                                <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/60">
+                                                    <div className="flex divide-x divide-purple-500/10">
+                                                        {[
+                                                            { rank: '2-10', val: 'FACE VALUE' },
+                                                            { rank: 'J', val: '11 PT' },
+                                                            { rank: 'Q', val: '12 PT' },
+                                                            { rank: 'K', val: '13 PT' },
+                                                            { rank: 'A', val: '14 PT' }
+                                                        ].map((item, idx) => (
+                                                            <div key={idx} className="flex-1 flex flex-col items-center justify-center py-4 px-2 group hover:bg-purple-500/5 transition-all">
+                                                                <span className="text-[7px] font-mono text-purple-500/40 mb-1 group-hover:text-purple-400 uppercase tracking-widest">ASSET_CLASS</span>
+                                                                <span className="font-cinzel text-xl text-white font-black mb-1">{item.rank}</span>
+                                                                <div className="h-[1px] w-4 bg-purple-500/20 mb-2 group-hover:w-8 transition-all" />
+                                                                <span className="text-[10px] font-cinzel font-black text-white/60 group-hover:text-purple-400">{item.val}</span>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
-                                            ))}
+                                            </TerminalBox>
                                         </div>
-                                    </TerminalBox>
-                                </motion.div>
+                                    </div>
+
+                                    {/* RIGHT: Conflict Summary */}
+                                    <motion.div
+                                        initial={{ x: 50, opacity: 0 }}
+                                        animate={{ x: 0, opacity: 1 }}
+                                        transition={{ delay: 0.2 }}
+                                        className="w-full xl:w-[320px] shrink-0 self-stretch"
+                                    >
+                                        <TerminalBox title="Conflict Summary" icon={<Info size={16} />}>
+                                            <div className="space-y-3 p-2 h-full flex flex-col">
+                                                {[
+                                                    { label: "WINNER", value: "SUM(ASSETS) > OPPONENT SUM", accent: "purple" },
+                                                    { label: "ZOMBIE", value: "OVERRIDES SLOT REGARDLESS OF SUM", accent: "purple" },
+                                                    { label: "LIMITS", value: "1Z, 2I, 2S PER TOTAL SESSION", accent: "orange" },
+                                                    { label: "SCORING", value: "SURVIVAL: +200CR | LOSS: -100CR", accent: "purple" }
+                                                ].map((item, idx) => (
+                                                    <div key={idx} className="flex items-center gap-4 bg-white/[0.02] border border-white/5 p-3 rounded-lg group hover:border-purple-500/30 transition-all flex-1">
+                                                        <div className={`w-1 h-full bg-${item.accent === 'purple' ? 'purple-500' : 'orange-500'} rounded-full opacity-50 group-hover:opacity-100 transition-opacity`} />
+                                                        <div className="flex-1">
+                                                            <p className={`font-cinzel text-[10px] font-black uppercase tracking-[0.2em] text-${item.accent === 'purple' ? 'purple-400' : 'orange-400'} mb-1`}>{item.label}</p>
+                                                            <p className="font-cinzel text-[11px] text-white/50 group-hover:text-white/80 transition-colors uppercase leading-tight">{item.value}</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </TerminalBox>
+                                    </motion.div>
+                                </div>
                             </div>
                         </div>
                     </motion.div>
@@ -1453,26 +1689,30 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             </AnimatePresence>
 
             {/* WAITING / IDLE */}
-            {gameState?.phase === 'idle' && (
-                <div className="absolute inset-0 z-40 bg-black/95 flex flex-col items-center justify-center">
-                    <div className="p-12 border border-purple-500/20 bg-purple-900/5 rounded-2xl text-center space-y-6 backdrop-blur-md">
-                        <div className="w-16 h-16 mx-auto border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
-                        <div>
-                            <h1 className="text-3xl font-bold text-white mb-2 tracking-widest font-mono uppercase">Logic Protocol Initializing...</h1>
-                            <p className="text-purple-400/50 text-sm font-mono tracking-[0.2em] animate-pulse">SYNCHRONIZING DATA GRID...</p>
+            {
+                gameState?.phase === 'idle' && (
+                    <div className="absolute inset-0 z-40 bg-black/95 flex flex-col items-center justify-center">
+                        <div className="p-12 border border-purple-500/20 bg-purple-900/5 rounded-2xl text-center space-y-6 backdrop-blur-md">
+                            <div className="w-16 h-16 mx-auto border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+                            <div>
+                                <h1 className="text-3xl font-bold text-white mb-2 tracking-widest font-mono uppercase">Logic Protocol Initializing...</h1>
+                                <p className="text-purple-400/50 text-sm font-mono tracking-[0.2em] animate-pulse">SYNCHRONIZING DATA GRID...</p>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* ELIMINATED */}
-            {myPlayer?.status === 'eliminated' && (
-                <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center">
-                    <Skull size={64} className="text-red-600 mb-6 animate-pulse" />
-                    <h1 className="text-6xl font-black text-red-600 tracking-tighter mix-blend-screen">ELIMINATED</h1>
-                    <p className="text-red-500/50 mt-4 font-mono text-sm tracking-[0.5em] uppercase">Subject Decommissioned</p>
-                </div>
-            )}
+            {
+                myPlayer?.status === 'eliminated' && (
+                    <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center">
+                        <Skull size={64} className="text-red-600 mb-6 animate-pulse" />
+                        <h1 className="text-6xl font-black text-red-600 tracking-tighter mix-blend-screen">ELIMINATED</h1>
+                        <p className="text-red-500/50 mt-4 font-mono text-sm tracking-[0.5em] uppercase">Subject Decommissioned</p>
+                    </div>
+                )
+            }
 
             {/* END GAME OVERLAY */}
             <AnimatePresence>
@@ -1586,9 +1826,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[2000] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+                        className="fixed inset-0 z-[2000] bg-black/95 backdrop-blur-3xl flex items-start justify-center p-4 lg:p-12 overflow-y-auto custom-scrollbar"
                     >
-                        <div className="max-w-xl w-full text-center space-y-8">
+                        <div className="max-w-xl w-full text-center space-y-10 py-12">
                             {(() => {
                                 const isWinner = gameState.round_data?.winners?.includes(user?.id) || gameState.round_data?.winners?.includes(myPlayer?.id);
                                 const isEliminated = myPlayer?.status === 'eliminated';
@@ -1599,12 +1839,16 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         <motion.div
                                             initial={{ scale: 0.5, opacity: 0 }}
                                             animate={{ scale: 1, opacity: 1 }}
-                                            className="space-y-2"
+                                            className="space-y-6"
                                         >
-                                            <h2 className={`text-6xl font-black italic uppercase tracking-tighter ${isWinner ? 'text-purple-400' : isEliminated ? 'text-red-600' : 'text-orange-500'}`}>
+                                            <h2 className={`text-4xl lg:text-6xl font-black italic uppercase tracking-tighter drop-shadow-[0_0_50px_rgba(0,0,0,1)] leading-none ${isWinner ? 'text-purple-400' : isEliminated ? 'text-red-600' : 'text-orange-500'}`}>
                                                 {isWinner ? "VICTORY" : isEliminated ? "TERMINATED" : "DEFEAT"}
                                             </h2>
-                                            <p className="text-white/40 font-mono text-sm tracking-[0.4em]">ROUND {gameState.current_round} SUMMARY</p>
+                                            <div className="flex flex-col items-center gap-2">
+                                                <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                                                <p className="text-white/40 font-mono text-xs tracking-[0.4em] font-black uppercase">ROUND {gameState.current_round} PROTOCOL SUMMARY</p>
+                                                <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                                            </div>
                                         </motion.div>
 
                                         {/* Status Effects */}
@@ -1681,7 +1925,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                                 <span className="text-white font-black text-xs leading-none mb-0.5">
                                                                                     {slot.p1Card ? (slot.p1Card.specialType || `${slot.p1Card.rank}${slot.p1Card.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                 </span>
-                                                                                <span className={`text-[8px] font-black leading-none ${slot.p1Val > 0 ? 'text-green-500' : 'text-red-500 opacity-60'}`}>{slot.p1Val}pt</span>
+                                                                                <span className={`text-[8px] font-black leading-none ${slot.p1Val > 0 ? 'text-green-500' : 'text-red-500 opacity-60'}`}>{slot.p1Val >= 999 ? 'MAX' : `${slot.p1Val}pt`}</span>
                                                                             </div>
                                                                         </td>
                                                                         <td className="py-3 px-4 text-center">
@@ -1689,7 +1933,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                                 <span className="text-white/40 font-bold text-xs leading-none mb-0.5">
                                                                                     {slot.p2Card ? (slot.p2Card.specialType || `${slot.p2Card.rank}${slot.p2Card.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                 </span>
-                                                                                <span className={`text-[8px] font-bold leading-none ${slot.p2Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p2Val}pt</span>
+                                                                                <span className={`text-[8px] font-bold leading-none ${slot.p2Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p2Val >= 999 ? 'MAX' : `${slot.p2Val}pt`}</span>
                                                                             </div>
                                                                         </td>
                                                                         {is3Way && (
@@ -1698,7 +1942,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                                     <span className="text-white/40 font-bold text-xs leading-none mb-0.5">
                                                                                         {slot.p3Card ? (slot.p3Card.specialType || `${slot.p3Card.rank}${slot.p3Card.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                     </span>
-                                                                                    <span className={`text-[8px] font-bold leading-none ${slot.p3Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p3Val}pt</span>
+                                                                                    <span className={`text-[8px] font-bold leading-none ${slot.p3Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p3Val >= 999 ? 'MAX' : `${slot.p3Val}pt`}</span>
                                                                                 </div>
                                                                             </td>
                                                                         )}
@@ -1709,9 +1953,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                         <tfoot>
                                                             <tr className="bg-purple-500/10 font-mono">
                                                                 <td className="py-4 px-4 text-left text-purple-400 font-black text-[9px] tracking-widest uppercase">TOTAL ROUND SCORE</td>
-                                                                <td className="py-4 px-4 text-center text-purple-400 font-black text-xl drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]">{battle.p1Total}</td>
-                                                                <td className="py-4 px-4 text-center text-white/30 font-bold text-lg">{battle.p2Total}</td>
-                                                                {is3Way && <td className="py-4 px-4 text-center text-white/10 font-bold text-lg">{battle.p3Total}</td>}
+                                                                <td className="py-4 px-4 text-center text-purple-400 font-black text-base drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]">{battle.p1Total >= 999 ? 'MAX' : battle.p1Total}</td>
+                                                                <td className="py-4 px-4 text-center text-white/30 font-bold text-base">{battle.p2Total >= 999 ? 'MAX' : battle.p2Total}</td>
+                                                                {is3Way && <td className="py-4 px-4 text-center text-white/10 font-bold text-base">{battle.p3Total >= 999 ? 'MAX' : battle.p3Total}</td>}
                                                             </tr>
                                                         </tfoot>
                                                     </table>
@@ -1719,16 +1963,40 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             );
                                         })()}
 
-                                        <div className="grid grid-cols-2 gap-4 py-8 border-y border-white/10">
-                                            <div className="text-left">
-                                                <p className="text-[10px] text-gray-500 uppercase mb-1">Visa Adjustment</p>
-                                                <p className={`text-3xl font-black ${(myPlayer?.roundAdjustment ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                    {(myPlayer?.roundAdjustment ?? 0) >= 0 ? '+' : ''}{myPlayer?.roundAdjustment ?? 0} <span className="text-xs opacity-50 font-mono">CR</span>
-                                                </p>
+                                        <div className="flex flex-col gap-4 py-6 border-y border-white/10">
+                                            <div className="flex justify-between items-end">
+                                                <div className="text-left">
+                                                    <p className="text-[10px] text-gray-500 uppercase mb-1">Individual Duel</p>
+                                                    <p className={`text-sm font-bold ${isWinner ? 'text-purple-400' : 'text-red-500'}`}>
+                                                        {isWinner ? "+200" : isEliminated ? "-500" : "-100"} <span className="text-[8px] opacity-40">CR</span>
+                                                    </p>
+                                                </div>
+                                                {(() => {
+                                                    const duelPoints = isWinner ? 200 : isEliminated ? -500 : -100;
+                                                    const synergyPoints = (myPlayer?.roundAdjustment ?? 0) - duelPoints;
+                                                    // USER REQUEST: Only show synergy box in the final round (Round 5)
+                                                    if ((gameState?.current_round || 0) < 5) return null;
+                                                    if (synergyPoints === 0) return null;
+
+                                                    return (
+                                                        <div className="text-center bg-white/5 px-4 py-2 rounded-lg border border-white/5">
+                                                            <p className="text-[10px] text-gray-500 uppercase mb-1">Team Synergy</p>
+                                                            <p className={`text-sm font-bold ${synergyPoints >= 0 ? 'text-green-500' : 'text-orange-500'}`}>
+                                                                {synergyPoints > 0 ? '+' : ''}{synergyPoints} <span className="text-[8px] opacity-40 font-mono">CR</span>
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                <div className="text-right">
+                                                    <p className="text-[14px] text-gray-400 uppercase mb-2 font-bold tracking-widest">Net Visa Adjust</p>
+                                                    <p className={`text-2xl lg:text-3xl font-black ${(myPlayer?.roundAdjustment ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                        {(myPlayer?.roundAdjustment ?? 0) >= 0 ? '+' : ''}{myPlayer?.roundAdjustment ?? 0}
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div className="text-right">
-                                                <p className="text-[10px] text-gray-500 uppercase mb-1">Total Balance</p>
-                                                <p className="text-3xl font-black text-white">{myPlayer?.score || 0}</p>
+                                            <div className="flex justify-between items-center pt-4 border-t border-white/5">
+                                                <span className="text-[10px] text-gray-500 uppercase tracking-widest">Protocol Balance</span>
+                                                <span className="text-base font-black text-white">{myPlayer?.score || 0} <span className="text-[10px] text-gray-600">CR</span></span>
                                             </div>
                                         </div>
 
@@ -1747,7 +2015,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             {/* UI CLEANUP: Redundant Header Removed */}
 
             {/* MAIN GAME AREA */}
-            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-32 sm:pt-40 relative z-10 flex flex-col items-center">
+            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-32 sm:pt-40 pb-56 relative z-10 flex flex-col items-center">
 
                 {/* PHASE INDICATOR */}
                 <div className="mb-4 text-center px-4" >
@@ -1774,51 +2042,119 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         )}
                     </motion.div>
 
-                    {/* POWERS UI - Slotting Phase Only */}
+                    {/* POWERS UI - Deployment Phase Only */}
                     {gameState?.phase === 'slotting' && (
-                        <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="flex flex-wrap items-center justify-center gap-4 mt-4"
-                        >
-                            <button
-                                onClick={handleRefreshHand}
-                                disabled={myPlayer?.hasUsedRefresh || isLocked}
-                                className={`flex items-center gap-3 px-6 py-3 rounded-full font-display text-[10px] font-black uppercase tracking-widest transition-all ${myPlayer?.hasUsedRefresh || isLocked ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-purple-900/30 border border-purple-500/50 text-purple-400 hover:bg-purple-500 hover:text-black shadow-[0_0_20px_rgba(168,85,247,0.2)] hover:shadow-[0_0_30px_#a855f7]'}`}
+                        <>
+                            {/* PLAYER STATUS DISPLAY BOX (LEFT MIDDLE) */}
+                            <motion.div
+                                initial={{ x: -100, opacity: 0 }}
+                                animate={{ x: 0, opacity: 1 }}
+                                className="fixed left-4 xl:left-8 top-1/2 -translate-y-1/2 z-10 w-52 xl:w-60 flex flex-col gap-3 px-4 py-6 bg-black/60 border border-white/10 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-glow-purple"
                             >
-                                <Activity size={16} />
-                                {myPlayer?.hasUsedRefresh || hasUsedRefreshSession ? "REFRESH_DEPLETED" : "REFRESH_ASSETS"}
-                            </button>
-
-                            <button
-                                onClick={handleUseDetector}
-                                disabled={myPlayer?.hasUsedDetector || isLocked}
-                                className={`flex items-center gap-3 px-6 py-3 rounded-full font-display text-[10px] font-black uppercase tracking-widest transition-all ${myPlayer?.hasUsedDetector || isLocked ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-emerald-900/30 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500 hover:text-black shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_30px_#10b981]'}`}
-                            >
-                                <Scan size={16} />
-                                {myPlayer?.hasUsedDetector || hasUsedDetectorSession ? "DETECTOR_DEPLETED" : "ENGAGE_DETECTOR"}
-                            </button>
-
-                            {/* PLAYER STATUS DISPLAY */}
-                            <div className="flex items-center gap-4 px-6 py-3 bg-white/[0.03] border border-white/10 rounded-full backdrop-blur-md">
-                                <div className="flex flex-col items-start leading-none">
-                                    <span className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-0.5">AGENT_ID</span>
-                                    <span className="text-sm font-black text-white tracking-widest">{myPlayer?.username || "SUBJECT"}</span>
+                                <div className="flex items-center gap-2 pb-4 border-b border-white/10">
+                                    <Activity size={16} className="text-purple-500 animate-pulse" />
+                                    <h3 className="text-[10px] font-display font-black text-purple-400 uppercase tracking-[0.4em]">Tactical Table Intelligence</h3>
                                 </div>
-                                <div className="h-6 w-px bg-white/10" />
-                                {myPlayer?.isZombie ? (
-                                    <div className="flex items-center gap-2 group/role">
-                                        <Biohazard size={16} className="text-red-500 animate-pulse" />
-                                        <span className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em]">BIOHAZARD_FLAG</span>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-2 group/role">
-                                        <Shield size={16} className="text-emerald-500" />
-                                        <span className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.2em]">PROTOCOL_SHIELD</span>
-                                    </div>
-                                )}
-                            </div>
-                        </motion.div>
+
+                                <div className="flex flex-col gap-2 overflow-y-auto max-h-[40vh] pr-2 custom-scrollbar">
+                                    {(() => {
+                                        const myGroup = gameState?.participants?.find(p => p.id === user?.id)?.groupId;
+                                        const otherGroupMembers = (gameState?.participants || []).filter(p => p.groupId === myGroup && p.id !== user?.id);
+
+                                        if (otherGroupMembers.length === 0) {
+                                            return <span className="text-[8px] font-mono text-white/10 uppercase tracking-widest text-center py-4">Searching for unit traces...</span>;
+                                        }
+
+                                        return otherGroupMembers.map(opp => (
+                                            <div key={opp.id} className="p-3 bg-white/[0.02] border border-white/5 rounded-xl flex items-center justify-between group hover:border-purple-500/30 transition-all">
+                                                <div className="flex flex-col">
+                                                    <span className="text-white/80 font-display text-[10px] font-black uppercase tracking-tight">{playerIdMap[opp.id] || opp.username}</span>
+                                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                                        {opp.isZombie && (
+                                                            <span className="text-[6px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-1 py-0.5 rounded-sm">ZOMBIE</span>
+                                                        )}
+                                                        {opp.status === 'eliminated' && (
+                                                            <span className="text-[6px] font-black text-orange-500 uppercase tracking-widest bg-orange-500/10 px-1 py-0.5 rounded-sm">OFFLINE</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {detectorActive && opponentHandCounts[opp.id] !== undefined ? (
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-emerald-400 font-mono text-lg font-black leading-none">{opponentHandCounts[opp.id]}</span>
+                                                        <span className="text-[6px] text-white/20 font-black uppercase tracking-widest">ASSETS</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col items-end opacity-40 group-hover:opacity-100 transition-opacity">
+                                                        <Scan size={14} className="text-white/40 group-hover:text-purple-500" />
+                                                        <span className="text-[6px] text-white/20 font-black uppercase tracking-[0.1em] mt-1">NO_UPLINK</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ));
+                                    })()}
+                                </div>
+
+                                <div className="mt-2 pt-4 border-t border-white/5">
+                                    <span className="text-[7px] font-mono text-white/10 uppercase tracking-[0.4em] animate-pulse">Scanning unit proximity...</span>
+                                </div>
+
+                                {/* Interactive corner detail */}
+                                <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-purple-500/40" />
+                                <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-purple-500/40" />
+                            </motion.div>
+
+                            {/* POWERS UI BOX (RIGHT MIDDLE) */}
+                            <motion.div
+                                initial={{ x: 100, opacity: 0 }}
+                                animate={{ x: 0, opacity: 1 }}
+                                className="fixed right-4 xl:right-8 top-1/2 -translate-y-1/2 z-10 w-52 xl:w-60 flex flex-col gap-4 px-5 py-7 bg-black/60 border border-white/10 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-glow-purple"
+                            >
+                                <div className="flex flex-col items-end gap-1 text-right pb-4 border-b border-white/5">
+                                    <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest">TACTICAL_ASSETS</span>
+                                    <span className="text-[8px] font-mono text-white/20 uppercase tracking-widest">DEPLOYMENT_MODULES</span>
+                                </div>
+
+                                <div className="flex flex-col gap-4">
+                                    <button
+                                        onClick={handleRefreshHand}
+                                        disabled={gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked}
+                                        className={`group relative flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-purple-900/20 border-purple-500/30 hover:bg-purple-500 hover:border-purple-400 hover:shadow-[0_0_30px_#a855f7]'}`}
+                                    >
+                                        <Activity size={24} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'} />
+                                        <span className={`mt-2 text-[9px] font-black uppercase tracking-widest ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'}`}>
+                                            {powerUsage.hasUsedRefresh ? "REFRESH_VOID" : "REFRESH_ARRAY"}
+                                        </span>
+                                        <div className="absolute top-2 right-2 flex gap-0.5">
+                                            <div className={`w-1 h-1 rounded-full ${powerUsage.hasUsedRefresh ? 'bg-white/20' : 'bg-purple-400 animate-pulse'}`} />
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={handleUseDetector}
+                                        disabled={gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked}
+                                        className={`group relative flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-emerald-900/20 border-emerald-500/30 hover:bg-emerald-500 hover:border-emerald-400 hover:shadow-[0_0_30px_#10b981]'}`}
+                                    >
+                                        <Scan size={24} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'} />
+                                        <span className={`mt-2 text-[9px] font-black uppercase tracking-widest ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'}`}>
+                                            {powerUsage.hasUsedDetector ? "DETECT_DEPLETED" : "ENGAGE_DETECTOR"}
+                                        </span>
+                                        <div className="absolute top-2 right-2 flex gap-0.5">
+                                            <div className={`w-1 h-1 rounded-full ${powerUsage.hasUsedDetector ? 'bg-white/20' : 'bg-emerald-400 animate-pulse'}`} />
+                                        </div>
+                                    </button>
+                                </div>
+
+                                <div className="mt-2 text-center">
+                                    <span className="text-[7px] font-mono text-white/10 uppercase tracking-[0.4em] animate-pulse">
+                                        {gameState?.phase === 'slotting' ? "Awaiting command input..." : "Modules standby..."}
+                                    </span>
+                                </div>
+
+                                {/* Interactive corner detail */}
+                                <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-purple-500/40" />
+                                <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-purple-500/40" />
+                            </motion.div>
+                        </>
                     )}
                 </div >
 
@@ -1988,13 +2324,12 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                                     mySlots.map((slot, i) =>
                                         <motion.div
-                                            key={i}
+                                            key={`slot-${i}`}
                                             ref={el => { slotRefs.current[i] = el; }}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: i * 0.1 }}
+                                            initial={false}
+                                            animate={{ opacity: 1, scale: 1 }}
                                             className={`
-                                            relative w-20 h-28 sm:w-28 sm:h-40 rounded-xl border-2 flex items-center justify-center transition-all duration-300
+                                            relative w-16 h-24 sm:w-24 sm:h-32 rounded-xl border-2 flex items-center justify-center transition-all duration-300
                                             ${slot
                                                     ? 'border-purple-500 bg-purple-900/20 shadow-[0_0_20px_rgba(168,85,247,0.2)]'
                                                     : 'border-white/10 bg-white/5 hover:border-white/20'
@@ -2004,7 +2339,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         >
                                             {slot ? (
                                                 <>
-                                                    <CardVisual card={slot} />
+                                                    <CardVisual card={slot} size="full" />
                                                     {gameState?.phase === 'slotting' && !isLocked && (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); handleUnslotCard(i); }}
@@ -2015,9 +2350,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                     )}
                                                 </>
                                             ) : (
-                                                <div className="flex flex-col items-center justify-center gap-3 opacity-20 group-hover:opacity-40 transition-opacity text-center w-full h-full">
-                                                    <div className="w-10 h-10 rounded-full border border-purple-500/30 border-t-purple-500 animate-spin" />
-                                                    <span className="text-[9px] font-display font-black uppercase tracking-[0.2em] text-purple-500 leading-tight">Awaiting Signal</span>
+                                                <div className="flex flex-col items-center justify-center gap-1.5 opacity-10 group-hover:opacity-30 transition-opacity text-center w-full h-full">
+                                                    <div className="w-6 h-6 rounded-full border border-purple-500/30 border-t-purple-500 animate-[spin_3s_linear_infinite]" />
+                                                    <span className="text-[7px] font-black uppercase tracking-widest text-purple-500">Signal...</span>
                                                 </div>
                                             )}
                                             <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] text-white/10 font-mono tracking-tighter">
@@ -2028,58 +2363,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                 )}
                             </div>
 
-                            {/* TABLE INTELLIGENCE - Slotting Phase */}
-                            {gameState?.phase === 'slotting' && (
-                                <motion.div
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    className="mt-4 w-full max-w-4xl mx-auto"
-                                >
-                                    <div className="flex items-center gap-4 mb-3">
-                                        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/10" />
-                                        <h3 className="text-[10px] font-display font-black text-white/40 uppercase tracking-[0.4em] flex items-center gap-2">
-                                            <Activity size={12} className="text-purple-500" />
-                                            Tactical Table Intelligence
-                                        </h3>
-                                        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/10" />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                                        {(() => {
-                                            const myGroup = gameState.participants.find(p => p.id === user?.id)?.groupId;
-                                            return gameState.participants
-                                                .filter(p => p.groupId === myGroup && p.id !== user?.id)
-                                                .map(opp => (
-                                                    <div key={opp.id} className="p-2 bg-white/[0.02] border border-white/5 rounded-xl flex items-center justify-between group hover:border-purple-500/30 transition-all">
-                                                        <div className="flex flex-col">
-                                                            <span className="text-white/80 font-display text-[10px] font-black uppercase tracking-tight">{playerIdMap[opp.id] || opp.username}</span>
-                                                            <div className="flex items-center gap-1.5 mt-0.5">
-                                                                {opp.id === user?.id && (
-                                                                    opp.isZombie ? (
-                                                                        <span className="text-[7px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-1.5 py-0.5 rounded-sm">ZOMBIE</span>
-                                                                    ) : (
-                                                                        <span className="text-[7px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-1.5 py-0.5 rounded-sm">SURVIVOR</span>
-                                                                    )
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        {detectorActive && opponentHandCounts[opp.id] !== undefined ? (
-                                                            <div className="flex flex-col items-end">
-                                                                <span className="text-emerald-400 font-mono text-xl font-black">{opponentHandCounts[opp.id]}</span>
-                                                                <span className="text-[7px] text-white/20 font-black uppercase tracking-widest">ASSETS_REMAINING</span>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="flex flex-col items-end opacity-20 group-hover:opacity-40 transition-opacity">
-                                                                <Scan size={18} className="text-white" />
-                                                                <span className="text-[6px] text-white font-black uppercase tracking-[0.2em] mt-1">NO_UPLINK</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ));
-                                        })()}
-                                    </div>
-                                </motion.div>
-                            )}
+                            {/* TABLE INTELLIGENCE - Moved to HUD box */}
 
                             {/* PICKING VIEW */}
                             {gameState?.phase === 'picking' && (
@@ -2092,7 +2376,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         /* WINNER VIEW */
                                         <div className={`
                                             ${opponentSlots.length === 1 ? 'flex justify-center' : 'grid grid-cols-1 lg:grid-cols-2'} 
-                                            gap-6 w-full pr-4 scrollbar-thin scrollbar-thumb-purple-500/20
+                                            gap-6 w-full pr-4 scrollbar-thin scrollbar-thumb-black
                                         `}>
 
 
@@ -2106,7 +2390,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                 return (
                                                     <div key={opp.playerId} className="relative group p-6 sm:p-8 border border-white/10 bg-black/40 rounded-[35px] backdrop-blur-xl hover:border-purple-500/40 transition-all duration-500 shadow-2xl overflow-hidden">
                                                         <div className="flex items-center gap-4 mb-6">
-                                                            <div className="w-2 h-2 bg-red-500 rounded-full shadow-[0_0_10px_#ef4444]" />
+                                                            <div className="w-2 h-2 bg-purple-500 rounded-full shadow-[0_0_10px_#a855f7]" />
                                                             <h4 className="font-display text-purple-400 text-[10px] uppercase tracking-[0.4em] font-black">
                                                                 {playerIdMap[opp.playerId] || opp.username || "AGENT"} :: Neutralized
                                                             </h4>
@@ -2125,13 +2409,13 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                         {isSelected && (
                                                                             <button
                                                                                 onClick={(e) => { e.stopPropagation(); setSelectedSteal(null); }}
-                                                                                className="absolute -top-3 -right-3 w-8 h-8 bg-black border-2 border-red-500 rounded-full flex items-center justify-center text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] hover:bg-red-500 hover:text-white hover:scale-110 transition-all z-[60] animate-in zoom-in spin-in"
+                                                                                className="absolute -top-3 -right-3 w-8 h-8 bg-black border-2 border-purple-500 rounded-full flex items-center justify-center text-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.4)] hover:bg-purple-500 hover:text-white hover:scale-110 transition-all z-[60] animate-in zoom-in spin-in"
                                                                             >
                                                                                 <X size={14} strokeWidth={3} />
                                                                             </button>
                                                                         )}
-                                                                        <div className="scale-90 sm:scale-100">
-                                                                            <CardVisual card={card} />
+                                                                        <div className="scale-75 sm:scale-90">
+                                                                            <CardVisual card={card} size="small" />
                                                                         </div>
                                                                         {!isSelected && (
                                                                             <div className="absolute inset-x-0 -bottom-6 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-all">
@@ -2152,11 +2436,11 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         /* LOSER / SPECTATOR VIEW BOX - SMALLER */
                                         <div className="flex flex-col items-center justify-center py-12 bg-black/40 border border-white/5 rounded-[40px] backdrop-blur-3xl w-full max-w-4xl mx-auto">
                                             <div className="mb-6 relative">
-                                                <div className="absolute -inset-8 bg-red-500/10 blur-3xl rounded-full" />
-                                                <Biohazard size={48} className="text-red-500/80 animate-pulse" />
+                                                <div className="absolute -inset-8 bg-purple-500/10 blur-3xl rounded-full" />
+                                                <Biohazard size={48} className="text-purple-500/80 animate-pulse" />
                                             </div>
                                             <h3 className="font-display text-xl font-black text-white uppercase tracking-[0.3em] mb-2 text-center">Under Extraction</h3>
-                                            <p className="text-red-400/40 font-display text-[9px] uppercase tracking-widest mb-8 text-center px-8">Winners are harvesting assets from your tactical array</p>
+                                            <p className="text-purple-400/40 font-display text-[9px] uppercase tracking-widest mb-8 text-center px-8">Winners are harvesting assets from your tactical array</p>
 
                                             <div className="flex flex-wrap justify-center gap-4 px-4">
                                                 {mySlots.map((c, i) => c && (
@@ -2194,7 +2478,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                     >
                                                         <span className="flex items-center gap-4">
                                                             Pass Extraction
-                                                            <X size={16} className="text-red-500/50 group-hover:text-red-500 group-hover:rotate-90 transition-all" />
+                                                            <X size={16} className="text-purple-500/50 group-hover:text-purple-500 group-hover:rotate-90 transition-all" />
                                                         </span>
                                                     </button>
                                                 </div>
@@ -2210,8 +2494,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 {/* HAND AREA - Gated to relevant phases */}
                 {
                     ['slotting', 'evaluation', 'scoring'].includes(gameState?.phase || '') && gameState?.phase !== 'idle' && (
-                        <div className="w-full max-w-6xl mt-4">
-                            <div className="flex items-center gap-6 mb-4">
+                        <div className="w-full -mt-4 flex flex-col items-center">
+                            {/* Label Section - Still constrained to 6xl for alignment */}
+                            <div className="w-full max-w-6xl px-4 flex items-center gap-6 mb-2">
                                 <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                                 <span className="text-[10px] font-display font-black text-white/20 uppercase tracking-[0.5em] flex items-center gap-3">
                                     <Swords size={14} className="text-purple-500/50" />
@@ -2220,36 +2505,44 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                 <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                             </div>
 
-                            <div className="flex flex-wrap justify-center gap-3">
-                                <AnimatePresence>
-                                    {myHand.map(card => {
-                                        const isSlotted = mySlots.some(s => s?.id === card.id);
-                                        if (isSlotted) return null;
+                            {/* Cards Row - Robust Centering + Scroll */}
+                            <div
+                                ref={handScrollerRef}
+                                className="w-full max-w-full overflow-x-auto custom-scrollbar touch-pan-x pb-4 pt-12 mt-4 scroll-smooth block relative z-[30] border-y border-white/5 bg-black/5 pointer-events-auto"
+                                style={{ WebkitOverflowScrolling: 'touch', minHeight: '180px' }}
+                            >
+                                <div className="flex flex-nowrap justify-center sm:justify-center items-end gap-6 sm:gap-10 px-12 py-6 min-w-full w-fit mx-auto h-full">
+                                    <AnimatePresence mode="popLayout">
+                                        {myHand.map(card => {
+                                            const isSlotted = mySlots.some(s => s?.id === card.id);
+                                            if (isSlotted) return null;
 
-                                        return (
-                                            <motion.div
-                                                key={card.id}
-                                                layoutId={card.id}
-                                                drag={!isLocked && gameState?.phase === 'slotting'}
-                                                dragSnapToOrigin
-                                                onDragEnd={(e, info) => handleDragEnd(e, info, card)}
-                                                whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
-                                                initial={{ opacity: 0, scale: 0.9 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                exit={{ opacity: 0, scale: 0.5 }}
-                                                whileHover={{ y: -10, scale: 1.05, zIndex: 10 }}
-                                                className={isLocked ? "opacity-50 grayscale cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}
-                                                onClick={() => {
-                                                    if (gameState?.phase !== 'slotting' || isLocked) return;
-                                                    const emptyIdx = mySlots.findIndex(s => s === null);
-                                                    if (emptyIdx !== -1) handleSlotCard(card, emptyIdx);
-                                                }}
-                                            >
-                                                <CardVisual card={card} />
-                                            </motion.div>
-                                        );
-                                    })}
-                                </AnimatePresence>
+                                            return (
+                                                <motion.div
+                                                    key={card.id}
+                                                    layoutId={card.id}
+                                                    drag={!isLocked && gameState?.phase === 'slotting'}
+                                                    dragSnapToOrigin
+                                                    dragListener={!isLocked}
+                                                    onDragEnd={(e, info) => handleDragEnd(e, info, card)}
+                                                    whileDrag={{ scale: 1.1, zIndex: 100, boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
+                                                    initial={{ opacity: 0, scale: 0.9 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    exit={{ opacity: 0, scale: 0.5 }}
+                                                    whileHover={{ y: -10, scale: 1.05, zIndex: 10 }}
+                                                    className={`shrink-0 ${isLocked ? "opacity-50 grayscale cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
+                                                    onClick={() => {
+                                                        if (gameState?.phase !== 'slotting' || isLocked) return;
+                                                        const emptyIdx = mySlots.findIndex(s => s === null);
+                                                        if (emptyIdx !== -1) handleSlotCard(card, emptyIdx);
+                                                    }}
+                                                >
+                                                    <CardVisual card={card} />
+                                                </motion.div>
+                                            );
+                                        })}
+                                    </AnimatePresence>
+                                </div>
                             </div>
                         </div>
                     )
@@ -2262,13 +2555,13 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                             initial={{ y: 100, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: 100, opacity: 0 }}
-                            className="fixed bottom-4 left-0 right-0 flex justify-center z-50 pointer-events-none"
+                            className="fixed bottom-8 left-0 right-0 flex justify-center z-[500] pointer-events-none"
                         >
                             <div className="relative group/container pointer-events-auto">
                                 <button
                                     onClick={handleConfirmSlots}
-                                    disabled={isLocked}
-                                    className={`group relative px-10 py-3 font-black uppercase tracking-[0.3em] text-[10px] overflow-hidden transition-all duration-500 ${isLocked ? 'bg-gray-800 cursor-not-allowed opacity-50' : 'bg-purple-600 hover:bg-purple-400 shadow-[0_0_30px_rgba(168,85,247,0.3)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] text-black'}`}
+                                    disabled={isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots)}
+                                    className={`group relative px-16 py-5 font-black uppercase tracking-[0.2em] text-sm overflow-hidden transition-all duration-500 ${isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots) ? 'bg-gray-800 cursor-not-allowed opacity-50' : 'bg-purple-600 hover:bg-purple-400 shadow-[0_0_30px_rgba(168,85,247,0.3)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] text-black'}`}
                                     style={{ clipPath: 'polygon(10% 0, 100% 0, 90% 100%, 0% 100%)' }}
                                 >
                                     {/* Scanner Sweep Effect */}
@@ -2280,8 +2573,8 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                                     <span className="relative flex items-center gap-4">
-                                        {isLocked ? "ASSETS LOCKED" : "AUTHORIZE DEPLOYMENT"}
-                                        {isLocked ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+                                        {isLocked ? "ASSETS LOCKED" : (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots) ? "5-SLOT LIMIT REACHED" : "AUTHORIZE DEPLOYMENT"}
+                                        {isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots) ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
                                     </span>
                                 </button>
 
@@ -2299,12 +2592,14 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     )}
                 </AnimatePresence>
             </main >
-            {showPlayerCard && (
-                <PlayerCardModal
-                    user={user}
-                    onClose={() => setShowPlayerCard(false)}
-                />
-            )}
+            {
+                showPlayerCard && (
+                    <PlayerCardModal
+                        user={user}
+                        onClose={() => setShowPlayerCard(false)}
+                    />
+                )
+            }
 
             {/* HOLOGRAPHIC TOAST SYSTEM */}
             <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-3 pointer-events-none">
@@ -2315,16 +2610,19 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                             initial={{ opacity: 0, y: 20, scale: 0.9, filter: 'blur(10px)' }}
                             animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                             exit={{ opacity: 0, scale: 0.8, filter: 'blur(10px)' }}
-                            className={`px-8 py-3 rounded-none border backdrop-blur-xl flex items-center gap-4 shadow-2xl ${toast.type === 'error' ? 'bg-red-500/10 border-red-500/50 text-red-400' :
-                                toast.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' :
-                                    'bg-purple-500/10 border-purple-500/50 text-purple-400'
+                            className={`px-12 py-5 rounded-none border backdrop-blur-3xl flex items-center gap-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] ${toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-100' :
+                                toast.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-300' :
+                                    'bg-purple-500/10 border-purple-500/50 text-purple-300'
                                 }`}
                             style={{ clipPath: 'polygon(5% 0, 100% 0, 95% 100%, 0% 100%)' }}
                         >
-                            <div className={`w-1 h-4 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse`} />
-                            <span className="text-[10px] font-black uppercase tracking-[0.2em] font-mono whitespace-nowrap">
-                                {toast.message}
-                            </span>
+                            <div className={`w-1.5 h-8 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse shadow-[0_0_15px_currentColor]`} />
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[10px] font-mono opacity-50 uppercase tracking-[0.4em]">Protocol Notification</span>
+                                <span className="text-base lg:text-xl font-black uppercase tracking-[0.1em] font-mono whitespace-nowrap">
+                                    {toast.message}
+                                </span>
+                            </div>
                         </motion.div>
                     ))}
                 </AnimatePresence>
@@ -2426,7 +2724,7 @@ const TerminalBox: React.FC<{ title: string; icon: React.ReactNode; children: Re
 
 // --- VISUAL COMPONENTS ---
 
-function CardVisual({ card, size = 'default' }: { card: DiamondsCard; size?: 'default' | 'small' | 'mini' }) {
+function CardVisual({ card, size = 'default' }: { card: DiamondsCard; size?: 'default' | 'small' | 'mini' | 'full' }) {
     const imgSrc = getCardImagePath(card);
 
     // Special Cards
@@ -2435,8 +2733,8 @@ function CardVisual({ card, size = 'default' }: { card: DiamondsCard; size?: 'de
         let glow = '';
 
         if (card.specialType === 'zombie') {
-            borderColor = 'border-red-500';
-            glow = 'shadow-[0_0_30px_rgba(239,68,68,0.3)]';
+            borderColor = 'border-purple-500';
+            glow = 'shadow-[0_0_30px_rgba(168,85,247,0.3)]';
         }
         if (card.specialType === 'injection') {
             borderColor = 'border-green-500';
@@ -2447,9 +2745,10 @@ function CardVisual({ card, size = 'default' }: { card: DiamondsCard; size?: 'de
             glow = 'shadow-[0_0_30px_rgba(249,115,22,0.3)]';
         }
 
-        const sizeClasses = size === 'mini' ? 'w-14 h-20' : size === 'small' ? 'w-20 h-28' : 'w-24 h-32 sm:w-32 sm:h-44';
+        const sizeClasses = size === 'mini' ? 'w-14 h-20' : size === 'small' ? 'w-20 h-28' : size === 'full' ? 'w-full h-full' : 'w-20 h-28 sm:w-24 sm:h-36';
         return (
-            <div className={`${sizeClasses} rounded-xl border-2 ${borderColor} ${glow} flex flex-col items-center justify-center relative overflow-hidden bg-black group`}>
+            <div className={`${sizeClasses} rounded-2xl border-2 ${borderColor} ${glow} flex flex-col items-center justify-center relative overflow-hidden bg-black group`}>
+
                 <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent z-10 opacity-30" />
                 <img
                     src={imgSrc}
@@ -2462,9 +2761,9 @@ function CardVisual({ card, size = 'default' }: { card: DiamondsCard; size?: 'de
     }
 
     // Standard Cards
-    const sizeClasses = size === 'mini' ? 'w-12 h-18' : size === 'small' ? 'w-18 h-26' : 'w-20 h-28 sm:w-28 sm:h-40';
+    const sizeClasses = size === 'mini' ? 'w-14 h-20' : size === 'small' ? 'w-20 h-28' : size === 'full' ? 'w-full h-full' : 'w-20 h-28 sm:w-24 sm:h-36';
     return (
-        <div className={`${sizeClasses} rounded-xl border border-white/20 flex flex-col items-center justify-center relative overflow-hidden bg-white shadow-2xl group transition-all duration-300 hover:shadow-purple-500/20`}>
+        <div className={`${sizeClasses} rounded-2xl border border-white/20 flex flex-col items-center justify-center relative overflow-hidden bg-white shadow-2xl group transition-all duration-300 hover:shadow-purple-500/20`}>
             <img
                 src={imgSrc}
                 alt={`${card.rank} of ${card.suit}`}

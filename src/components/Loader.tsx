@@ -5,9 +5,9 @@ import { Spade, Heart, Club, Diamond } from 'lucide-react';
 export function Loader() {
     const [currentSuit, setCurrentSuit] = useState(0);
     const suits = [
-        { Icon: Spade, color: 'text-blue-500' },
+        { Icon: Spade, color: 'text-red-500' },
         { Icon: Heart, color: 'text-[var(--color-squid-pink)]' },
-        { Icon: Club, color: 'text-blue-500' },
+        { Icon: Club, color: 'text-red-500' },
         { Icon: Diamond, color: 'text-[var(--color-squid-pink)]' }
     ];
 
@@ -50,8 +50,8 @@ export function Loader() {
                 </AnimatePresence>
 
                 {/* Orbiting Rings */}
-                <div className="absolute inset-0 border-2 border-[#333] rounded-full animate-[spin_3s_linear_infinite]" />
-                <div className="absolute inset-[-10px] border border-dashed border-[#555] rounded-full animate-[spin_4s_linear_infinite_reverse]" />
+                <div className="absolute inset-0 border-2 border-red-500/20 rounded-full animate-[spin_3s_linear_infinite]" />
+                <div className="absolute inset-[-10px] border border-dashed border-red-500/30 rounded-full animate-[spin_4s_linear_infinite_reverse]" />
             </div>
 
             {/* Loading Text */}
@@ -68,7 +68,7 @@ export function Loader() {
                     {[...Array(3)].map((_, i) => (
                         <motion.div
                             key={i}
-                            className="w-2 h-2 bg-[var(--color-squid-pink)] rounded-full"
+                            className="w-2 h-2 bg-red-500/50 rounded-full"
                             animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
                             transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                         />
@@ -77,13 +77,13 @@ export function Loader() {
             </div>
 
             {/* Decorative Corners */}
-            <div className="absolute top-8 left-8 w-16 h-16 border-t-2 border-l-2 border-[var(--color-squid-pink)] opacity-50" />
-            <div className="absolute top-8 right-8 w-16 h-16 border-t-2 border-r-2 border-[var(--color-squid-pink)] opacity-50" />
-            <div className="absolute bottom-8 left-8 w-16 h-16 border-b-2 border-l-2 border-[var(--color-squid-pink)] opacity-50" />
-            <div className="absolute bottom-8 right-8 w-16 h-16 border-b-2 border-r-2 border-[var(--color-squid-pink)] opacity-50" />
+            <div className="absolute top-8 left-8 w-16 h-16 border-t-2 border-l-2 border-red-500 opacity-50" />
+            <div className="absolute top-8 right-8 w-16 h-16 border-t-2 border-r-2 border-red-500 opacity-50" />
+            <div className="absolute bottom-8 left-8 w-16 h-16 border-b-2 border-l-2 border-red-500 opacity-50" />
+            <div className="absolute bottom-8 right-8 w-16 h-16 border-b-2 border-r-2 border-red-500 opacity-50" />
 
             {/* Random Code Snippets Background overlay */}
-            <div className="absolute inset-0 overflow-hidden opacity-5 pointer-events-none font-mono text-xs text-green-500 p-4">
+            <div className="absolute inset-0 overflow-hidden opacity-5 pointer-events-none font-mono text-xs text-red-500 p-4">
                 {Array.from({ length: 20 }).map((_, i) => (
                     <div key={i} className="absolute" style={{
                         top: `${Math.random() * 100}%`,

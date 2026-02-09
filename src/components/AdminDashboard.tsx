@@ -244,15 +244,20 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
     // Sync Diamonds (Global)
     useEffect(() => {
+        const fetchStatus = async () => {
+            const { data } = await supabase.from('diamonds_game_state').select('*').eq('id', 'diamonds_king').maybeSingle();
+            if (data) setDiamondsGameStatus(data);
+        };
+        fetchStatus();
+
         const channel = supabase.channel('admin_diamonds_cx')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'diamonds_game_state', filter: 'id=eq.diamonds_king' }, (payload) => {
                 setDiamondsGameStatus((prev: any) => ({ ...prev, ...payload.new }));
             })
             .subscribe();
 
-        supabase.from('diamonds_game_state').select('*').eq('id', 'diamonds_king').maybeSingle().then(({ data }) => {
-            if (data) setDiamondsGameStatus(data);
-        });
+        // Polling fallback every 2s to catch missed updates
+        const interval = setInterval(fetchStatus, 2000);
 
         // Persistent Broadcast Channel for Diamonds (Force Exit)
         const broadcastChannel = supabase.channel('diamonds_king_game');
@@ -265,6 +270,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         return () => {
             supabase.removeChannel(channel);
+            clearInterval(interval);
             if (diamondsControlChannelRef.current) {
                 supabase.removeChannel(diamondsControlChannelRef.current);
                 diamondsControlChannelRef.current = null;
@@ -1193,7 +1199,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             </AnimatePresence>
             {/* LEft SIDEBAR */}
             <aside className={`
-                w-80 border-r border-white/10 bg-black/60 backdrop-blur-xl p-6 flex flex-col gap-8 h-screen z-40 overflow-y-auto custom-scrollbar transition-transform duration-300
+                w-80 border-r border-white/10 bg-black/60 backdrop-blur-xl p-6 flex flex-col gap-8 h-screen z-40 overflow-y-auto admin-scrollbar transition-transform duration-300
                 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
                 fixed lg:sticky top-0 left-0 lg:left-auto
             `}>
@@ -1291,7 +1297,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             </aside>
 
             {/* Main Content Area */}
-            <main className="w-full lg:flex-1 p-4 lg:p-8 h-screen overflow-y-auto relative z-10 custom-scrollbar">
+            <main className="w-full lg:flex-1 p-4 lg:p-8 h-screen overflow-y-auto relative z-10 admin-scrollbar">
 
                 {/* Header */}
                 <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8 lg:mb-12 border-b border-white/10 pb-6">
@@ -1397,7 +1403,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     <Database size={18} />
                                     <h2 className="font-bold tracking-widest">SYSTEM LOGS</h2>
                                 </div>
-                                <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
                                     {[...Array(15)].map((_, i) => (
                                         <div key={i} className="flex gap-2 border-b border-white/5 pb-2">
                                             <span className="text-gray-500">[{new Date().toLocaleTimeString()}]</span>
@@ -2209,11 +2215,42 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            const { error } = await supabase.from('diamonds_game_state').update({ is_paused: !diamondsGameStatus.is_paused }).eq('id', 'diamonds_king');
+                                                            // Fetch latest state for atomic toggle
+                                                            const { data, error: fetchError } = await supabase.from('diamonds_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'diamonds_king').single();
+                                                            if (fetchError) {
+                                                                showToast(`SYNC ERROR: ${fetchError.message}`, 'error');
+                                                                return;
+                                                            }
+
+                                                            const currentPaused = data?.is_paused;
+                                                            const phaseStartedAt = data?.phase_started_at;
+                                                            const currentDuration = data?.phase_duration_sec || 0;
+
+                                                            let updatePayload: any = {};
+                                                            if (!currentPaused) {
+                                                                // PAUSING: Calculate remaining time and save it as the NEW duration
+                                                                const now = new Date();
+                                                                const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                const remaining = Math.max(0, currentDuration - elapsed);
+
+                                                                updatePayload = {
+                                                                    is_paused: true,
+                                                                    phase_duration_sec: remaining // Save snapshot of time left
+                                                                };
+                                                            } else {
+                                                                // RESUMING: Start fresh timer with the preserved duration
+                                                                updatePayload = {
+                                                                    is_paused: false,
+                                                                    phase_started_at: new Date().toISOString() // Restart clock NOW
+                                                                };
+                                                            }
+
+                                                            const { error } = await supabase.from('diamonds_game_state').update(updatePayload).eq('id', 'diamonds_king');
                                                             if (error) {
                                                                 showToast(`ERROR: ${error.message}`, 'error');
                                                             } else {
-                                                                showToast(diamondsGameStatus.is_paused ? "DIAMONDS RESUMED." : "DIAMONDS HALTED.", 'info');
+                                                                showToast(!currentPaused ? "DIAMONDS HALTED (TIME FROZEN)." : "DIAMONDS RESUMED.", 'info');
                                                             }
                                                         }}
                                                         className={`flex-1 px-3 py-2.5 border text-[8px] font-black uppercase rounded transition-all flex items-center justify-center gap-1.5 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
@@ -2561,7 +2598,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 />
                                             </div>
 
-                                            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                            <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
                                                 {(suit.id === 'clubs' ? clubsMessages : heartsMessages).filter(m => {
                                                     const query = suit.id === 'clubs' ? clubsSearchQuery : heartsSearchQuery;
                                                     const matchesSearch = !query ||
@@ -2701,7 +2738,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 </div>
 
                                 {/* List */}
-                                <div className="flex-1 overflow-y-auto p-0 custom-scrollbar">
+                                <div className="flex-1 overflow-y-auto p-0 admin-scrollbar">
                                     <table className="w-full text-left border-collapse">
                                         <thead className="bg-white/[0.02] sticky top-0 z-10 backdrop-blur-md">
                                             <tr>

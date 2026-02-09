@@ -1,12 +1,14 @@
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, getDocs } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { supabase } from '../../supabaseClient';
 
-import { Timer } from 'lucide-react';
+import { Timer, MessageSquare, X, CheckCircle2, Shield, Eye, FileText, Smartphone } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Loader } from '../Loader';
+import { ClubsPointsTable } from './ClubsPointsTable';
 
 
 interface ClubsGameMasterProps {
@@ -33,7 +35,7 @@ const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q']; // 
 const generateRandomDeck = () => {
     // Set 1: Clubs A-Q
     const set1: Card[] = RANKS.map(rank => ({
-        id: `clubs-${rank}-1`,
+        id: `clubs - ${rank} -1`,
         suit: 'clubs',
         rank,
         playerRole: null,
@@ -44,7 +46,7 @@ const generateRandomDeck = () => {
 
     // Set 2: Clubs A-Q
     const set2: Card[] = RANKS.map(rank => ({
-        id: `clubs-${rank}-2`,
+        id: `clubs - ${rank} -2`,
         suit: 'clubs',
         rank,
         playerRole: null,
@@ -81,6 +83,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     const [topPlayerScore, setTopPlayerScore] = useState(0);
     const [topPlayerId, setTopPlayerId] = useState<string | null>(null);
     const [topMasterScore, setTopMasterScore] = useState(0);
+
+    // Points Table State
+    const [showPointsTable, setShowPointsTable] = useState(false);
+    const [allScores, setAllScores] = useState<Record<string, number>>({});
 
     const [cards, setCards] = useState<Card[]>([]);
     const [messages, setMessages] = useState<any[]>([]);
@@ -119,6 +125,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     // Individual Master Voting
     const [masterVotes, setMasterVotes] = useState<Record<string, string[]>>({});
+    const [phase1Selections, setPhase1Selections] = useState<Record<string, any>>({});
     const [showResetOverlay, setShowResetOverlay] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
 
@@ -155,6 +162,37 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     // Player ID Mapping (UID → #PLAYER_XXX)
     const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
 
+    // Hint Cards State
+    const [hintCards, setHintCards] = useState<string[]>([]);
+
+    useEffect(() => {
+        if ((round === 1 || round === 4) && playerSelection && playerSelection.angel && playerSelection.demon) {
+            const targets = playerSelection;
+            const otherCards = cards.filter(c =>
+                c.id !== targets.angel &&
+                c.id !== targets.demon &&
+                !c.isRemoved
+            );
+
+            // True Random Decoy Selection (Shuffle then Pick)
+            const shuffledOthers = [...otherCards].sort(() => Math.random() - 0.5);
+            const randoms = shuffledOthers.slice(0, 2);
+
+            const combinedIds = [
+                targets.angel!,
+                targets.demon!,
+                ...randoms.map(c => c.id)
+            ];
+
+            // True Random Display Order
+            const finalHintList = [...combinedIds].sort(() => Math.random() - 0.5);
+            setHintCards(finalHintList);
+        } else {
+            setHintCards([]);
+        }
+        // Only re-run if round or selection changes, NOT on every render/timer tick
+    }, [round, playerSelection?.angel, playerSelection?.demon]);
+
     // Fetch Player ID Mapping from Firestore
     useEffect(() => {
         const fetchPlayerIds = async () => {
@@ -180,7 +218,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                 const mapping: Record<string, string> = {};
                 users.forEach((user: any, index) => {
-                    const pid = `#PLAYER_${(index + 1).toString().padStart(3, '0')}`;
+                    const pid = `#PLAYER_${(index + 1).toString().padStart(3, '0')} `;
                     if (user.id) mapping[user.id] = pid;
                     if (user.username) mapping[user.username] = pid;
                 });
@@ -271,6 +309,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     const updateDetailedScores = useCallback((status: any) => {
         if (status.scores && status.scores.current) {
             const currentScores = status.scores.current;
+
+            // Update All Scores for Points Table
+            setAllScores(currentScores);
+
             // const myUid = user?.id || ''; // Unused variable removed
 
             // Update My Score (as Master)
@@ -300,7 +342,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 const s = typeof score === 'number' ? score : 0;
                 const isPlayer = playerIds.has(uid);
 
-                console.log(`  [CLUBS MASTER] UID: ${uid}, Score: ${s}, IsPlayer: ${isPlayer}`);
+                console.log(`  [CLUBS MASTER]UID: ${uid}, Score: ${s}, IsPlayer: ${isPlayer} `);
 
                 if (isPlayer) {
                     // This is a PLAYER
@@ -369,7 +411,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     // Absolute Total reached in game (including bonuses)
                     const myFinalTotal = Number(currentScores[mUid || '']) || myScore;
 
-                    console.log(`[CLUBS MASTER] Pasting final score ${myFinalTotal} to profile ${user.email}`);
+                    console.log(`[CLUBS MASTER] Pasting final score ${myFinalTotal} to profile ${user.email} `);
 
                     await supabase.from('profiles').update({ visa_points: myFinalTotal }).eq('email', user.email);
                     console.log('[CLUBS MASTER] ✅ Self-sync complete.');
@@ -399,7 +441,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     .single();
 
                 if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
-                    console.log(`[CLUBS MASTER] Syncing score from profile: ${profile.visa_points}`);
+                    console.log(`[CLUBS MASTER] Syncing score from profile: ${profile.visa_points} `);
 
                     // Fetch latest status to get current scores object
                     const { data: latestStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
@@ -439,7 +481,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
         const suffix = _currentRound >= 4 ? '-2' : '-1';
 
         return RANKS.map(rank => ({
-            id: `clubs-${rank}${suffix}`,
+            id: `clubs - ${rank}${suffix} `,
             suit: 'clubs' as const,
             rank,
             playerRole: null,
@@ -482,12 +524,12 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 users.forEach((u: any) => {
                     const isMaster = u.role === 'master' || u.role === 'admin' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
                     if (isMaster) {
-                        const mid = `#MASTER_${mCount.toString().padStart(3, '0')}`;
+                        const mid = `#MASTER_${mCount.toString().padStart(3, '0')} `;
                         if (u.id) mapping[u.id] = mid;
                         if (u.username) mapping[u.username] = mid;
                         mCount++;
                     } else {
-                        const pid = `#PLAYER_${pCount.toString().padStart(3, '0')}`;
+                        const pid = `#PLAYER_${pCount.toString().padStart(3, '0')} `;
                         if (u.id) mapping[u.id] = pid;
                         if (u.username) mapping[u.username] = pid;
                         pCount++;
@@ -570,7 +612,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                                 // Future Deltas will be calculated from 1000 -> 870.
                                             }
                                             updated = true;
-                                            console.log(`[SCORE SYNC] Synced ${user.email} -> Start: ${points}`);
+                                            console.log(`[SCORE SYNC] Synced ${user.email} -> Start: ${points} `);
                                         }
                                     }
                                 });
@@ -649,6 +691,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         })));
                     }
                     if (data.round_data.master_selection) setMySelection(data.round_data.master_selection);
+                    if (data.round_data.phase1_selections) setPhase1Selections(data.round_data.phase1_selections);
                     if (data.round_data.player_selection) {
                         setPlayerSelection(data.round_data.player_selection);
                         setPlayerLocked(true);
@@ -722,7 +765,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                 // Debug log every 5 seconds or if near zero
                 if (secondsLeft % 5 === 0 || secondsLeft < 5) {
-                    console.log(`TIMER DEBUG: Expiry=${phaseExpiry.toISOString()}, Now=${now.toISOString()}, Diff=${diff}, Display=${secondsLeft}`);
+                    console.log(`TIMER DEBUG: Expiry = ${phaseExpiry.toISOString()}, Now = ${now.toISOString()}, Diff = ${diff}, Display = ${secondsLeft} `);
                 }
 
                 // REMOVED: Forced timer sync was causing glitches
@@ -816,6 +859,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     if (!playerLocked) setPlayerLocked(true);
                 }
 
+                if (status.round_data?.phase1_selections) {
+                    setPhase1Selections(status.round_data.phase1_selections);
+                }
+
                 // --- SYNC DETAILED SCORES (HUD) ---
                 if (status.scores) {
                     const currentScores = status.scores.current || {};
@@ -877,6 +924,9 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 // We fetch current, merge, and write back.
                 // Since only Master does this (and we assume 1 master or they race less frequently), it's safer.
                 try {
+                    // Update local state immediately for UI responsiveness
+                    setPhase1Selections(prev => ({ ...prev, [userId]: selection }));
+
                     const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
                     const currentData = data?.round_data || {};
                     const currentSelections = currentData.phase1_selections || {};
@@ -1029,7 +1079,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     }
 
                     const picked = validCards[Math.floor(Math.random() * validCards.length)].id;
-                    console.log(`[AUTO-PICK] Selected ${picked} from ${validCards.length} candidates.`);
+                    console.log(`[AUTO - PICK] Selected ${picked} from ${validCards.length} candidates.`);
                     return picked;
                 };
 
@@ -1284,10 +1334,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                         .eq('email', targetEmail);
 
                                     if (updateError) {
-                                        console.error(`[CLUBS MASTER] Failed to update stats for ${targetEmail}:`, updateError);
+                                        console.error(`[CLUBS MASTER] Failed to update stats for ${targetEmail}: `, updateError);
                                     }
                                 } catch (innerErr) {
-                                    console.error(`[CLUBS MASTER] Error processing user ${uid}:`, innerErr);
+                                    console.error(`[CLUBS MASTER] Error processing user ${uid}: `, innerErr);
                                 }
                             }
                         } catch (err) {
@@ -1346,6 +1396,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     setPlayerLocked(false);
                     setMasterVotes({});
                     setPlayersVotes({});
+                    setPhase1Selections({}); // Clear for next round
 
                     await supabase.from('clubs_game_status').update({
                         gameState: 'setup_phase1',
@@ -1390,7 +1441,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                 if (latestSession) {
                     activeGameId = latestSession.id;
-                    console.log(`[RECOVERY] Found existing active session: ${activeGameId}`);
+                    console.log(`[RECOVERY] Found existing active session: ${activeGameId} `);
                 } else {
                     // 2. If no session exists, CREATE ONE
                     console.warn("[RECOVERY] No active session found. Creating new session...");
@@ -1407,7 +1458,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                     if (newSession) {
                         activeGameId = newSession.id;
-                        console.log(`[RECOVERY] Created new session: ${activeGameId}`);
+                        console.log(`[RECOVERY] Created new session: ${activeGameId} `);
                     } else {
                         console.error("[RECOVERY FAILED] Could not create session:", createError);
                     }
@@ -1447,7 +1498,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             masterIds.add('MASTER');
             masterIds.add('SYSTEM_ARCHITECT');
 
-            console.log(`[CLUBS EVAL] Master IDs:`, Array.from(masterIds), "mUid:", mUid);
+            console.log(`[CLUBS EVAL] Master IDs: `, Array.from(masterIds), "mUid:", mUid);
 
             const angelReward = 300 - ((round - 1) * 50);
 
@@ -1482,10 +1533,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             const targetRole = isMaster ? pSel : mSel;
                             if (consensusCard === targetRole.angel) {
                                 score += angelReward;
-                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''}ANGEL`);
+                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''} ANGEL`);
                             } else if (consensusCard === targetRole.demon) {
                                 score -= 50;
-                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''}DEMON`);
+                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''} DEMON`);
                             }
                         }
                     });
@@ -1575,7 +1626,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         .in('id', participantIds);
 
                     if (!pErr && profiles) {
-                        console.log(`[ROUND PERSIST] Storing results for Game ${activeGameId}, Participants: ${profiles.length}`);
+                        console.log(`[ROUND PERSIST] Storing results for Game ${activeGameId}, Participants: ${profiles.length} `);
 
                         for (const profile of profiles) {
                             const roundDelta = roundScores[profile.id] || 0;
@@ -1591,9 +1642,9 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             });
 
                             if (rpcError) {
-                                console.error(`[PERSIST ERROR] Failed to save for ${profile.email}:`, rpcError);
+                                console.error(`[PERSIST ERROR] Failed to save for ${profile.email}: `, rpcError);
                             } else {
-                                // console.log(`[PERSIST SUCCESS] Saved R${round} for ${profile.email}`);
+                                // console.log(`[PERSIST SUCCESS] Saved R${ round } for ${ profile.email }`);
                             }
                         }
                     } else {
@@ -1658,7 +1709,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             });
                         }
                     } catch (err) {
-                        console.error(`[ROUND SCORES] Error preparing record for ${uid}:`, err);
+                        console.error(`[ROUND SCORES] Error preparing record for ${uid}: `, err);
                     }
                 }
 
@@ -1712,12 +1763,12 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                 p_adjustment: roundDelta
                             });
     
-                            if (rpcError) console.error(`[PROFILE SYNC ERROR] ${userData.email}:`, rpcError);
-                            else console.log(`[PROFILE SYNC] Adjusted ${userData.email} by ${roundDelta}`);
+                            if (rpcError) console.error(`[PROFILE SYNC ERROR] ${ userData.email }: `, rpcError);
+                            else console.log(`[PROFILE SYNC] Adjusted ${ userData.email } by ${ roundDelta } `);
                         }
                     }
                 } catch (err) {
-                    console.error(`[PROFILE SYNC FAIL] UID ${uid}`, err);
+                    console.error(`[PROFILE SYNC FAIL] UID ${ uid } `, err);
                 }
             }
             */
@@ -1746,7 +1797,17 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     return (
         <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
             {/* HEADER HUB - Consolidated with Main Header */}
-            <div className={`px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0`}>
+            <div className={`px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0 relative`}>
+
+                {/* POINTS TABLE BUTTON */}
+                <button
+                    onClick={() => setShowPointsTable(true)}
+                    className="sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[10px] font-bold uppercase tracking-widest transition-all mb-2 sm:mb-0"
+                >
+                    <FileText size={14} />
+                    <span>Rules & Points</span>
+                </button>
+
                 <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
                     <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
                         {/* ROUND */}
@@ -1819,25 +1880,67 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             </p>
                         </div>
 
+                        {/* Hint Box for Round 1 & 4 */}
+                        <AnimatePresence>
+                            {(round === 1 || round === 4) && gameState === 'playing' && (
+                                <motion.div
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: 20 }}
+                                    className="px-4 py-2 bg-purple-500/10 border border-purple-500/30 rounded-lg backdrop-blur-md shadow-[0_0_20px_rgba(168,85,247,0.15)] flex flex-col items-center gap-2"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                                        <span className="text-[10px] font-black text-purple-400 tracking-[0.2em] uppercase">Tactical Intel</span>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {hintCards.map(hId => {
+                                            const card = cards.find(c => c.id === hId);
+                                            const rank = card?.rank || '?';
+                                            const suit = card?.suit || 'clubs';
+                                            const symbol = suit === 'hearts' ? '♥' : suit === 'diamonds' ? '♦' : suit === 'spades' ? '♠' : '♣';
+                                            const color = (suit === 'hearts' || suit === 'diamonds') ? 'text-red-500' : 'text-white';
+
+                                            return (
+                                                <div key={hId} className="w-10 h-10 sm:w-12 sm:h-12 rounded bg-white/5 border border-white/10 flex flex-col items-center justify-center shadow-lg group hover:border-purple-500/50 transition-all">
+                                                    <span className={`text - sm sm: text - base font - black ${color} leading - none`}>{rank}</span>
+                                                    <span className={`text - [10px] sm: text - xs ${color} opacity - 80`}>{symbol}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-[7px] text-white/40 font-mono uppercase tracking-widest text-center mt-1">Player's heroes hidden in this set</p>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
                         {/* Master Selection Display */}
                         {(gameState === 'setup_phase1' || gameState === 'setup' || gameState === 'selection_reveal') && (
                             <div className="flex items-center gap-4">
-                                <div className={`px-4 py-2 rounded border ${mySelection.angel ? 'border-yellow-500 bg-yellow-500/10' : 'border-white/10 bg-white/5'} text-center w-24`}>
-                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">SECRET ANGEL</p>
-                                    <p className="text-[6px] text-green-500 uppercase tracking-widest mb-1 leading-none">THEY HUNT THIS</p>
-                                    <p className="text-lg font-black text-yellow-500">{cards.find(c => c.id === mySelection.angel)?.rank || '-'}</p>
-                                </div>
-                                <div className={`px-4 py-2 rounded border ${mySelection.demon ? 'border-red-500 bg-red-500/10' : 'border-white/10 bg-white/5'} text-center w-24`}>
-                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">SECRET DEMON</p>
-                                    <p className="text-[6px] text-red-500 uppercase tracking-widest mb-1 leading-none">THEY AVOID THIS</p>
-                                    <p className="text-lg font-black text-red-500">{cards.find(c => c.id === mySelection.demon)?.rank || '-'}</p>
+                                <div className={`relative px-4 py-3 rounded-lg border transition-all duration-300 ${mySelection.angel ? 'border-yellow-500/50 bg-yellow-500/10 shadow-[0_0_15px_rgba(234,179,8,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[100px]`}>
+                                    <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-yellow-500/30 to-transparent" />
+                                    <p className="text-[8px] text-yellow-500/70 font-black uppercase tracking-[0.2em] mb-1">SECRET ANGEL</p>
+                                    <p className="text-[6px] text-white/30 uppercase tracking-widest mb-1.5 leading-none">CONSENSUS TARGET</p>
+                                    <p className="text-xl font-mono font-black text-white">{cards.find(c => c.id === mySelection.angel)?.rank || '-'}</p>
                                 </div>
 
-                                <div className="h-8 w-px bg-white/10 mx-2" />
+                                <div className={`relative px-4 py-3 rounded-lg border transition-all duration-300 ${mySelection.demon ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[100px]`}>
+                                    <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-red-500/30 to-transparent" />
+                                    <p className="text-[8px] text-red-500/70 font-black uppercase tracking-[0.2em] mb-1">SECRET DEMON</p>
+                                    <p className="text-[6px] text-white/30 uppercase tracking-widest mb-1.5 leading-none">AVOIDANCE TARGET</p>
+                                    <p className="text-xl font-mono font-black text-white">{cards.find(c => c.id === mySelection.demon)?.rank || '-'}</p>
+                                </div>
 
-                                <div className={`px-4 py-2 rounded border ${playerLocked ? 'border-green-500/50 bg-green-900/10' : 'border-white/10 bg-white/5'} text-center w-32`}>
-                                    <p className="text-[8px] text-white/30 uppercase tracking-widest mb-1">PLAYER STATUS</p>
-                                    <p className="text-xs font-bold text-white">{playerLocked ? 'READY' : 'DECIDING...'}</p>
+                                <div className="h-8 w-px bg-white/5 mx-2" />
+
+                                <div className={`px-4 py-3 rounded-lg border transition-all duration-300 ${Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'border-green-500/30 bg-green-500/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]' : 'border-white/5 bg-white/[0.02]'} text-center min-w-[120px]`}>
+                                    <p className="text-[8px] text-white/30 font-black uppercase tracking-[0.2em] mb-1.5">PLAYER STATUS</p>
+                                    <div className="flex items-center justify-center gap-2">
+                                        <div className={`w-1.5 h-1.5 rounded-full ${Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'bg-green-500' : 'bg-white/10 animate-pulse'}`} />
+                                        <p className={`text-[10px] font-mono font-bold ${Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'text-green-500' : 'text-white/40'}`}>
+                                            {Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'SYNC_LOCKED' : 'CALCULATING...'}
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -1882,7 +1985,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                                             // 3. Fetch Profiles & Map (Case-Insensitive)
                                             if (emails.length > 0) {
-                                                const orFilter = emails.map(e => `email.ilike.${e}`).join(',');
+                                                const orFilter = emails.map(e => `email.ilike.${e} `).join(',');
                                                 const { data: profileData } = await supabase.from('profiles').select('email, visa_points').or(orFilter);
 
                                                 if (profileData) {
@@ -1941,6 +2044,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                             // Clear local vote state to prevent stale triggers
                                             setPlayersVotes({});
                                             setMasterVotes({});
+                                            setPhase1Selections({}); // Clear for fresh start
                                             playersVotesRef.current = {};
                                             masterVotesRef.current = {};
                                         }
@@ -2133,7 +2237,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         <div className="p-3 border-b border-white/10 bg-[#0F0F13]">
                             <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS INTERCEPT</h3>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-black scrollbar-track-transparent">
                             {messages.length === 0 && (
                                 <div className="text-center mt-10 opacity-30">
                                     <p className="text-xs uppercase tracking-widest font-mono">Channel Silent...</p>
@@ -2182,6 +2286,13 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     </div>
                 </div>
             </div>
+
+            {/* POINTS TABLE MODAL */}
+            <ClubsPointsTable
+                isOpen={showPointsTable}
+                onClose={() => setShowPointsTable(false)}
+                currentRound={round}
+            />
 
             {/* GAME OVER OVERLAY */}
             {

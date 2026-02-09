@@ -105,109 +105,132 @@ const evaluateBattle = (p1: DiamondsPlayer, p2: DiamondsPlayer): BattleResult =>
     let p2Sum = 0;
 
     // A. Shotgun Check (Zombie Hunter Logic)
-    // USER REQUEST: If player has zombie (in hand or slots) and opponent uses gun, eliminate player.
-    const p1HasZombie = p1.slots.some(s => s?.specialType === 'zombie') || p1.cards.some(c => c.specialType === 'zombie');
-    const p2HasZombie = p2.slots.some(s => s?.specialType === 'zombie') || p2.cards.some(c => c.specialType === 'zombie');
+    // USER REQUEST: Shotgun now neutralizes Zombie cards instead of eliminating players.
     const p1UsedGun = p1.slots.some(s => s?.specialType === 'shotgun');
     const p2UsedGun = p2.slots.some(s => s?.specialType === 'shotgun');
 
-    if (p1UsedGun && p2HasZombie) {
-        res.winners.push(p1.id);
-        res.eliminatedIds.push(p2.id);
-        res.effects?.push({ playerId: p2.id, type: 'eliminated', desc: 'ELIMINATED BY SHOTGUN' });
-    }
-    if (p2UsedGun && p1HasZombie) {
-        res.winners.push(p2.id);
-        res.eliminatedIds.push(p1.id);
-        res.effects?.push({ playerId: p1.id, type: 'eliminated', desc: 'ELIMINATED BY SHOTGUN' });
+    // TRACKING: Map of slotIndex -> neutralizedRank
+    const p1NeutralizedZombies = new Map<number, number>();
+    const p2NeutralizedZombies = new Map<number, number>();
+
+    if (p1UsedGun) {
+        // Target P2's Zombies (Slots)
+        p2.slots.forEach((s, i) => {
+            if (s?.specialType === 'zombie') {
+                const newVal = Math.floor(Math.random() * 8) + 2;
+                p2NeutralizedZombies.set(i, newVal);
+                res.effects?.push({
+                    playerId: p2.id,
+                    type: 'cured',
+                    desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN SLOT ${i}`,
+                    originalCardId: s.id,
+                    slotIndex: i
+                });
+            }
+        });
+        // Target P2's Zombies (Hand - cards not in slots)
+        p2.cards.forEach(c => {
+            if (c.specialType === 'zombie' && !p2.slots.some(s => s?.id === c.id)) {
+                const newVal = Math.floor(Math.random() * 8) + 2;
+                res.effects?.push({
+                    playerId: p2.id,
+                    type: 'cured',
+                    desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN HAND`,
+                    originalCardId: c.id,
+                    slotIndex: -1
+                });
+            }
+        });
     }
 
-    // Determine outcomes early if eliminated
-    if (res.eliminatedIds.length > 0) {
-        if (res.winners.length > 1) {
-            res.winners = [];
-            res.losers.push(p1.id, p2.id);
-        } else if (res.winners.length === 1) {
-            const soleWinner = res.winners[0];
-            const soleLoser = soleWinner === p1.id ? p2.id : p1.id;
-            res.losers.push(soleLoser);
-        } else {
-            res.losers.push(p1.id, p2.id);
-        }
-        // Still fill slot details for UI
-        for (let i = 0; i < 5; i++) {
-            res.slotDetails?.push({
-                p1Val: 0, p2Val: 0,
-                p1Card: p1.slots[i], p2Card: p2.slots[i],
-                outcome: 'Eliminated'
-            });
-        }
-        return res;
+    if (p2UsedGun) {
+        // Target P1's Zombies (Slots)
+        p1.slots.forEach((s, i) => {
+            if (s?.specialType === 'zombie') {
+                const newVal = Math.floor(Math.random() * 8) + 2;
+                p1NeutralizedZombies.set(i, newVal);
+                res.effects?.push({
+                    playerId: p1.id,
+                    type: 'cured',
+                    desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN SLOT ${i}`,
+                    originalCardId: s.id,
+                    slotIndex: i
+                });
+            }
+        });
+        // Target P1's Zombies (Hand)
+        p1.cards.forEach(c => {
+            if (c.specialType === 'zombie' && !p1.slots.some(s => s?.id === c.id)) {
+                const newVal = Math.floor(Math.random() * 8) + 2;
+                res.effects?.push({
+                    playerId: p1.id,
+                    type: 'cured',
+                    desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN HAND`,
+                    originalCardId: c.id,
+                    slotIndex: -1
+                });
+            }
+        });
     }
 
     // B. Slot Comparison
     for (let i = 0; i < 5; i++) {
         let c1 = p1.slots[i];
         let c2 = p2.slots[i];
-        let v1 = c1?.value || 0;
-        let v2 = c2?.value || 0;
 
-        // Zombie vs Zombie (Clash)
-        if (c1?.specialType === 'zombie' && c2?.specialType === 'zombie') {
+        // APPLIED: Shotgun Neutralization (Pre-comparison Rank Injection)
+        let v1 = p1NeutralizedZombies.has(i) ? p1NeutralizedZombies.get(i)! : (c1?.value || 0);
+        let v2 = p2NeutralizedZombies.has(i) ? p2NeutralizedZombies.get(i)! : (c2?.value || 0);
+
+        // If neutralized, we skip standard Zombie logic for this slot
+        const p1WasHit = p1NeutralizedZombies.has(i);
+        const p2WasHit = p2NeutralizedZombies.has(i);
+
+        // Zombie vs Zombie (Clash) - only if not hit by shotgun
+        if (!p1WasHit && !p2WasHit && c1?.specialType === 'zombie' && c2?.specialType === 'zombie') {
             v1 = 0; v2 = 0;
             res.effects?.push({ playerId: 'both', type: 'infected', desc: 'ZOMBIE CLASH (0-0)' });
         }
         // Zombie vs Injection (Cure / Transformation)
-        else if (c1?.specialType === 'zombie' && c2?.specialType === 'injection') {
+        else if (!p1WasHit && c1?.specialType === 'zombie' && c2?.specialType === 'injection') {
             const newVal = Math.floor(Math.random() * 8) + 2;
-            v2 = 0;
-            // PRIORITY: If P1 is already eliminated by shotgun, don't cure
-            if (res.eliminatedIds.includes(p1.id)) {
-                v1 = 0;
-            } else {
-                v1 = newVal;
-                res.effects?.push({
-                    playerId: p1.id,
-                    type: 'cured',
-                    desc: `ZOMBIE NEUTRALIZED TO ${newVal} IN SLOT ${i}`,
-                    originalCardId: c1.id,
-                    slotIndex: i
-                });
-            }
+            v2 = 0; v1 = newVal;
+            res.effects?.push({
+                playerId: p1.id,
+                type: 'cured',
+                desc: `ZOMBIE NEUTRALIZED TO ${newVal} IN SLOT ${i}`,
+                originalCardId: c1.id,
+                slotIndex: i
+            });
         }
-        else if (c2?.specialType === 'zombie' && c1?.specialType === 'injection') {
+        else if (!p2WasHit && c2?.specialType === 'zombie' && c1?.specialType === 'injection') {
             const newVal = Math.floor(Math.random() * 8) + 2;
-            v1 = 0;
-            if (res.eliminatedIds.includes(p2.id)) {
-                v2 = 0;
-            } else {
-                v2 = newVal;
-                res.effects?.push({
-                    playerId: p2.id,
-                    type: 'cured',
-                    desc: `ZOMBIE NEUTRALIZED TO ${newVal} IN SLOT ${i}`,
-                    originalCardId: c2.id,
-                    slotIndex: i
-                });
-            }
+            v1 = 0; v2 = newVal;
+            res.effects?.push({
+                playerId: p2.id,
+                type: 'cured',
+                desc: `ZOMBIE NEUTRALIZED TO ${newVal} IN SLOT ${i}`,
+                originalCardId: c2.id,
+                slotIndex: i
+            });
         }
         // Zombie vs Normal (Spread)
-        else if (c1?.specialType === 'zombie' && c2?.type === 'standard') {
+        else if (!p1WasHit && c1?.specialType === 'zombie' && c2?.type === 'standard' && !p2WasHit) {
             v1 = 999; v2 = 0;
             if (!res.eliminatedIds.includes(p2.id)) {
                 res.effects?.push({ playerId: p2.id, type: 'infected', desc: 'INFECTED BY ZOMBIE' });
             }
         }
-        else if (c2?.specialType === 'zombie' && c1?.type === 'standard') {
+        else if (!p2WasHit && c2?.specialType === 'zombie' && c1?.type === 'standard' && !p1WasHit) {
             v2 = 999; v1 = 0;
             if (!res.eliminatedIds.includes(p1.id)) {
                 res.effects?.push({ playerId: p1.id, type: 'infected', desc: 'INFECTED BY ZOMBIE' });
             }
         }
 
-        // Shotgun / Injection (Normal case - usage 1 time logic handled in DiamondsGame)
-        if (c1?.specialType === 'shotgun' || (c1?.specialType === 'injection' && c2?.specialType !== 'zombie')) v1 = 0;
-        if (c2?.specialType === 'shotgun' || (c2?.specialType === 'injection' && c1?.specialType !== 'zombie')) v2 = 0;
+        // Shotgun / Injection (Cost resolution)
+        if (c1?.specialType === 'shotgun' || (c1?.specialType === 'injection' && (c2?.specialType !== 'zombie' || p2WasHit))) v1 = 0;
+        if (c2?.specialType === 'shotgun' || (c2?.specialType === 'injection' && (c1?.specialType !== 'zombie' || p1WasHit))) v2 = 0;
 
         p1Sum += v1;
         p2Sum += v2;
@@ -244,26 +267,47 @@ const evaluateBattle3Way = (p1: DiamondsPlayer, p2: DiamondsPlayer, p3: Diamonds
     };
     const players = [p1, p2, p3];
 
+    // TRACKING: Map of playerId -> slotIndex -> neutralizedRank for shotgun effects
+    const neutralizedZombiesByPlayer = new Map<string, Map<number, number>>();
+    players.forEach(p => neutralizedZombiesByPlayer.set(p.id, new Map<number, number>()));
+
     // 1. Shotgun Check (Hand-wide) - Multi-Hunter De-duplication
     players.forEach(p => {
         if (p.slots.some(s => s?.specialType === 'shotgun')) {
-            let successfullyEliminatedNewTarget = false;
             players.forEach(target => {
                 if (target.id === p.id) return;
-                const targetHasZombie = target.slots.some(s => s?.specialType === 'zombie') || target.cards.some(c => c.specialType === 'zombie');
-                if (targetHasZombie) {
-                    // USER REQUEST: ensure only one elimination point (one winner per kill)
-                    if (!res.eliminatedIds.includes(target.id)) {
-                        res.eliminatedIds.push(target.id);
-                        res.effects?.push({ playerId: target.id, type: 'eliminated', desc: 'ELIMINATED BY SHOTGUN' });
-                        successfullyEliminatedNewTarget = true;
+
+                target.slots.forEach((s, idx) => {
+                    if (s?.specialType === 'zombie') {
+                        const newVal = Math.floor(Math.random() * 8) + 2;
+                        if (!res.effects?.some(e => e.playerId === target.id && e.slotIndex === idx && e.type === 'cured')) {
+                            res.effects?.push({
+                                playerId: target.id,
+                                type: 'cured',
+                                desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN SLOT ${idx}`,
+                                originalCardId: s.id,
+                                slotIndex: idx
+                            });
+                            neutralizedZombiesByPlayer.get(target.id)?.set(idx, newVal);
+                        }
                     }
-                }
+                });
+                // Target Hand
+                target.cards.forEach(c => {
+                    if (c.specialType === 'zombie' && !target.slots.some(s => s?.id === c.id)) {
+                        const newVal = Math.floor(Math.random() * 8) + 2;
+                        if (!res.effects?.some(e => e.playerId === target.id && e.originalCardId === c.id && e.type === 'cured')) {
+                            res.effects?.push({
+                                playerId: target.id,
+                                type: 'cured',
+                                desc: `ZOMBIE SHATTERED BY SHOTGUN TO ${newVal} IN HAND`,
+                                originalCardId: c.id,
+                                slotIndex: -1
+                            });
+                        }
+                    }
+                });
             });
-            // Credit this hunter as a winner only if they secured a kill that others didn't already take
-            if (successfullyEliminatedNewTarget) {
-                if (!res.winners.includes(p.id)) res.winners.push(p.id);
-            }
         }
     });
 
@@ -271,11 +315,19 @@ const evaluateBattle3Way = (p1: DiamondsPlayer, p2: DiamondsPlayer, p3: Diamonds
     const sums = [0, 0, 0];
     for (let i = 0; i < 5; i++) {
         const cards = players.map(p => p.slots[i]);
-        const vals = cards.map(c => c?.type === 'standard' ? c.value : 0);
+        const initialVals = cards.map((c, idx) => {
+            const playerNeutralizedMap = neutralizedZombiesByPlayer.get(players[idx].id);
+            return playerNeutralizedMap?.has(i) ? playerNeutralizedMap.get(i)! : (c?.value || 0);
+        });
+        const vals = [...initialVals]; // Use a mutable copy for slot-specific modifications
+
         const zombies = cards.map(c => c?.specialType === 'zombie');
         const injections = cards.map(c => c?.specialType === 'injection');
 
-        const zombieCount = zombies.filter(z => z).length;
+        // Check which zombies were hit by shotgun in this slot (already reflected in `vals` from `neutralizedZombiesByPlayer`)
+        const zombieNeutralizedByShotgun = zombies.map((isZ, idx) => isZ && neutralizedZombiesByPlayer.get(players[idx].id)?.has(i));
+
+        const zombieCount = zombies.filter((z, idx) => z && !zombieNeutralizedByShotgun[idx]).length;
         const injectionCount = injections.filter(i => i).length;
 
         if (zombieCount > 0 && injectionCount > 0) {

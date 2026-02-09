@@ -877,20 +877,24 @@ export const SpadesGameMaster: React.FC<SpadesGameMasterProps> = ({ onComplete, 
                                     </h3>
                                     {/* Target Card */}
                                     <div className="mb-4 text-center">
-                                        <div className="text-xs text-slate-500 uppercase">TARGET</div>
+                                        <div className="text-xs text-slate-500 uppercase mb-2">TARGET</div>
                                         {info.target_card ? (
-                                            <div className="text-xl font-black text-white">
-                                                {info.target_card.rank} {info.target_card.suit}
+                                            <div className="relative w-24 h-36 mx-auto rounded border border-white/10 overflow-hidden shadow-2xl">
+                                                <img
+                                                    src={`/borderland_cards/${info.target_card.suit.charAt(0).toUpperCase() + info.target_card.suit.slice(1)}_${info.target_card.rank}.png`}
+                                                    className="w-full h-full object-cover"
+                                                    alt={`${info.target_card.rank} of ${info.target_card.suit}`}
+                                                />
                                             </div>
                                         ) : <div className="text-slate-600 italic">Hidden</div>}
                                     </div>
                                     {/* Players in Group */}
                                     <div className="space-y-2">
                                         {Object.values(players).filter(p => p.groupId === parseInt(gid)).map(p => (
-                                            <div key={p.id} className={`flex justify - between text - sm p - 2 rounded ${info.winner_id === p.id ? 'bg-yellow-500/20 border border-yellow-500' : 'bg-slate-900'} `}>
-                                                <span>{p.username}</span>
-                                                <div className="flex gap-2">
-                                                    <span className="text-yellow-500">Bid: {p.bid ?? '-'}</span>
+                                            <div key={p.id} className={`flex justify-between items-center text-sm p-2 rounded ${info.winner_id === p.id ? 'bg-yellow-500/20 border border-yellow-500' : 'bg-slate-900'} `}>
+                                                <span className="truncate max-w-[120px]">{p.username}</span>
+                                                <div className="flex gap-2 font-mono text-[10px]">
+                                                    <span className="text-yellow-500">BID:{p.bid ?? '-'}</span>
                                                     <span className="text-blue-400">{p.score}</span>
                                                 </div>
                                             </div>

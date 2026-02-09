@@ -1148,17 +1148,12 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onClose }) => {
                                             {p.cards && p.cards.length > 0 && (
                                                 <div className="flex flex-wrap gap-1 mt-2 pl-9">
                                                     {p.cards.map((c: any, i: number) => (
-                                                        <div key={i} className={`
-                                                            flex flex-col items-center justify-center w-6 h-8 rounded-[2px] border 
-                                                            ${c.color === 'red' ? 'bg-red-950 border-red-500/50 text-red-500' : 'bg-slate-900 border-slate-500/50 text-slate-400'}
-                                                        `}>
-                                                            <span className="text-[8px] font-bold leading-none">{c.rank}</span>
-                                                            <span className="text-[8px] leading-none -mt-0.5">
-                                                                {c.suit === 'hearts' && '♥'}
-                                                                {c.suit === 'diamonds' && '♦'}
-                                                                {c.suit === 'clubs' && '♣'}
-                                                                {c.suit === 'spades' && '♠'}
-                                                            </span>
+                                                        <div key={i} className="relative w-6 h-9 rounded-[2px] border border-white/10 overflow-hidden bg-black/40">
+                                                            <img
+                                                                src={`/borderland_cards/${c.suit.charAt(0).toUpperCase() + c.suit.slice(1)}_${c.rank}.png`}
+                                                                className="w-full h-full object-cover"
+                                                                alt={`${c.rank} of ${c.suit}`}
+                                                            />
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1460,11 +1455,26 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onClose }) => {
                                 <p className="text-xs text-slate-500 font-mono mb-4">
                                     {(round === 2 || round === 4) ? 'PRECISE TARGET LOCK:' : 'DECRYPTED SIGNAL FRAGMENT:'}
                                 </p>
-                                <p className="text-2xl font-bold font-mono text-blue-300">
-                                    {(round === 2 || round === 4) && localRoundData?.target_card
-                                        ? `${localRoundData.target_card.rank} OF ${localRoundData.target_card.suit.toUpperCase()}`
-                                        : (localRoundData?.hint || 'AWAITING SIGNAL...')}
-                                </p>
+                                <div className="flex flex-col items-center gap-4">
+                                    {(round === 2 || round === 4) && localRoundData?.target_card ? (
+                                        <>
+                                            <div className="relative w-32 h-48 sm:w-40 sm:h-60 rounded-xl border-4 border-white/20 overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.2)]">
+                                                <img
+                                                    src={`/borderland_cards/${localRoundData.target_card.suit.charAt(0).toUpperCase() + localRoundData.target_card.suit.slice(1)}_${localRoundData.target_card.rank}.png`}
+                                                    className="w-full h-full object-cover"
+                                                    alt={`${localRoundData.target_card.rank} of ${localRoundData.target_card.suit}`}
+                                                />
+                                            </div>
+                                            <p className="text-xl font-bold font-mono text-blue-300 uppercase">
+                                                {localRoundData.target_card.rank} OF {localRoundData.target_card.suit}
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <p className="text-2xl font-bold font-mono text-blue-300">
+                                            {localRoundData?.hint || 'AWAITING SIGNAL...'}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1621,36 +1631,24 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onClose }) => {
                             </h2>
 
                             <div className="flex items-center gap-6 sm:gap-12 flex-wrap justify-center">
-                                {/* Target Card */}
                                 {localRoundData.target_card && (
                                     <motion.div
                                         initial={{ rotateY: 90 }}
                                         animate={{ rotateY: 0 }}
                                         transition={{ type: 'spring', damping: 12 }}
-                                        className={`w-48 h-64 sm:w-64 sm:h-80 rounded-xl border-4 sm:border-8 flex flex-col items-center justify-center relative shadow-[0_0_100px_rgba(255,255,255,0.1)] ${localRoundData.target_card.color === 'red'
-                                            ? 'bg-white border-red-600 text-red-600'
-                                            : 'bg-white border-black text-black'
-                                            }`}
+                                        className="relative w-48 h-72 sm:w-64 sm:h-96 group"
                                     >
-                                        <span className="text-6xl sm:text-8xl font-black font-oswald">
-                                            {localRoundData.target_card.rank}
-                                        </span>
-                                        <span className="text-3xl sm:text-4xl mt-1 sm:mt-2">
-                                            {localRoundData.target_card.suit === 'hearts' && '♥'}
-                                            {localRoundData.target_card.suit === 'diamonds' && '♦'}
-                                            {localRoundData.target_card.suit === 'clubs' && '♣'}
-                                            {localRoundData.target_card.suit === 'spades' && '♠'}
-                                        </span>
-
-                                        <div className="absolute top-2 left-2 sm:top-4 sm:left-4 text-sm sm:text-xl font-bold">
-                                            {localRoundData.target_card.rank}
-                                        </div>
-                                        <div className="absolute bottom-2 right-2 sm:bottom-4 sm:right-4 text-sm sm:text-xl font-bold rotate-180">
-                                            {localRoundData.target_card.rank}
-                                        </div>
-
-                                        <div className="absolute bottom-2 left-2 sm:bottom-4 sm:left-4 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-black/80 text-white text-[10px] sm:text-xs font-mono rounded">
-                                            {scoreCard(localRoundData.target_card!) > 0 ? '+' : ''}{scoreCard(localRoundData.target_card!)}
+                                        <div className={`absolute -inset-2 rounded-2xl blur-2xl opacity-30 ${localRoundData.target_card.color === 'red' ? 'bg-red-600' : 'bg-white'}`} />
+                                        <div className={`relative h-full w-full rounded-xl border-4 sm:border-8 overflow-hidden shadow-2xl ${localRoundData.target_card.color === 'red' ? 'border-red-600' : 'border-white/20'}`}>
+                                            <img
+                                                src={`/borderland_cards/${localRoundData.target_card.suit.charAt(0).toUpperCase() + localRoundData.target_card.suit.slice(1)}_${localRoundData.target_card.rank}.png`}
+                                                className="w-full h-full object-cover"
+                                                alt={`${localRoundData.target_card.rank} of ${localRoundData.target_card.suit}`}
+                                            />
+                                            {/* Score Overlay */}
+                                            <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/80 backdrop-blur-md text-white text-[10px] sm:text-xs font-mono rounded border border-white/20 shadow-lg z-10">
+                                                {scoreCard(localRoundData.target_card!) > 0 ? '+' : ''}{scoreCard(localRoundData.target_card!)}
+                                            </div>
                                         </div>
                                     </motion.div>
                                 )}
@@ -1698,18 +1696,13 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onClose }) => {
                                                 {(myPlayer.cards || []).map((c, i) => (
                                                     <div
                                                         key={i}
-                                                        className={`w-12 h-16 border-2 rounded flex flex-col items-center justify-center text-sm font-bold ${c.color === 'red'
-                                                            ? 'bg-red-900 border-red-500 text-red-200'
-                                                            : 'bg-slate-700 border-slate-500 text-slate-200'
-                                                            }`}
+                                                        className="relative w-12 h-18 sm:w-16 sm:h-24 rounded border border-white/10 overflow-hidden shadow-lg bg-black/40"
                                                     >
-                                                        <span>{c.rank}</span>
-                                                        <span className="text-xs">
-                                                            {c.suit === 'hearts' && '♥'}
-                                                            {c.suit === 'diamonds' && '♦'}
-                                                            {c.suit === 'clubs' && '♣'}
-                                                            {c.suit === 'spades' && '♠'}
-                                                        </span>
+                                                        <img
+                                                            src={`/borderland_cards/${c.suit.charAt(0).toUpperCase() + c.suit.slice(1)}_${c.rank}.png`}
+                                                            className="w-full h-full object-cover"
+                                                            alt={`${c.rank} of ${c.suit}`}
+                                                        />
                                                     </div>
                                                 ))}
                                             </div>

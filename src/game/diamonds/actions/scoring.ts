@@ -4,7 +4,8 @@ import type { DiamondsPlayer, BattleResult } from '../../diamonds';
 
 export const updateScores = (
     participants: DiamondsPlayer[],
-    battleResults: BattleResult[]
+    battleResults: BattleResult[],
+    isFinalRound: boolean = false
 ): { updatedParticipants: DiamondsPlayer[] } => {
 
     // Score Rules:
@@ -47,15 +48,25 @@ export const updateScores = (
     });
 
     // 4. Team-Based Bonus (USER REQUEST)
-    // Survivors win if count > Zombie count
+    // ONLY IN FINAL ROUND: Survivors win if count > Zombie count
     const activeParticipants = updated.filter(p => p.status !== 'eliminated');
     const survivors = activeParticipants.filter(p => !p.isZombie);
     const zombies = activeParticipants.filter(p => p.isZombie);
 
-    // If no active players, skip bonus
-    if (activeParticipants.length === 0) return { updatedParticipants: updated };
+    // If no active players or NOT FINAL ROUND, skip bonus
+    if (activeParticipants.length === 0 || !isFinalRound) {
+        return {
+            updatedParticipants: updated.map(p => {
+                const startScore = participants.find(op => op.id === p.id)!.score;
+                return {
+                    ...p,
+                    roundAdjustment: p.score - startScore
+                };
+            })
+        };
+    }
 
-    const survivorTeamWins = survivors.length > zombies.length;
+    const survivorTeamWins = survivors.length >= zombies.length;
 
     const finalUpdate = updated.map(p => {
         const startScore = participants.find(op => op.id === p.id)!.score;
