@@ -1,7 +1,7 @@
 // Hearts Game Settings Modal with Delete Confirmation
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Eye, RotateCcw, Trash2, Save, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Eye, RotateCcw, Trash2, Save, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
 interface GameSettingsModalProps {
@@ -339,6 +339,21 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
                         <div className="animate-spin rounded-full h-16 w-16 border-4 border-red-500 border-t-transparent mb-4"></div>
                     </div>
                 )}
+
+                {/* Toast Notification */}
+                <AnimatePresence>
+                    {toast && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 20 }}
+                            className={`absolute bottom-8 right-8 px-6 py-3 rounded-xl border font-bold uppercase tracking-wider shadow-[0_0_20px_rgba(0,0,0,0.5)] z-[400] flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-green-500/10 border-green-500 text-green-400'}`}
+                        >
+                            {toast.type === 'error' ? <AlertTriangle size={20} /> : <CheckCircle2 size={20} />}
+                            {toast.message}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* Delete Confirmation Overlay */}
                 <AnimatePresence>

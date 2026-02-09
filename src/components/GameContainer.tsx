@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Sword, Heart, Users, Brain, AlertTriangle, ArrowRight } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+// import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SpadesGame } from './games/SpadesGame';
 import { SpadesGameMaster } from './games/SpadesGameMaster';
@@ -774,7 +774,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                     case 'Spades':
                                         return (isMasterRole && userInfo?.username !== 'sanjay') ?
                                             <SpadesGameMaster onComplete={() => handleComplete(0)} user={userInfo} /> :
-                                            <SpadesGame onComplete={handleComplete} onFail={handleFail} user={userInfo} onClose={onClose} />;
+                                            <SpadesGame onComplete={handleComplete} onFail={handleFail} user={userInfo} />;
                                     case 'Hearts':
                                         return isMasterRole ?
                                             <HeartsGameMaster onComplete={() => handleComplete(0)} user={userInfo} /> :

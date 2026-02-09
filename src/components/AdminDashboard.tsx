@@ -617,19 +617,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         return () => { supabase.removeChannel(channel); };
     }, [activeView]);
 
-    const handleDeleteHeartsMessage = async (msgId: string) => {
-        setHeartsMessages(prev => prev.filter(m => m.id !== msgId));
-        await supabase.from('messages').delete().eq('id', msgId);
-    };
 
-    const handlePurgeAllHeartsMessages = async () => {
-        if (!confirm(`PURGE ALL HEARTS TRANSCRIPTS?`)) return;
-        const { error } = await supabase.from('messages').delete().eq('game_id', 'hearts_main');
-        if (!error) {
-            setHeartsMessages([]);
-            showToast("HEARTS TRANSCRIPTS PURGED.", 'success');
-        }
-    };
 
     // SPADES SYNC - status sync
     useEffect(() => {
@@ -2839,7 +2827,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                                 // FIXED: Standardize Hearts ID to 'hearts_main'
                                                 const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
-                                                const firestoreDocId = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
+                                                // const firestoreDocId = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
 
                                                 console.log(`Saving Allowed Players for ${suit} to Firestore:`, allowedIds);
 
