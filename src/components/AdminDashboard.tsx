@@ -19,12 +19,13 @@ interface AdminDashboardProps {
 
 export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     // CURRENT USER STATE (For Headless Check)
-    const [currentUser, setCurrentUser] = useState<any>(null);
-    useEffect(() => {
-        supabase.auth.getUser().then(({ data }) => {
-            setCurrentUser(data.user);
-        });
-    }, []);
+    // CURRENT USER STATE (For Headless Check) - Unused
+    // const [currentUser, setCurrentUser] = useState<any>(null);
+    // useEffect(() => {
+    //     supabase.auth.getUser().then(({ data }) => {
+    //         setCurrentUser(data.user);
+    //     });
+    // }, []);
 
     // ... stats state ...
     const [stats, setStats] = useState([
@@ -128,7 +129,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         setClubsIDMap(map);
     }, [players, clubsMessages]);
-    const [clubsRoundPage, setClubsRoundPage] = useState(0);
+    // const [clubsRoundPage, setClubsRoundPage] = useState(0);
     const [clubsCommsMode, setClubsCommsMode] = useState<'player' | 'master' | 'all'>('all');
     const [clubsSearchQuery, setClubsSearchQuery] = useState('');
     const [clubsFilterUserId, setClubsFilterUserId] = useState<string | null>(null);
@@ -142,7 +143,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [showStartModal, setShowStartModal] = useState(false);
     const [selectedSuitForModal, setSelectedSuitForModal] = useState<string | null>(null);
     const [waitingPlayers, setWaitingPlayers] = useState<any[]>([]);
-    const [diamondsGameInitiating, setDiamondsGameInitiating] = useState(false);
+    // const [diamondsGameInitiating, setDiamondsGameInitiating] = useState(false);
 
     // GAME SETTINGS MODAL STATE
     const [showGameSettings, setShowGameSettings] = useState(false);
@@ -544,35 +545,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         return () => { supabase.removeChannel(channel); };
     }, [activeView, clubsCommsMode]);
 
-    const handleDeleteClubsMessage = async (msgId: string) => {
-        // Optimistic update
-        setClubsMessages(prev => prev.filter(m => m.id !== msgId));
 
-        const { error } = await supabase
-            .from('messages')
-            .delete()
-            .eq('id', msgId);
-
-        if (error) {
-            console.error("ADMIN_DELETE_ERROR:", error);
-            alert("SYSTEM ERROR: UNABLE TO PURGE TRANSCRIPT.");
-        }
-    };
-
-    const handlePurgeAllClubsMessages = async () => {
-        if (!confirm(`CAUTION: This will permanently erase ALL ${clubsCommsMode.toUpperCase()} transcripts. Continue?`)) return;
-
-        const { error } = await supabase
-            .from('messages')
-            .delete()
-            .eq('game_id', 'clubs_king')
-            .eq(clubsCommsMode === 'all' ? 'game_id' : 'channel', clubsCommsMode === 'all' ? 'clubs_king' : clubsCommsMode);
-
-        if (!error) {
-            setClubsMessages([]);
-            showToast(`${clubsCommsMode.toUpperCase()} TRANSCRIPTS PURGED.`, 'success');
-        }
-    };
 
     useEffect(() => {
         if (activeView !== 'hearts') return;
