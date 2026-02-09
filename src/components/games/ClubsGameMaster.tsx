@@ -5,7 +5,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { supabase } from '../../supabaseClient';
 
-import { Timer, MessageSquare, X, CheckCircle2, Shield, Eye, FileText, Smartphone } from 'lucide-react';
+import { Timer, FileText } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Loader } from '../Loader';
 import { ClubsPointsTable } from './ClubsPointsTable';
@@ -86,7 +86,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     // Points Table State
     const [showPointsTable, setShowPointsTable] = useState(false);
-    const [allScores, setAllScores] = useState<Record<string, number>>({});
+    // const [allScores, setAllScores] = useState<Record<string, number>>({});
 
     const [cards, setCards] = useState<Card[]>([]);
     const [messages, setMessages] = useState<any[]>([]);
@@ -311,7 +311,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const currentScores = status.scores.current;
 
             // Update All Scores for Points Table
-            setAllScores(currentScores);
+            // setAllScores(currentScores);
 
             // const myUid = user?.id || ''; // Unused variable removed
 

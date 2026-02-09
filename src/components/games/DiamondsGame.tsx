@@ -819,16 +819,30 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
             // PRIORITY: Prioritize the dedicated participant status over the game state snapshot to prevent "flexing"
             setMyPlayer(prev => {
-                if (!prev) return me;
-                if (!me) return prev;
-                // Merge critical group/identity info but keep the score/adj from the fresher source
+                const p = me;
+                if (!prev) return p;
+
+                // --- SCORING FIX ---
+                // During 'scoring' or 'picking', the Game State snapshot (calculated by transitionTo logic)
+                // is the AUTHORITATIVE source for points and adjustments.
+                // We MUST update scores from the snapshot during these phases.
+                if (data.phase === 'scoring' || data.phase === 'picking') {
+                    console.log(`[DIAMONDS_PLAYER] Scoring Phase Update: Taking authoritative score ${p.score} (Adj: ${p.roundAdjustment})`);
+                    return {
+                        ...p, // Take everything from the snapshot
+                        isZombie: prev.isZombie ?? p.isZombie // Preserve zombie state if ambiguous, but generally snapshot is king here too
+                    };
+                }
+
+                // For other phases (hunting, slotting), avoid "flexing" by keeping local detailed state
+                // until the next major transition.
                 return {
-                    ...me,
-                    score: prev.score,
-                    roundAdjustment: prev.roundAdjustment,
+                    ...p,
+                    score: prev.score, // Keep displayed score stable
+                    roundAdjustment: prev.roundAdjustment, // Keep displayed adjustment stable
                     status: prev.status,
-                    isZombie: prev.isZombie ?? me.isZombie,
-                    groupId: me.groupId // Snapshots are good for group assignments
+                    isZombie: prev.isZombie ?? p.isZombie,
+                    groupId: p.groupId // Snapshots are good for group assignments
                 };
             });
 

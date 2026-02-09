@@ -18,24 +18,25 @@ export const updateScores = (
         let pStatus = p.status;
 
         // Find result for this player
+        // Find result for this player (Robust Matching)
         const res = battleResults.find(r =>
-            r.winners.includes(p.id) ||
-            r.losers.includes(p.id) ||
-            r.eliminatedIds.includes(p.id)
+            r.winners.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username) ||
+            r.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username) ||
+            r.eliminatedIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)
         );
 
         if (res) {
             // 1. Elimination Check
-            if (res.eliminatedIds.includes(p.id)) {
+            if (res.eliminatedIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
                 newScore -= 500;
                 pStatus = 'eliminated';
             }
             // 2. Win Check
-            else if (res.winners.includes(p.id)) {
+            else if (res.winners.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
                 newScore += 200;
             }
             // 3. Loss Check
-            else if (res.losers.includes(p.id)) {
+            else if (res.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
                 newScore -= 100;
             }
         }

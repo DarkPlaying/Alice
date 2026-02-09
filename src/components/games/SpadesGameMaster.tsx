@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../supabaseClient';
-import { Play, Users } from 'lucide-react';
+import { Play } from 'lucide-react';
 
 import {
     type Card,
@@ -238,30 +238,7 @@ export const SpadesGameMaster: React.FC<SpadesGameMasterProps> = ({ onComplete, 
                 setTimeLeft(remaining);
 
                 if (remaining === 0 && !isProcessingRef.current) {
-                    isProcessingRef.current = true; // Lock immediately
-
-                    // Define next phase logic locally
-                    let next: SpadesPhase = 'idle';
-                    let nextRound = roundRef.current;
-                    const p = phaseRef.current;
-
-                    if (p === 'briefing') next = 'shuffle'; // R1: Briefing -> Shuffle
-                    else if (p === 'shuffle') next = 'hint';
-                    else if (p === 'hint') next = 'bidding';
-                    else if (p === 'bidding') next = 'reveal';
-                    else if (p === 'reveal') {
-                        if (roundRef.current < MAX_ROUNDS) {
-                            next = 'shuffle';
-                            nextRound = roundRef.current + 1;
-                        } else {
-                            next = 'completed';
-                        }
-                    }
-
-                    transitionToPhase(next, nextRound).catch(err => {
-                        console.error("[SPADES MASTER] TRANSITION FAILED:", err);
-                        isProcessingRef.current = false;
-                    });
+                    handlePhaseExpiry();
                 }
 
                 // Heartbeat sync
