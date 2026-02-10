@@ -59,7 +59,7 @@ export const AboutGame = () => {
                 >
                     <div className="absolute inset-0 bg-[#ff0050]/20 blur-2xl -z-10 rounded-full opacity-60"></div>
                     <motion.img
-                        src="/about-image.png"
+                        src="/about-image.jpg"
                         alt="About The Game"
                         initial={{ filter: "grayscale(100%)" }}
                         whileInView={{ filter: "grayscale(0%)" }}
