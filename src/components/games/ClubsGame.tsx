@@ -445,9 +445,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 });
 
                 const mapping: Record<string, string> = {};
-                // const masters = new Set<string>();
-                // let mCount = 1;
-                // let pCount = 1;
+
 
                 users.forEach((u: any, index: number) => {
                     // Match Admin Dashboard: Use GLOBAL index for ID generation
@@ -455,7 +453,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     const globalId = (index + 1).toString().padStart(3, '0');
                     const pid = `#PLAYER_${globalId}`;
 
-                    // const isMaster = u.role === 'master' || u.role === 'admin' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
+
 
                     // Optional: You can keep #MASTER_ prefix if preferred, but user requested Admin Code match (which uses #PLAYER_)
                     // For now, we standardize to #PLAYER_ to ensure 1:1 match with Visa IDs.

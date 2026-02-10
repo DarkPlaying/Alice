@@ -8,7 +8,7 @@ import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { supabase } from '../supabaseClient';
 import { PlayerCache } from '../lib/playerCache';
-import { SpadesGameMaster } from './games/SpadesGameMaster';
+
 import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { GameSettingsModal } from './admin/GameSettingsModal';
 import { HeartsGameSettingsModal } from './admin/HeartsGameSettingsModal';
@@ -19,13 +19,7 @@ interface AdminDashboardProps {
 
 export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     // CURRENT USER STATE (For Headless Check)
-    // CURRENT USER STATE (For Headless Check) - Unused
-    // const [currentUser, setCurrentUser] = useState<any>(null);
-    // useEffect(() => {
-    //     supabase.auth.getUser().then(({ data }) => {
-    //         setCurrentUser(data.user);
-    //     });
-    // }, []);
+
 
     // ... stats state ...
     const [stats, setStats] = useState([
@@ -129,7 +123,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         setClubsIDMap(map);
     }, [players, clubsMessages]);
-    // const [clubsRoundPage, setClubsRoundPage] = useState(0);
+
     const [clubsCommsMode, setClubsCommsMode] = useState<'player' | 'master' | 'all'>('all');
     const [clubsSearchQuery, setClubsSearchQuery] = useState('');
     const [clubsFilterUserId, setClubsFilterUserId] = useState<string | null>(null);
@@ -143,7 +137,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [showStartModal, setShowStartModal] = useState(false);
     const [selectedSuitForModal, setSelectedSuitForModal] = useState<string | null>(null);
     const [waitingPlayers, setWaitingPlayers] = useState<any[]>([]);
-    // const [diamondsGameInitiating, setDiamondsGameInitiating] = useState(false);
+
 
     // GAME SETTINGS MODAL STATE
     const [showGameSettings, setShowGameSettings] = useState(false);
@@ -546,7 +540,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     }, [activeView, clubsCommsMode]);
 
 
-
     useEffect(() => {
         if (activeView !== 'hearts') return;
 
@@ -589,6 +582,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         return () => { supabase.removeChannel(channel); };
     }, [activeView]);
+
+
 
 
 
@@ -2800,7 +2795,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                                 // FIXED: Standardize Hearts ID to 'hearts_main'
                                                 const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
-                                                // const firestoreDocId = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
+
 
                                                 console.log(`Saving Allowed Players for ${suit} to Firestore:`, allowedIds);
 
@@ -3075,16 +3070,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             {/* HEADLESS GAME LOOPS (To ensure timers run even if Master is not on Game Page) */}
             {/* HEADLESS GAME LOOPS (To ensure timers run even if Master is not on Game Page) */}
             {/* SPADES: DISABLED (Moved to Peer-to-Peer Host in SpadesGame.tsx) */}
-            {
-                spadesGameStatus?.system_start && (
-                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
-                        <SpadesGameMaster
-                            onComplete={() => console.log("Spades Complete (Headless)")}
-                            user={{ id: 'system-architect', username: 'SYSTEM ARCHITECT', role: 'admin' }}
-                        />
-                    </div>
-                )
-            }
+
             {
                 heartsGameStatus?.system_start && (
                     <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">

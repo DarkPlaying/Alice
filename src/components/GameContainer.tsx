@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Sword, Heart, Users, Brain, AlertTriangle, ArrowRight } from 'lucide-react';
-// import { useNavigate } from 'react-router-dom';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import { SpadesGame } from './games/SpadesGame';
-import { SpadesGameMaster } from './games/SpadesGameMaster';
+
 import { HeartsGame } from './games/HeartsGame';
 import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { ClubsGame } from './games/ClubsGame';
@@ -546,13 +546,6 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 >
                                     <GlowCard glowColor={theme.glow} className="w-full h-full border-none p-0 overflow-hidden rounded-[2.5rem]">
                                         <div className="absolute inset-0">
-                                            {rules.cardImage && (
-                                                <img
-                                                    src={rules.cardImage}
-                                                    alt={type}
-                                                    className="w-full h-full object-cover opacity-100"
-                                                />
-                                            )}
                                         </div>
                                     </GlowCard>
                                 </motion.div>
@@ -772,9 +765,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                             {(() => {
                                 switch (type) {
                                     case 'Spades':
-                                        return (isMasterRole && userInfo?.username !== 'sanjay') ?
-                                            <SpadesGameMaster onComplete={() => handleComplete(0)} user={userInfo} /> :
-                                            <SpadesGame onComplete={handleComplete} onFail={handleFail} user={userInfo} />;
+                                        return <SpadesGame onComplete={handleComplete} onFail={handleFail} user={userInfo} onClose={onClose} />;
                                     case 'Hearts':
                                         return isMasterRole ?
                                             <HeartsGameMaster onComplete={() => handleComplete(0)} user={userInfo} /> :
@@ -814,14 +805,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
               This ensures the game keeps running (timers, transitions) even if they leave the Admin Dashboard.
             */}
             {
-                isMasterRole && type === 'Spades' && (
-                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
-                        <SpadesGameMaster
-                            onComplete={() => console.log("Spades Headless Master Complete")}
-                            user={userInfo || { id: 'admin-fallback', username: 'ADMIN', role: 'admin' }}
-                        />
-                    </div>
-                )
+
             }
             {
                 isMasterRole && type === 'Hearts' && (

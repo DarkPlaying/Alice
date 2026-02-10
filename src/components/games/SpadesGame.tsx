@@ -26,7 +26,7 @@ import {
 interface SpadesGameProps {
     onComplete: (score: number) => void;
     onFail: () => void;
-    // onClose?: () => void;
+    onClose?: () => void;
     user?: any;
 }
 
@@ -40,14 +40,14 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
     const [isPaused, setIsPaused] = useState(false);
     const [players, setPlayers] = useState<PlayersMap>({});
     const [roundData, setRoundData] = useState<RoundData>({}); // Map of groupId -> Round Info
-
+    const [_connectedPlayers, setConnectedPlayers] = useState<PresenceState[]>([]);
 
     // Host State
     const deckRef = useRef<Card[]>(generateDeck());
 
     // Local bid input state
     const [myBidInput, setMyBidInput] = useState('');
-
+    const [_hostError, setHostError] = useState<string | null>(null); // Track host failures
     const [projectedScore, setProjectedScore] = useState(1000);
     const [bidError, setBidError] = useState('');
 
@@ -76,7 +76,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
 
         const n = ids.length;
         const newPlayers = { ...currentPlayers };
-        const groups: string[][] = [];
+        let groups: string[][] = [];
 
         if (n < 2) {
             // Very small lobbies: just one group
@@ -227,7 +227,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                         }
                     });
                 });
-                // setConnectedPlayers(presenceList);
+                setConnectedPlayers(presenceList);
             })
             .subscribe(async (status) => {
                 console.log(`[SPADES PLAYER] Subscription status: ${status}`);
@@ -712,10 +712,10 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                 .then(async ({ error }) => {
                     if (error) {
                         console.error('[SPADES HOST] Update failed:', error);
-                        console.error('[SPADES HOST] Update failed:', error.message);
+                        setHostError(error.message);
                     } else {
                         console.log('[SPADES HOST] Successfully advanced to:', nextPhase);
-                        // setHostError(null);
+                        setHostError(null);
                     }
                     setTimeout(() => isProcessingRef.current = false, 5000);
                 });

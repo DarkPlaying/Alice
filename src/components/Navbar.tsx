@@ -1,8 +1,8 @@
 import { PlayerCardModal } from './PlayerCardModal';
 import { useState } from 'react';
-import { List, LayoutDashboard, X } from 'lucide-react';
+import { LayoutDashboard, X, List } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-// import { motion, AnimatePresence } from 'framer-motion';
+
 
 interface NavbarProps {
     onLoginClick?: () => void;

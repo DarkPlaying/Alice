@@ -86,7 +86,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     // Points Table State
     const [showPointsTable, setShowPointsTable] = useState(false);
-    // const [allScores, setAllScores] = useState<Record<string, number>>({});
+
 
     const [cards, setCards] = useState<Card[]>([]);
     const [messages, setMessages] = useState<any[]>([]);
@@ -311,7 +311,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const currentScores = status.scores.current;
 
             // Update All Scores for Points Table
-            // setAllScores(currentScores);
+
 
             // const myUid = user?.id || ''; // Unused variable removed
 

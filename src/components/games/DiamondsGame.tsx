@@ -530,7 +530,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     // If not authorized OR 0 cards slotted, we force 1 card.
                     // REFINED: Only force 1 card if they HAHA haven't slotted ANYTHING OR they are NOT authorized for 5 slots.
                     // But if they HAVE slotted cards, we should respect them up to their auth limit.
-                    // const isAuthorized = p.hasUsedFiveSlots || (slotsMap.get(p.id)?.length || 0) > 1; // If they have > 1, they likely intended to use power
+                    // const isAuthorized = p.hasUsedFiveSlots || (slotsMap.get(p.id)?.length || 0) > 1;
 
                     // Actually, the real logic should be: 
                     // 1. If slots are empty -> pick 1 random.
@@ -1236,7 +1236,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
 
         setIsLoading(true);
-        // setHasUsedRefreshSession(true);
+
         try {
             const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
             const newStandardHand: DiamondsCard[] = [];
@@ -1279,7 +1279,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
 
         setIsLoading(true);
-        // setHasUsedDetectorSession(true);
+
         try {
             const { data: hands } = await supabase.from('diamonds_hands').select('player_id, cards').eq('game_id', GAME_ID);
             if (hands) {
