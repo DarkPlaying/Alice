@@ -109,7 +109,7 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     transition={{ duration: 1.2, ease: "easeOut" }}
                     className="font-gothic text-[8rem] md:text-[15rem] leading-[0.8] text-white drop-shadow-[0_0_30px_rgba(255,0,80,0.5)] relative mb-2"
                 >
-                    <span className="font-bold" style={{ fontFamily: "'UnifrakturCook', cursive" }}>A</span>lice
+                    <span className="font-bold">A</span>lice
                 </motion.h1>
 
                 {/* in Borderland - Gothic Subtitle (White) */}
