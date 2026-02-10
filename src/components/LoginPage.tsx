@@ -161,7 +161,8 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
     return (
         <div
             ref={containerRef}
-            className="relative min-h-screen bg-home overflow-hidden flex items-center justify-center p-4"
+            className="relative min-h-screen overflow-hidden flex items-center justify-center p-4"
+            style={{ backgroundImage: "url('/hero-bg.webp')", backgroundSize: "cover", backgroundPosition: "center" }}
         >
             {/* Overlay to darken bg slightly */}
             <div className="absolute inset-0 bg-black/60 pointer-events-none" />
