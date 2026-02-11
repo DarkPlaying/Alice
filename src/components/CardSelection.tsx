@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { GlowCard } from './ui/spotlight-card';
+// import { GlowCard } from './ui/spotlight-card';
 import { Sword, Brain, Users, Heart } from 'lucide-react';
 import { PlayerCardModal } from './PlayerCardModal';
 
@@ -13,7 +13,7 @@ const cards = [
         color: '#3b82f6',
         glow: 'rgba(59, 130, 246, 0.4)',
         symbol: '♠',
-        image: '/borderland_cards/Spades_K.png',
+        image: '/borderland_cards/Spades.png',
         icon: Sword
     },
     {
@@ -24,7 +24,7 @@ const cards = [
         color: '#ef4444',
         glow: 'rgba(239, 68, 68, 0.4)',
         symbol: '♥',
-        image: '/borderland_cards/Hearts_K.png',
+        image: '/borderland_cards/Hearts.png',
         icon: Heart
     },
     {
@@ -35,7 +35,7 @@ const cards = [
         color: '#22c55e',
         glow: 'rgba(34, 197, 94, 0.4)',
         symbol: '♣',
-        image: '/borderland_cards/Clubs_K.png',
+        image: '/borderland_cards/Clubs.png',
         icon: Users
     },
     {
@@ -46,7 +46,7 @@ const cards = [
         color: '#eab308',
         glow: 'rgba(234, 179, 8, 0.4)',
         symbol: '♦',
-        image: '/borderland_cards/Diamonds_K.png',
+        image: '/borderland_cards/Diamonds.png',
         icon: Brain
     }
 ];
@@ -167,9 +167,8 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                         }}
                         className="relative cursor-pointer"
                     >
-                        <GlowCard
-                            glowColor={card.type === 'Spades' ? 'blue' : card.type === 'Hearts' ? 'red' : card.type === 'Clubs' ? 'green' : 'orange'}
-                            className="w-full aspect-[5/7] border-white/10 bg-[#0d0d0f] p-0 overflow-hidden group rounded-[1.2rem] shadow-2xl transition-all duration-500 hover:scale-[1.05]"
+                        <div
+                            className="w-full aspect-[5/7] relative overflow-hidden group rounded-[1.2rem] shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10 bg-[#0d0d0f]"
                         >
                             <div
                                 className="absolute inset-0 z-0"
@@ -177,9 +176,9 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                                 <img
                                     src={card.image}
                                     alt={card.type}
-                                    className="w-full h-full object-cover opacity-70 grayscale-[0.5] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
+                                    className="w-full h-full object-cover opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
                                 />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent opacity-100 group-hover:opacity-80 transition-opacity duration-500" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90 group-hover:opacity-60 transition-opacity duration-500" />
                             </div>
 
                             <div className="absolute inset-0 z-10 p-8 flex flex-col justify-end pointer-events-none">
@@ -210,7 +209,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
                             {/* Scanline & HUD */}
                             <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
-                        </GlowCard>
+                        </div>
 
                         {/* Status Light below card */}
                         <div className="mt-8 flex justify-center">

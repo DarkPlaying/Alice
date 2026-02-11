@@ -9,7 +9,7 @@ import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { ClubsGame } from './games/ClubsGame';
 import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { DiamondsGame } from './games/DiamondsGame';
-import { GlowCard } from './ui/spotlight-card';
+// import { GlowCard } from './ui/spotlight-card';
 import { PlayerCardModal } from './PlayerCardModal';
 import { supabase } from '../supabaseClient';
 import { auth, db } from '../firebase';
@@ -544,17 +544,18 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                     className="relative w-[280px] h-[420px] md:w-[350px] md:h-[520px] rounded-[2.5rem] group"
                                     style={{ willChange: 'opacity' }}
                                 >
-                                    <GlowCard glowColor={theme.glow} className="w-full h-full border-none p-0 overflow-hidden rounded-[2.5rem]">
+                                    <div className="w-full h-full relative overflow-hidden rounded-[2.5rem] shadow-2xl border border-white/10 bg-[#0d0d0f]">
                                         <div className="absolute inset-0">
                                             {rules.cardImage && (
                                                 <img
                                                     src={rules.cardImage}
                                                     alt="Rules Card"
-                                                    className="w-full h-full object-cover"
+                                                    className="w-full h-full object-cover opacity-90"
                                                 />
                                             )}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80" />
                                         </div>
-                                    </GlowCard>
+                                    </div>
                                 </motion.div>
                             </div>
 
@@ -788,8 +789,9 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 }
                             })()}
                         </motion.div>
-                    )}
-                </AnimatePresence>
+                    )
+                    }
+                </AnimatePresence >
             </div >
 
 
