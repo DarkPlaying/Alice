@@ -546,6 +546,13 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 >
                                     <GlowCard glowColor={theme.glow} className="w-full h-full border-none p-0 overflow-hidden rounded-[2.5rem]">
                                         <div className="absolute inset-0">
+                                            {rules.cardImage && (
+                                                <img
+                                                    src={rules.cardImage}
+                                                    alt="Rules Card"
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            )}
                                         </div>
                                     </GlowCard>
                                 </motion.div>

@@ -13,7 +13,7 @@ const cards = [
         color: '#3b82f6',
         glow: 'rgba(59, 130, 246, 0.4)',
         symbol: '♠',
-        image: '/suit_assets/spade.jpg',
+        image: '/borderland_cards/Spades_K.png',
         icon: Sword
     },
     {
@@ -24,7 +24,7 @@ const cards = [
         color: '#ef4444',
         glow: 'rgba(239, 68, 68, 0.4)',
         symbol: '♥',
-        image: '/suit_assets/heart.jpg',
+        image: '/borderland_cards/Hearts_K.png',
         icon: Heart
     },
     {
@@ -35,7 +35,7 @@ const cards = [
         color: '#22c55e',
         glow: 'rgba(34, 197, 94, 0.4)',
         symbol: '♣',
-        image: '/suit_assets/clubs.jpg',
+        image: '/borderland_cards/Clubs_K.png',
         icon: Users
     },
     {
@@ -46,7 +46,7 @@ const cards = [
         color: '#eab308',
         glow: 'rgba(234, 179, 8, 0.4)',
         symbol: '♦',
-        image: '/suit_assets/diamond.jpg',
+        image: '/borderland_cards/Diamonds_K.png',
         icon: Brain
     }
 ];
