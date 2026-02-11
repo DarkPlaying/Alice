@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-// import { GlowCard } from './ui/spotlight-card'; // REMOVED
+// import { GlowCard } from './ui/spotlight-card';
+import { Sword, Brain, Users, Heart } from 'lucide-react';
+import { PlayerCardModal } from './PlayerCardModal';
 
 const cards = [
     {
@@ -11,7 +13,7 @@ const cards = [
         color: '#3b82f6',
         glow: 'rgba(59, 130, 246, 0.4)',
         symbol: '♠',
-        image: '/borderland_cards/Spades_A.png',
+        image: '/suit_assets/spade.jpg',
         icon: Sword
     },
     {
@@ -22,7 +24,7 @@ const cards = [
         color: '#ef4444',
         glow: 'rgba(239, 68, 68, 0.4)',
         symbol: '♥',
-        image: '/borderland_cards/Hearts_A.png',
+        image: '/suit_assets/heart.jpg',
         icon: Heart
     },
     {
@@ -33,7 +35,7 @@ const cards = [
         color: '#22c55e',
         glow: 'rgba(34, 197, 94, 0.4)',
         symbol: '♣',
-        image: '/borderland_cards/Clubs_A.png',
+        image: '/suit_assets/clubs.jpg',
         icon: Users
     },
     {
@@ -44,7 +46,7 @@ const cards = [
         color: '#eab308',
         glow: 'rgba(234, 179, 8, 0.4)',
         symbol: '♦',
-        image: '/borderland_cards/Diamonds_A.png',
+        image: '/suit_assets/diamond.jpg',
         icon: Brain
     }
 ];
