@@ -564,15 +564,15 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                         </div>
                                     ) : (
                                         <div className="w-full h-full overflow-hidden rounded-2xl animate-flip-in">
-                                            {(gameState?.cards || {})[myPlayer?.id!] ? (
-                                                <img src={`/borderland_cards/${(gameState?.cards || {})[myPlayer?.id!].suit.charAt(0).toUpperCase() + (gameState?.cards || {})[myPlayer?.id!].suit.slice(1)}_${(gameState?.cards || {})[myPlayer?.id!].rank}.png`} alt="My Card" className="w-full h-full object-cover" />
+                                            {(gameState?.pairs || {})[myPlayer?.id!] ? (
+                                                <img src={`/borderland_cards/${(gameState?.pairs || {})[myPlayer?.id!].suit.charAt(0).toUpperCase() + (gameState?.pairs || {})[myPlayer?.id!].suit.slice(1)}_${(gameState?.pairs || {})[myPlayer?.id!].rank}.png`} alt="My Card" className="w-full h-full object-cover" />
                                             ) : <div className="flex items-center justify-center h-full text-white/20">NO DATA</div>}
                                         </div>
                                     )}
                                 </div>
                             </div>
                             {othersInGroup.map(pid => {
-                                const card = (gameState?.cards || {})[pid];
+                                const card = (gameState?.pairs || {})[pid];
                                 return (
                                     <div key={pid} className="flex flex-col items-center gap-4 shrink-0">
                                         <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-white/50">{playerIdMap[pid] || 'Agent'}</span>

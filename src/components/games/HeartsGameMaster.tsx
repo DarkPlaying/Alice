@@ -43,7 +43,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
         is_paused: false,
         participants: [],
         groups: {},
-        cards: {},
+        pairs: {},
         guesses: {},
         eliminated: [],
         winners: [],
@@ -242,7 +242,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             return { ...p, groupId: gId };
         });
 
-        return { groups, cards: newCards, players: updatedPlayers };
+        return { groups, pairs: newCards, players: updatedPlayers };
     };
 
     const transitionToPhase = async (nextPhase: HeartsPhase, nextRound: number, endReason?: 'survival' | 'master_defeat' | 'master_victory' | 'max_rounds', extraUpdates: Partial<HeartsGameState> = {}) => {
@@ -321,9 +321,9 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             // REMOVED DEALING: Delay grouping/dealing until 'shuffle' phase to allow all players to join
             // const { groups, cards, players: updatedActive } = await performShuffleAndDeal(activePlayers);
 
-            // Just update participants list (clearing groups/cards for now)
+            // Just update participants list (clearing groups/pairs for now)
             updates.groups = {};
-            updates.cards = {};
+            updates.pairs = {};
             // --------------------------------------------------------------------------------
             // UPDATE: Score Synchronization (Round 1 ONLY)
             // --------------------------------------------------------------------------------
@@ -477,7 +477,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             const eliminatedPlayers = currentState.participants.filter((p: HeartsPlayer) => p.status === 'eliminated' || eliminatedIds.includes(p.id));
 
             // PERFORM DEAL HERE
-            const { groups, cards, players: updatedActive } = await performShuffleAndDeal(activePlayers);
+            const { groups, pairs, players: updatedActive } = await performShuffleAndDeal(activePlayers);
 
 
             // Merge updates
@@ -489,7 +489,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             }));
 
             updates.groups = groups;
-            updates.cards = cards;
+            updates.pairs = pairs;
             updates.participants = [...updatedActive, ...updatedEliminated];
         }
         else if (nextPhase === 'result') {
@@ -529,7 +529,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             const guesses = fetchedGuesses;
             updates.guesses = fetchedGuesses;
 
-            const cards = freshState.cards || {};
+            const pairs = freshState.pairs || {};
             const players = [...(freshState.participants || [])];
             const winners: string[] = [];
             const newEliminated: string[] = [];
@@ -538,7 +538,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 if (p.status === 'eliminated') return p;
 
                 const guess = guesses[p.id];
-                const card = cards[p.id]; // FRESH card data
+                const card = pairs[p.id]; // FRESH card data
                 let passed = false;
 
                 if (guess && card && guess.suit && card.suit) {

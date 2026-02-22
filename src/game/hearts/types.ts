@@ -37,7 +37,7 @@ export interface HeartsGameState {
 
     participants: HeartsPlayer[];
     groups: Record<string, string[]>; // { [groupId]: [pid1, pid2, pid3] }
-    cards: Record<string, Card>;      // { [pid]: Card } (The card assigned to the player)
+    pairs: Record<string, Card>;       // { [pid]: Card } (The card assigned to the player)
     guesses: Record<string, { rank?: string, suit?: string }>;  // { [pid]: { rank, suit } }
     eliminated: string[];             // [pid]
     winners: string[];                // [pid]
