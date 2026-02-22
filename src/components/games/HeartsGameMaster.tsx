@@ -138,12 +138,13 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
     // or if the Master view reloads.
     useEffect(() => {
         if (gameState.phase === 'briefing' && gameState.system_start && user?.role === 'master') {
+            const participants = gameState.participants || [];
             // Self-healing ghost logic...
-            const ghostPlayers = gameState.participants.filter(p => !p.name || !/[a-zA-Z0-9]/.test(p.name));
+            const ghostPlayers = participants.filter(p => !p.name || !/[a-zA-Z0-9]/.test(p.name));
 
             // CLEANUP: Remove Admin from participants list if they accidentally joined (User requested Master stays)
             // Only targeting 'admin' role or 'admin' name. 'master' is allowed to play.
-            const illegalPlayers = gameState.participants.filter(p => p.role === 'admin' || p.name === 'admin');
+            const illegalPlayers = participants.filter(p => p.role === 'admin' || p.name === 'admin');
 
             if (ghostPlayers.length > 0 || illegalPlayers.length > 0) {
                 console.log("[HEARTS MASTER] 🧹 CLEANUP REQUIRED: Removing ghosts or admins...", { ghosts: ghostPlayers, admins: illegalPlayers });
@@ -954,7 +955,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-white/40">PLAYERS</span>
-                        <span className="text-white font-bold">{gameState.participants.length}</span>
+                        <span className="text-white font-bold">{gameState.participants?.length || 0}</span>
                     </div>
                 </div>
                 <button

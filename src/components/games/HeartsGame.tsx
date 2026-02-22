@@ -193,22 +193,21 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
 
                             // Fetch latest state to avoid race
                             const { data: latestState } = await supabase.from('hearts_game_state').select('participants').eq('id', 'hearts_main').single();
-                            if (latestState?.participants) {
-                                const updatedParticipants = latestState.participants.map((p: HeartsPlayer) => {
-                                    if (p.id === userId) {
-                                        return {
-                                            ...p,
-                                            score: profileScore,
-                                            start_score: profileScore, // Reset start score to match reality
-                                            last_total_score: profileScore
-                                        };
-                                    }
-                                    return p;
-                                });
+                            const participants = latestState?.participants || [];
+                            const updatedParticipants = participants.map((p: HeartsPlayer) => {
+                                if (p.id === userId) {
+                                    return {
+                                        ...p,
+                                        score: profileScore,
+                                        start_score: profileScore, // Reset start score to match reality
+                                        last_total_score: profileScore
+                                    };
+                                }
+                                return p;
+                            });
 
-                                await supabase.from('hearts_game_state').update({ participants: updatedParticipants }).eq('id', 'hearts_main');
-                                console.log('[HEARTS PLAYER] Score Synced & Start Score Recorded.');
-                            }
+                            await supabase.from('hearts_game_state').update({ participants: updatedParticipants }).eq('id', 'hearts_main');
+                            console.log('[HEARTS PLAYER] Score Synced & Start Score Recorded.');
                         }
                     }
                 }
@@ -362,7 +361,8 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
         setRevealMyCard(true);
         const { data: latest } = await supabase.from('hearts_game_state').select('participants').eq('id', 'hearts_main').single();
         if (latest) {
-            const updated = latest.participants.map((p: any) => p.id === (user?.id || user?.uid) ? { ...p, eye_of_truth_uses: p.eye_of_truth_uses - 1 } : p);
+            const participants = latest.participants || [];
+            const updated = participants.map((p: any) => p.id === (user?.id || user?.uid) ? { ...p, eye_of_truth_uses: p.eye_of_truth_uses - 1 } : p);
             await supabase.from('hearts_game_state').update({ participants: updated }).eq('id', 'hearts_main');
         }
     };
