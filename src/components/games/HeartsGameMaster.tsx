@@ -111,14 +111,15 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
         const channel = supabase.channel('hearts_master_sync')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'hearts_game_state', filter: 'id=eq.hearts_main' }, (payload) => {
-                const newData = payload.new as HeartsGameState;
-                setGameState(newData);
+                const newData = payload.new as Partial<HeartsGameState>;
+                setGameState(prevState => ({ ...prevState, ...newData }));
+                console.log('[HEARTS MASTER] Sync update received:', newData);
 
                 // Admin pause/resume controls
                 if (newData.is_paused !== undefined) setIsPaused(newData.is_paused);
 
                 // Sync local tracking if updated remotely
-                if (newData.phase !== phaseRef.current) {
+                if (newData.phase !== undefined && newData.phase !== phaseRef.current) {
                     setPhase(newData.phase);
                     // Update timer refs on phase change from server
                     if (newData.phase_started_at) {
@@ -126,7 +127,9 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                         phaseDurationRef.current = newData.phase_duration_sec || 0;
                     }
                 }
-                if (newData.current_round !== roundRef.current) setRound(newData.current_round);
+                if (newData.current_round !== undefined && newData.current_round !== roundRef.current) {
+                    setRound(newData.current_round);
+                }
             })
             .subscribe();
 
@@ -173,6 +176,10 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
         console.log('[HEARTS MASTER] Current players:', currentPlayers.map(p => ({ id: p.id, name: p.name })));
 
         const pIds = currentPlayers.map(p => p.id);
+        if (pIds.length === 0) {
+            console.error('[HEARTS MASTER] CRITICAL: Attempted to deal to 0 players!');
+            return { groups: {}, cards: {}, players: [] };
+        }
 
         // --- Smart Shuffle: Avoid Repeating Partners ---
         let groups = assignGroups(pIds);
@@ -805,6 +812,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             if (onComplete) onComplete();
         }
 
+        console.log(`[HEARTS MASTER] FINAL UPDATE PAYLOAD for ${nextPhase}:`, JSON.stringify(updates));
         await updateState(updates);
 
         setPhase(nextPhase);
