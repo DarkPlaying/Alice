@@ -20,6 +20,9 @@ export const updateScores = (
         // Find result for this player
         // Find result for this player (Robust Matching)
         const res = battleResults.find(r =>
+            (r.p1Id && r.p1Id.toLowerCase() === p.id.toLowerCase()) ||
+            (r.p2Id && r.p2Id.toLowerCase() === p.id.toLowerCase()) ||
+            (r.p3Id && r.p3Id.toLowerCase() === p.id.toLowerCase()) ||
             r.winners.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username) ||
             r.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username) ||
             r.eliminatedIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)
@@ -39,6 +42,8 @@ export const updateScores = (
             else if (res.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
                 newScore -= 100;
             }
+        } else {
+            console.warn(`[DIAMONDS_SCORING] No battle result found for player: ${p.username} (${p.id})`);
         }
 
         return {

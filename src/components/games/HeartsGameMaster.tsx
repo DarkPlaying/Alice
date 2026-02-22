@@ -248,6 +248,8 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             return;
         }
 
+        const currentSessionId = currentState.active_game_id || 'hearts_main';
+
         console.log(`[HEARTS MASTER] Transitioning to ${nextPhase} (Round ${nextRound})`);
 
         const now = new Date();
@@ -261,13 +263,6 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             ...extraUpdates // Merge remote updates
         };
 
-        // CLEAR CHAT for NEW ROUNDS (specifically at shuffle phase)
-        if (nextPhase === 'shuffle') {
-            const currentSessionId = currentState.active_game_id || 'hearts_main';
-            console.log(`[HEARTS MASTER] Clearing chat history for start of Round ${nextRound}...`);
-            await supabase.from('messages').delete().eq('game_id', currentSessionId);
-        }
-
         if (nextPhase === 'briefing') {
             // ONLY Round 1: Briefing phase should only occur at the start of the game
             if (nextRound !== 1) {
@@ -277,16 +272,12 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
             // AUTO-HEALING: Clear previous elimination data if starting a new game (Round 1 Briefing)
             // This prevents "Instant Termination" bug if Admin didn't manually Reset
-            if (nextRound === 1) {
-                const currentSessionId = currentState.active_game_id || 'hearts_main';
-                console.log('[HEARTS MASTER] New Game Detected. Purging previous elimination records...');
-                await supabase.from('hearts_eliminated').delete().eq('game_id', currentSessionId);
-            }
+            console.log('[HEARTS MASTER] New Game Detected. Purging previous elimination records...');
+            await supabase.from('hearts_eliminated').delete().eq('game_id', currentSessionId);
 
             // Robust Check: Sync with hearts_eliminated table (Even for Round 1, to be safe)
             // Note: Since we just deleted it, this should be empty, but good for consistency/race conditions? 
             // Actually, if we just deleted, we should assume empty or fetch again.
-            const currentSessionId = currentState.active_game_id || 'hearts_main';
             const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId);
             const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
 
@@ -328,88 +319,83 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             // --------------------------------------------------------------------------------
             // UPDATE: Score Synchronization (Round 1 ONLY)
             // --------------------------------------------------------------------------------
-            if (nextRound === 1) {
-                console.log(`[HEARTS MASTER] Syncing scores from profiles for Round 1...`);
+            console.log(`[HEARTS MASTER] Syncing scores from profiles for Round 1...`);
 
-                // 1. Fetch User Emails
-                const { data: userData } = await supabase
-                    .from('users')
-                    .select('id, email')
-                    .in('id', activePlayers.map((p: HeartsPlayer) => p.id));
+            // 1. Fetch User Emails
+            const { data: userData } = await supabase
+                .from('users')
+                .select('id, email')
+                .in('id', activePlayers.map((p: HeartsPlayer) => p.id));
 
-                const idEmailMap: Record<string, string> = {};
-                if (userData) {
-                    userData.forEach((u: { id: string, email: string }) => { idEmailMap[u.id] = u.email; });
+            const idEmailMap: Record<string, string> = {};
+            if (userData) {
+                userData.forEach((u: { id: string, email: string }) => { idEmailMap[u.id] = u.email; });
+            }
+
+            // 2. Fetch Profiles for everyone who doesn't have a score yet or needs sync
+            const scoreMap: Record<string, number> = {};
+
+            // Construct a set of emails to fetch
+            const emailsToFetch = new Set<string>();
+            activePlayers.forEach((p: HeartsPlayer) => {
+                const email = p.email || idEmailMap[p.id];
+                if (email) emailsToFetch.add(email.toLowerCase());
+            });
+
+            if (emailsToFetch.size > 0) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('email, visa_points')
+                    .in('email', Array.from(emailsToFetch));
+
+                if (profiles) {
+                    profiles.forEach(prof => {
+                        // Find which player this belongs to - Case Insensitive Match
+                        const player = activePlayers.find((ap: HeartsPlayer) =>
+                            ap.email?.toLowerCase() === prof.email.toLowerCase() ||
+                            idEmailMap[ap.id]?.toLowerCase() === prof.email.toLowerCase()
+                        );
+                        if (player) {
+                            console.log(`[HEARTS MASTER] Synced ${player.id} to score: ${prof.visa_points}`);
+                            scoreMap[player.id] = prof.visa_points;
+                        }
+                    });
+                }
+            }
+
+            // 3. Update Participants map
+            updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => {
+                const realScore = scoreMap[p.id];
+                // FORCEFUL SYNC: 
+                // 1. If we found a profile score, use it (even if it's 0 or negative).
+                // 2. If no profile but current score is > 0, keep it.
+                // 3. Absolute fallback: 1000.
+                let finalScore = 1000;
+                if (realScore !== undefined) {
+                    finalScore = realScore;
+                } else if (p.score !== undefined && p.score !== 0) {
+                    finalScore = p.score;
                 }
 
-                // 2. Fetch Profiles for everyone who doesn't have a score yet or needs sync
-                const scoreMap: Record<string, number> = {};
+                console.log(`[HEARTS MASTER] Authoritative Sync for ${p.id}: Final Score = ${finalScore}`);
 
-                // Construct a set of emails to fetch
-                const emailsToFetch = new Set<string>();
-                activePlayers.forEach((p: HeartsPlayer) => {
-                    const email = p.email || idEmailMap[p.id];
-                    if (email) emailsToFetch.add(email.toLowerCase());
-                });
-
-                if (emailsToFetch.size > 0) {
-                    const { data: profiles } = await supabase
-                        .from('profiles')
-                        .select('email, visa_points')
-                        .in('email', Array.from(emailsToFetch));
-
-                    if (profiles) {
-                        profiles.forEach(prof => {
-                            // Find which player this belongs to - Case Insensitive Match
-                            const player = activePlayers.find((ap: HeartsPlayer) =>
-                                ap.email?.toLowerCase() === prof.email.toLowerCase() ||
-                                idEmailMap[ap.id]?.toLowerCase() === prof.email.toLowerCase()
-                            );
-                            if (player) {
-                                console.log(`[HEARTS MASTER] Synced ${player.id} to score: ${prof.visa_points}`);
-                                scoreMap[player.id] = prof.visa_points;
-                            }
-                        });
-                    }
-                }
-
-                // 3. Update Participants map
-                updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => {
-                    const realScore = scoreMap[p.id];
-                    // FORCEFUL SYNC: 
-                    // 1. If we found a profile score, use it (even if it's 0 or negative).
-                    // 2. If no profile but current score is > 0, keep it.
-                    // 3. Absolute fallback: 1000.
-                    let finalScore = 1000;
-                    if (realScore !== undefined) {
-                        finalScore = realScore;
-                    } else if (p.score !== undefined && p.score !== 0) {
-                        finalScore = p.score;
-                    }
-
-                    console.log(`[HEARTS MASTER] Authoritative Sync for ${p.id}: Final Score = ${finalScore}`);
-
-                    return {
-                        ...p,
-                        score: finalScore,
-                        start_score: finalScore,
-                        last_total_score: finalScore, // CRITICAL: Initialize for delta calculation
-                        groupId: undefined,
-                        cards_visible: undefined
-                    };
-                });
-            } else {
-                console.log(`[HEARTS MASTER] Skipping profile sync for Round ${nextRound}. Using current game scores.`);
-                updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => ({
+                return {
                     ...p,
+                    score: finalScore,
+                    start_score: finalScore,
+                    last_total_score: finalScore, // CRITICAL: Initialize for delta calculation
                     groupId: undefined,
                     cards_visible: undefined
-                }));
-            }
+                };
+            });
         }
         else if (nextPhase === 'shuffle') {
+            // CLEAR CHAT for NEW ROUNDS
+            console.log(`[HEARTS MASTER] Clearing chat history for start of Round ${nextRound}...`);
+            await supabase.from('messages').delete().eq('game_id', currentSessionId);
+
             // Robust Check: Sync with hearts_eliminated table
-            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', 'hearts_main');
+            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId);
             const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
 
             let activePlayers = currentState.participants.filter((p: HeartsPlayer) =>
@@ -442,7 +428,6 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             }));
 
             // CLEANUP: Clear the persistent guesses table for this round/game to prevent stale evaluations
-            const currentSessionId = currentState.active_game_id || 'hearts_main';
             console.log(`[HEARTS MASTER] Clearing stale guesses from database for ${currentSessionId}...`);
             await supabase.from('hearts_guesses').delete().eq('game_id', currentSessionId);
 
@@ -454,7 +439,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             // --------------------------------------------------------------------------------
 
             // Robust Check: Sync with hearts_eliminated table
-            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', 'hearts_main');
+            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId);
             const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
 
             // Identify active vs eliminated
@@ -512,14 +497,12 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             const targetRound = freshState.current_round || 1;
 
             // CRITICAL GUARD: Prevent Double-Scoring
-            // If the database state already reflects the 'result' phase for this round, we have already processed scores.
             if (freshState.phase === 'result' && targetRound === currentState.current_round) {
                 console.warn(`[HEARTS MASTER] Results for Round ${targetRound} already processed. Skipping redundant increment.`);
                 return;
             }
             console.log(`[HEARTS MASTER] Fetching votes for Round ${targetRound} from hearts_guesses...`);
 
-            const currentSessionId = freshState.active_game_id || 'hearts_main';
             const { data: guessRows, error: guessError } = await supabase
                 .from('hearts_guesses')
                 .select('*')
@@ -911,7 +894,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                                 } else if (activeSubjects === 0 && activeMasters > 0) {
                                     finalNext = 'end';
                                     finalReason = 'master_victory' as any;
-                                } else if (authoritative.current_round >= MAX_ROUNDS || activeCount < 2) {
+                                } else if ((authoritative.current_round || 0) >= MAX_ROUNDS || activeCount < 2) {
                                     finalNext = 'end';
                                     finalReason = (activeCount >= 1) ? 'survival' : 'master_victory' as any;
                                 }

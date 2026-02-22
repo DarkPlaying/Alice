@@ -294,7 +294,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     useEffect(() => {
         const userId = user?.id || user?.uid;
         if (gameState && userId) {
-            const me = gameState.participants.find(p => p.id === userId);
+            const me = (gameState?.participants || []).find(p => p.id === userId);
             setMyPlayer(me || null);
             if (gameState.phase !== 'choosing') { setHasSubmitted(false); setSelectedSuit(null); }
             if (gameState.phase === 'shuffle' || gameState.phase === 'briefing') {
@@ -321,9 +321,9 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     }, [gameState?.phase_started_at, gameState?.phase_duration_sec, gameState?.is_paused]);
 
     const myGroupId = myPlayer?.groupId;
-    const myGroupMembers = (myGroupId && gameState?.groups && gameState.groups[myGroupId]) ? gameState.groups[myGroupId] : [];
+    const myGroupMembers = (myGroupId && (gameState?.groups || {})[myGroupId]) ? (gameState?.groups || {})[myGroupId] : [];
     const othersInGroup = myGroupMembers.filter(pid => pid !== (user?.id || user?.uid)).filter(pid => {
-        const p = gameState?.participants?.find(part => part.id === pid);
+        const p = (gameState?.participants || []).find(part => part.id === pid);
         return p && p.name && p.status !== 'eliminated';
     });
 
@@ -343,7 +343,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
         if (currentC >= 10) { alert("COMMUNICATION LIMIT REACHED"); return; }
 
         const temp = chatInput.trim(); setChatInput('');
-        const newCounts = { ...gameState.chat_counts, [myPlayer.id]: currentC + 1 };
+        const newCounts = { ...(gameState.chat_counts || {}), [myPlayer.id]: currentC + 1 };
         await supabase.from('hearts_game_state').update({ chat_counts: newCounts }).eq('id', 'hearts_main');
 
         const senderName = playerIdMap[myPlayer.id] || myPlayer.name || 'Unknown Agent';
@@ -560,15 +560,15 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                         </div>
                                     ) : (
                                         <div className="w-full h-full overflow-hidden rounded-2xl animate-flip-in">
-                                            {gameState.cards[myPlayer?.id!] ? (
-                                                <img src={`/borderland_cards/${gameState.cards[myPlayer?.id!].suit.charAt(0).toUpperCase() + gameState.cards[myPlayer?.id!].suit.slice(1)}_${gameState.cards[myPlayer?.id!].rank}.png`} alt="My Card" className="w-full h-full object-cover" />
+                                            {(gameState?.cards || {})[myPlayer?.id!] ? (
+                                                <img src={`/borderland_cards/${(gameState?.cards || {})[myPlayer?.id!].suit.charAt(0).toUpperCase() + (gameState?.cards || {})[myPlayer?.id!].suit.slice(1)}_${(gameState?.cards || {})[myPlayer?.id!].rank}.png`} alt="My Card" className="w-full h-full object-cover" />
                                             ) : <div className="flex items-center justify-center h-full text-white/20">NO DATA</div>}
                                         </div>
                                     )}
                                 </div>
                             </div>
                             {othersInGroup.map(pid => {
-                                const card = gameState.cards[pid];
+                                const card = (gameState?.cards || {})[pid];
                                 return (
                                     <div key={pid} className="flex flex-col items-center gap-4 shrink-0">
                                         <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-white/50">{playerIdMap[pid] || 'Agent'}</span>

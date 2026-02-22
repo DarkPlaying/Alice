@@ -97,6 +97,8 @@ const evaluateBattle = (p1: DiamondsPlayer, p2: DiamondsPlayer): BattleResult =>
         losers: [],
         eliminatedIds: [],
         effects: [],
+        p1Id: p1.id,
+        p2Id: p2.id,
         slotDetails: [],
         p1Total: 0,
         p2Total: 0
@@ -281,6 +283,9 @@ const evaluateBattle3Way = (p1: DiamondsPlayer, p2: DiamondsPlayer, p3: Diamonds
         losers: [],
         eliminatedIds: [],
         effects: [],
+        p1Id: p1.id,
+        p2Id: p2.id,
+        p3Id: p3.id,
         slotDetails: [],
         p1Total: 0,
         p2Total: 0,
@@ -451,14 +456,24 @@ const evaluateBattle3Way = (p1: DiamondsPlayer, p2: DiamondsPlayer, p3: Diamonds
     const validSums = sums.map((s, idx) => res.eliminatedIds.includes(players[idx].id) ? -1 : s);
     const max = Math.max(...validSums);
 
+    console.log(`[DIAMONDS_EVAL] 3-Way Sums: P1:${sums[0]}, P2:${sums[1]}, P3:${sums[2]} | Max: ${max}`);
+
     players.forEach((p, i) => {
-        if (res.eliminatedIds.includes(p.id)) return;
+        if (res.eliminatedIds.includes(p.id)) {
+            console.log(`[DIAMONDS_EVAL] Player ${p.username} (${p.id}) is ELIMINATED. Skipping win.`);
+            return;
+        }
         if (validSums[i] === max && max >= 0) {
-            if (!res.winners.includes(p.id)) res.winners.push(p.id);
+            if (!res.winners.includes(p.id)) {
+                console.log(`[DIAMONDS_EVAL] ADDING WINNER: ${p.username} (Sum: ${validSums[i]})`);
+                res.winners.push(p.id);
+            }
         } else if (!res.winners.includes(p.id)) {
             res.losers.push(p.id);
         }
     });
+
+    console.log(`[DIAMONDS_EVAL] Final Result Winners:`, res.winners);
 
     return res;
 };

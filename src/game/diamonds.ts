@@ -20,6 +20,9 @@ export interface BattleResult {
     winners: string[];
     losers: string[];
     eliminatedIds: string[];
+    p1Id: string;
+    p2Id: string;
+    p3Id?: string;
     p1Total?: number;
     p2Total?: number;
     p3Total?: number;
