@@ -178,7 +178,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
         const pIds = currentPlayers.map(p => p.id);
         if (pIds.length === 0) {
             console.error('[HEARTS MASTER] CRITICAL: Attempted to deal to 0 players!');
-            return { groups: {}, cards: {}, players: [] };
+            return { groups: {}, pairs: {}, players: [] };
         }
 
         // --- Smart Shuffle: Avoid Repeating Partners ---
@@ -541,7 +541,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 const card = pairs[p.id]; // FRESH card data
                 let passed = false;
 
-                if (guess && card && guess.suit && card.suit) {
+                if (guess?.suit && card?.suit) {
                     if (guess.suit.toLowerCase() === card.suit.toLowerCase()) {
                         passed = true;
                     }
@@ -639,8 +639,8 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
                             // Correct Delta: For R1, it should be p.score - p.start_score
                             const roundScoreDelta = targetRound === 1
-                                ? (p.score - (p.start_score || p.score))
-                                : (p.score - (p.last_total_score || 0));
+                                ? ((Number(p.score) || 0) - (Number(p.start_score) || Number(p.score) || 0))
+                                : ((Number(p.score) || 0) - (Number(p.last_total_score) || 0));
 
                             if (existingPoints) {
                                 await supabase.from('hearts_round_points').update({
