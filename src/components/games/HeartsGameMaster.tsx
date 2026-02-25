@@ -426,7 +426,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
             // Just update participants list (clearing groups/cards for now)
             updates.groups = {};
-            updates.cards = {};
+            updates.pairs = {};
 
             // Keep participants list clean but don't assign yet
             updates.participants = [...activePlayers, ...eliminatedPlayers].map((p: HeartsPlayer) => ({
