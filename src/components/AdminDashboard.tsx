@@ -1,17 +1,55 @@
+// CACHE BUSTER V2: FORCING VITE TO RECOMPILE
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, Search } from 'lucide-react';
+import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import Papa from 'papaparse';
-import { collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, writeBatch, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { supabase } from '../supabaseClient';
+
+import { createClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        storageKey: 'borderland-fresh-token-v2',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        lock: async (_name: string, ...args: any[]) => {
+            const acquire = args.pop();
+            if (typeof acquire === 'function') {
+                return await acquire();
+            }
+        }
+    }
+});
+
+const getAdminAuthClient = () => {
+    return createClient('https://ssirmxujmdhdhmnqxfxi.supabase.co', 'sb_publishable_8aNc7iJaeXfRI2jOwHccrQ_dFMYz6fT', {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+            detectSessionInUrl: false,
+
+            storageKey: 'borderland-admin-v2',
+            lock: async (_name: string, ...args: any[]) => {
+                // Bypass navigator.locks entirely to prevent Vite HMR deadlocks
+                const acquire = args.pop();
+                if (typeof acquire === 'function') {
+                    return await acquire();
+                }
+            }
+        }
+    });
+};
+
 import { PlayerCache } from '../lib/playerCache';
+import { VisaManagement } from './admin/VisaManagement';
 
 import { HeartsGameMaster } from './games/HeartsGameMaster';
+import { ClubsGameMaster } from './games/ClubsGameMaster';
+import { SpadesGameMaster } from './games/SpadesGameMaster';
 import { GameSettingsModal } from './admin/GameSettingsModal';
 import { HeartsGameSettingsModal } from './admin/HeartsGameSettingsModal';
+import { generateGameId } from '../utils/gameId';
 
 interface AdminDashboardProps {
     onLogout: () => void;
@@ -30,6 +68,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     ]);
     const [activeView, setActiveView] = useState<'dashboard' | 'players' | 'masters' | 'spades' | 'clubs' | 'diamonds' | 'hearts'>('dashboard');
     const [players, setPlayers] = useState<any[]>([]);
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
     // ... suits definition ...
     const suits = [
@@ -137,6 +176,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [showStartModal, setShowStartModal] = useState(false);
     const [selectedSuitForModal, setSelectedSuitForModal] = useState<string | null>(null);
     const [waitingPlayers, setWaitingPlayers] = useState<any[]>([]);
+    const [bannedPlayers, setBannedPlayers] = useState<any[]>([]);
+    const bannedPlayersRef = useRef<any[]>([]);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
 
     // GAME SETTINGS MODAL STATE
@@ -160,15 +202,84 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     useEffect(() => {
         const channel = supabase.channel('admin_hearts_cx')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'hearts_game_state', filter: 'id=eq.hearts_main' }, (payload) => {
-                setHeartsGameStatus((prev: any) => ({ ...prev, ...payload.new }));
+                setHeartsGameStatus((prev: any) => {
+                    // Stale data protection
+                    if (payload.new.phase_started_at && prev.phase_started_at) {
+                        let newDStr = payload.new.phase_started_at.replace(' ', 'T');
+                        if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                        if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                        let oldDStr = prev.phase_started_at.replace(' ', 'T');
+                        if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
+
+                        if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
+
+                        if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
+                            return prev;
+                        }
+                    }
+                    return { ...prev, ...payload.new };
+                });
             })
             .subscribe();
 
-        supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').maybeSingle().then(({ data }) => {
-            if (data) setHeartsGameStatus(data);
-        });
+        let isFetchingHearts = false;
+        const fetchHeartsState = async () => {
+            if (isFetchingHearts) return;
+            isFetchingHearts = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
 
-        return () => { supabase.removeChannel(channel); };
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && Object.keys(data).length > 0) {
+                        setHeartsGameStatus((prev: any) => {
+                            if (data.phase_started_at && prev.phase_started_at) {
+                                let newDStr = data.phase_started_at.replace(' ', 'T');
+                                if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                                if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                                let oldDStr = prev.phase_started_at.replace(' ', 'T');
+                                if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
+
+                                if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
+
+                                if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
+                                    return prev;
+                                }
+                            }
+                            return data;
+                        });
+                    }
+                }
+            } catch (err) {
+                // Ignore
+            } finally {
+                clearTimeout(timeoutId);
+                isFetchingHearts = false;
+            }
+        };
+
+        fetchHeartsState();
+        const pollInterval = setInterval(fetchHeartsState, 15000);
+
+        return () => {
+            clearInterval(pollInterval);
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     // SPADES STATE
@@ -190,14 +301,55 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             .subscribe();
 
         // Initial Fetch
+        let isFetchingSpades = false;
         const fetchSpadesState = async () => {
-            const { data } = await supabase.from('spades_game_state').select('*').eq('id', 'spades_main').maybeSingle();
-            if (data) setSpadesGameStatus(data);
+            if (isFetchingSpades) return;
+            isFetchingSpades = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    signal: controller.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.id) {
+                        setSpadesGameStatus((prev: any) => {
+                            if (prev.phase_started_at && data.phase_started_at) {
+                                let prevDStr = prev.phase_started_at.replace(' ', 'T');
+                                if (prevDStr.match(/[+-]\d{2}$/)) prevDStr += ':00';
+
+                                if (!prevDStr.endsWith('Z') && !prevDStr.match(/[+-]\d{2}:?\d{2}$/)) prevDStr += 'Z';
+                                let newDStr = data.phase_started_at.replace(' ', 'T');
+                                if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                                if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                                if (new Date(newDStr).getTime() < new Date(prevDStr).getTime()) {
+                                    return prev; // Ignore stale polling data
+                                }
+                            }
+                            return data;
+                        });
+                    }
+                }
+            } catch (err) {
+                // Ignore abort errors
+            } finally {
+                clearTimeout(timeoutId);
+                isFetchingSpades = false;
+            }
         };
         fetchSpadesState();
 
-        // Polling Fallback (Every 2s) to handle Realtime drops/lag
-        const pollInterval = setInterval(fetchSpadesState, 2000);
+        // Polling Fallback (Every 15s) to handle Realtime drops/lag
+        const pollInterval = setInterval(fetchSpadesState, 15000);
 
         return () => {
             supabase.removeChannel(channel);
@@ -206,27 +358,106 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     }, []);
 
     // SPADES: Local Countdown Timer Effect
-    const [spadesTimerDisplay, setSpadesTimerDisplay] = useState('STABLE');
+    const [spadesTimerDisplay, setSpadesTimerDisplay] = useState('0:00');
     useEffect(() => {
         if (!spadesGameStatus.is_active || !spadesGameStatus.phase_started_at || !spadesGameStatus.phase_duration_sec) {
-            setSpadesTimerDisplay(spadesGameStatus.is_active ? 'STABLE' : 'IDLE');
+            setSpadesTimerDisplay('0:00');
             return;
         }
 
         const interval = setInterval(() => {
-            if (spadesGameStatus.is_paused) return; // Freeze timer on UI if paused
+            if (spadesGameStatus.is_paused) {
+                const remaining = spadesGameStatus.phase_duration_sec;
+                const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+                setSpadesTimerDisplay(fmt);
+                return;
+            }
 
             const now = new Date();
-            const startedAt = new Date(spadesGameStatus.phase_started_at);
+            let dStr = spadesGameStatus.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const startedAt = new Date(dStr);
             const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
             const remaining = Math.max(0, spadesGameStatus.phase_duration_sec - elapsed);
 
             const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
             setSpadesTimerDisplay(fmt);
-        }, 500); // 500ms for smoother updates
+        }, 100); // 100ms for accurate visual sync
 
         return () => clearInterval(interval);
     }, [spadesGameStatus]);
+
+    // HEARTS: Local Countdown Timer Effect
+    const [heartsTimerDisplay, setHeartsTimerDisplay] = useState('0:00');
+    useEffect(() => {
+        if (!heartsGameStatus?.system_start || heartsGameStatus.phase === 'idle' || !heartsGameStatus.phase_started_at || !heartsGameStatus.phase_duration_sec) {
+            setHeartsTimerDisplay('0:00');
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (heartsGameStatus.is_paused) {
+                const remaining = heartsGameStatus.phase_duration_sec;
+                const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+                setHeartsTimerDisplay(fmt);
+                return;
+            }
+
+            const now = new Date();
+            let dStr = heartsGameStatus.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const startedAt = new Date(dStr);
+            const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+            const remaining = Math.max(0, heartsGameStatus.phase_duration_sec - elapsed);
+
+            const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+            setHeartsTimerDisplay(fmt);
+        }, 100);
+
+        return () => clearInterval(interval);
+    }, [heartsGameStatus]);
+
+
+    // CLUBS: Local Countdown Timer Effect
+    const [clubsTimerDisplay, setClubsTimerDisplay] = useState('0:00');
+    useEffect(() => {
+        if (!clubsGameStatus?.system_start) {
+            setClubsTimerDisplay('0:00');
+            return;
+        }
+
+        if (clubsGameStatus?.is_paused) {
+            const remaining = clubsGameStatus.round_data?.paused_remaining_sec || 0;
+            const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+            setClubsTimerDisplay(fmt);
+            return;
+        }
+
+        const phaseExpirySource = clubsGameStatus?.phase_expiry || clubsGameStatus?.round_data?.phase_expiry;
+        if (!phaseExpirySource) {
+            setClubsTimerDisplay('0:00');
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const now = new Date();
+            let dStr = phaseExpirySource.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const expiry = new Date(dStr);
+            const remaining = Math.max(0, Math.floor((expiry.getTime() - now.getTime()) / 1000));
+
+            const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+            setClubsTimerDisplay(fmt);
+        }, 500);
+
+        return () => clearInterval(interval);
+    }, [clubsGameStatus]);
 
     // DIAMONDS STATE
     const [diamondsMessages, setDiamondsMessages] = useState<any[]>([]);
@@ -237,22 +468,115 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         system_start: false
     });
 
+    // DIAMONDS: Local Countdown Timer Effect
+    const [diamondsTimerDisplay, setDiamondsTimerDisplay] = useState('0:00');
+    useEffect(() => {
+        if (!diamondsGameStatus?.system_start || !diamondsGameStatus.phase_started_at || !diamondsGameStatus.phase_duration_sec) {
+            setDiamondsTimerDisplay('0:00');
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (diamondsGameStatus.is_paused) {
+                const remaining = diamondsGameStatus.phase_duration_sec;
+                const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+                setDiamondsTimerDisplay(fmt);
+                return;
+            }
+
+            const now = new Date();
+            let dStr = diamondsGameStatus.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const startedAt = new Date(dStr);
+            const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+            const remaining = Math.max(0, diamondsGameStatus.phase_duration_sec - elapsed);
+
+            const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+            setDiamondsTimerDisplay(fmt);
+        }, 100);
+
+        return () => clearInterval(interval);
+    }, [diamondsGameStatus]);
+
+
     // Sync Diamonds (Global)
     useEffect(() => {
-        const fetchStatus = async () => {
-            const { data } = await supabase.from('diamonds_game_state').select('*').eq('id', 'diamonds_king').maybeSingle();
-            if (data) setDiamondsGameStatus(data);
+        let isFetchingDiamonds = false;
+        const fetchDiamondsStatus = async () => {
+            if (isFetchingDiamonds) return;
+            isFetchingDiamonds = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.diamonds_king&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && Object.keys(data).length > 0) {
+                        setDiamondsGameStatus((prev: any) => {
+                            if (data.phase_started_at && prev.phase_started_at) {
+                                let newDStr = data.phase_started_at.replace(' ', 'T');
+                                if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                                if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                                let oldDStr = prev.phase_started_at.replace(' ', 'T');
+                                if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
+
+                                if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
+
+                                if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
+                                    return prev;
+                                }
+                            }
+                            return data;
+                        });
+                    }
+                }
+            } catch (err) {
+                // Ignore
+            } finally {
+                clearTimeout(timeoutId);
+                isFetchingDiamonds = false;
+            }
         };
-        fetchStatus();
+        fetchDiamondsStatus();
 
         const channel = supabase.channel('admin_diamonds_cx')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'diamonds_game_state', filter: 'id=eq.diamonds_king' }, (payload) => {
-                setDiamondsGameStatus((prev: any) => ({ ...prev, ...payload.new }));
+                setDiamondsGameStatus((prev: any) => {
+                    if (payload.new.phase_started_at && prev.phase_started_at) {
+                        let newDStr = payload.new.phase_started_at.replace(' ', 'T');
+                        if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                        if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                        let oldDStr = prev.phase_started_at.replace(' ', 'T');
+                        if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
+
+                        if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
+
+                        if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
+                            return prev;
+                        }
+                    }
+                    return { ...prev, ...payload.new };
+                });
             })
             .subscribe();
 
-        // Polling fallback every 2s to catch missed updates
-        const interval = setInterval(fetchStatus, 2000);
+        // Polling fallback every 15s to catch missed updates
+        const interval = setInterval(fetchDiamondsStatus, 15000);
 
         // Persistent Broadcast Channel for Diamonds (Force Exit)
         const broadcastChannel = supabase.channel('diamonds_king_game');
@@ -276,10 +600,15 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
     // Unified Waiting List Listener (Supabase Realtime + Firestore Backup)
     useEffect(() => {
-        if (!showStartModal) return;
 
         console.log("[ADMIN] Initializing Hybrid Presence Monitor...");
-        const channel = supabase.channel('clubs_lobby');
+        const channel = supabase.channel('clubs_lobby', {
+            config: {
+                presence: {
+                    key: 'admin'
+                }
+            }
+        });
         lobbyChannelRef.current = channel;
 
         // We use refs to store the separate lists so we can merge them without race conditions
@@ -312,7 +641,21 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             for (const key in newState) {
                 raw.push(...newState[key]);
             }
-            realtimeUsersRef.current = raw.map((u: any) => ({
+            const validRaw: any[] = [];
+            for (const u of raw) {
+                if (bannedPlayersRef.current.some(b => b.user_id === u.user_id)) {
+                    // Auto-kick banned players
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'player_kick',
+                        payload: { userId: u.user_id, username: u.username }
+                    });
+                } else {
+                    validRaw.push(u);
+                }
+            }
+
+            realtimeUsersRef.current = validRaw.map((u: any) => ({
                 user_id: u.user_id,
                 username: u.username,
                 role: u.role,
@@ -334,49 +677,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 }
             });
 
-        // 2. Firestore Handler (Backup where waiting_for_game != null)
-        const q = query(
-            collection(db, "users"),
-            where("waiting_for_game", "!=", null)
-        );
 
-        const unsubFirestore = onSnapshot(q, (snapshot) => {
-            console.log(`[ADMIN] Firestore Snapshot: ${snapshot.size} docs found.`);
-            const fsUsers: any[] = [];
-            snapshot.forEach(doc => {
-                const d = doc.data();
-                // Filter in-memory for waiting players
-                if (d.waiting_for_game) {
-
-                    // Convert game id (e.g. diamonds_king) to type (diamonds) if needed
-                    let gType = d.waiting_for_game;
-                    if (gType.includes('_')) gType = gType.split('_')[0];
-
-                    fsUsers.push({
-                        user_id: doc.id,
-                        username: d.username,
-                        role: d.role,
-                        entered_at: d.last_active ? new Date(d.last_active).toISOString() : new Date().toISOString(),
-                        game_type: gType.toLowerCase(),
-                        source: 'firestore'
-                    });
-                }
-            });
-            console.log("[ADMIN] Firestore filtered users:", fsUsers);
-            firestoreUsersRef.current = fsUsers;
-            mergeAndSet();
-        }, (err) => {
-            console.error("[ADMIN] Firestore Monitor Error:", err);
-        });
 
         return () => {
             console.log("[ADMIN] Cleaning up monitors...");
             supabase.removeChannel(channel);
-            unsubFirestore();
+
             lobbyChannelRef.current = null;
             setWaitingPlayers([]);
         };
-    }, [showStartModal]);
+    }, []);
 
     const handleKickPlayer = async (userId: string, username: string) => {
         if (!confirm(`CONFIRM: REMOVE ${username} FROM DEPLOYMENT QUEUE?`)) return;
@@ -384,9 +694,14 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         try {
             // 1. Clear Firestore status (Persistence)
             if (userId) {
-                await updateDoc(doc(db, "users", userId), {
-                    waiting_for_game: null
-                });
+                await supabase.from('profiles').update({ waiting_for_game: null }).eq('id', userId);
+            }
+
+            // Add to local banned list
+            const newBanned = { user_id: userId, username };
+            if (!bannedPlayersRef.current.some(p => p.user_id === userId)) {
+                bannedPlayersRef.current = [...bannedPlayersRef.current, newBanned];
+                setBannedPlayers(bannedPlayersRef.current);
             }
 
             // 2. Broadcast Transient Kick (Realtime)
@@ -408,20 +723,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         if (!confirm("WARNING: THIS WILL CLEAR ALL QUEUES FOR ALL PLAYERS. PROCEED?")) return;
 
         try {
-            const q = query(collection(db, "users"), where("waiting_for_game", "!=", null));
-            const snapshot = await getDocs(q);
-
-            if (snapshot.empty) {
+            const { data, error } = await supabase.from('profiles').update({ waiting_for_game: null }).neq('waiting_for_game', null).select();
+            if (error) throw error;
+            if (!data || data.length === 0) {
                 showToast("QUEUE IS ALREADY EMPTY", 'info');
                 return;
             }
-
-            const batch = writeBatch(db);
-            snapshot.docs.forEach(d => {
-                batch.update(d.ref, { waiting_for_game: null });
-            });
-
-            await batch.commit();
+            const snapshot = { size: data.length };
             showToast(`PURGED ${snapshot.size} QUEUE ENTRIES`, 'success');
 
             // Force Realtime broadcast to everyone
@@ -443,11 +751,55 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     useEffect(() => {
         if (activeView !== 'clubs') return;
 
+        let isFetchingClubs = false;
         const fetchStatus = async () => {
-            const { data } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
-            if (data) setClubsGameStatus(data);
+            if (isFetchingClubs) return;
+            isFetchingClubs = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    signal: controller.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.id) {
+                        setClubsGameStatus((prev: any) => {
+                            if (prev.phase_expiry && data.phase_expiry) {
+                                let prevDStr = prev.phase_expiry.replace(' ', 'T');
+                                if (prevDStr.match(/[+-]\d{2}$/)) prevDStr += ':00';
+
+                                if (!prevDStr.endsWith('Z') && !prevDStr.match(/[+-]\d{2}:?\d{2}$/)) prevDStr += 'Z';
+                                let newDStr = data.phase_expiry.replace(' ', 'T');
+                                if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+
+                                if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+
+                                if (new Date(newDStr).getTime() < new Date(prevDStr).getTime()) {
+                                    return prev; // Ignore stale polling data
+                                }
+                            }
+                            return data;
+                        });
+                    }
+                }
+            } catch (err) {
+                // Ignore
+            } finally {
+                clearTimeout(timeoutId);
+                isFetchingClubs = false;
+            }
         };
         fetchStatus();
+
+        // Autorefresh fallback (15s) to prevent state staleness
+        const syncInterval = setInterval(fetchStatus, 15000);
 
         const channel = supabase
             .channel('admin_status_sync')
@@ -467,10 +819,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         return () => {
             supabase.removeChannel(channel);
-            if (clubsControlChannelRef.current) {
-                supabase.removeChannel(clubsControlChannelRef.current);
-                clubsControlChannelRef.current = null;
-            }
+            supabase.removeChannel(broadcastChannel);
+            clubsControlChannelRef.current = null;
+            clearInterval(syncInterval);
         };
     }, [activeView]);
 
@@ -735,12 +1086,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         // 2. Perform Deletion
         try {
-            const batch = writeBatch(db);
-            safeIds.forEach(id => {
-                const docRef = doc(db, 'users', id);
-                batch.delete(docRef);
-            });
-            await batch.commit();
+            const { error } = await supabase.from('profiles').delete().in('id', safeIds);
+            if (error) throw error;
+
+            // Optimistic update to immediately reflect deletion in UI (in case Realtime is off)
+            setPlayers(prev => prev.filter(p => !safeIds.includes(p.id)));
 
             // 3. Setup Undo
             setLastActionType('delete');
@@ -757,22 +1107,12 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         if (!deletedBackup.length) return;
 
         try {
-            const batch = writeBatch(db);
             if (lastActionType === 'delete') {
-                // RESTORE DELETED PLAYERS
-                deletedBackup.forEach(user => {
-                    const docRef = doc(db, 'users', user.id);
-                    const { id, ...userData } = user;
-                    batch.set(docRef, userData);
-                });
-                await batch.commit();
+                const { error } = await supabase.from('profiles').insert(deletedBackup);
+                if (error) throw error;
             } else {
-                // REVERT CREATION (PURGE NEWLY CREATED)
-                deletedBackup.forEach(user => {
-                    const docRef = doc(db, 'users', user.id);
-                    batch.delete(docRef);
-                });
-                await batch.commit();
+                const { error } = await supabase.from('profiles').delete().in('id', deletedBackup.map(u => u.id));
+                if (error) throw error;
                 alert("BATCH UPLOAD REVERTED. IDENTITIES PURGED.");
             }
             setShowUndo(false);
@@ -799,43 +1139,46 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 const users = results.data as { username: string; password: string }[];
                 setUploadProgress({ current: 0, total: users.length });
 
-                // Initialize Secondary App once for the batch
-                const secondaryApp = initializeApp({
-                    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-                    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-                    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-                    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-                    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-                    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-                }, "BatchApp");
-
-                const secondaryAuth = getAuth(secondaryApp);
-
                 let successCount = 0;
                 let failCount = 0;
                 const createdPlayersTmp: any[] = [];
 
+                const adminAuthClient = getAdminAuthClient();
                 for (let i = 0; i < users.length; i++) {
                     const user = users[i];
                     try {
                         if (!user.username || !user.password) continue;
 
-                        const email = user.username.includes('@') ? user.username : `${user.username}@borderland.com`;
+                        const sanitizedUsername = user.username.trim().toLowerCase().replace(/\s+/g, '');
+                        const email = sanitizedUsername.includes('@') ? sanitizedUsername : `${sanitizedUsername}@borderland.app`;
 
-                        // Create Auth
-                        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, user.password);
+                        const { data, error } = await adminAuthClient.auth.signUp({ email, password: user.password });
+                        if (error) throw error;
 
-                        // Create Firestore
-                        await setDoc(doc(db, "users", userCredential.user.uid), {
-                            username: user.username.split('@')[0],
-                            email: email,
-                            role: activeView === 'masters' ? 'master' : 'player',
-                            createdAt: serverTimestamp(),
-                            status: 'alive',
-                            visaDays: 500,
+                        // Direct REST call to bypass any client lock issues
+                        const res = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+                            method: 'POST',
+                            headers: {
+                                'apikey': supabaseKey,
+                                'Authorization': `Bearer ${supabaseKey}`,
+                                'Content-Type': 'application/json',
+                                'Prefer': 'resolution=merge-duplicates'
+                            },
+                            body: JSON.stringify({
+                                id: data.user?.id,
+                                email: email,
+                                username: user.username.split('@')[0],
+                                role: activeView === 'masters' ? 'master' : 'player',
+                                visa_points: 500
+                            })
                         });
 
-                        createdPlayersTmp.push({ id: userCredential.user.uid });
+                        if (!res.ok) {
+                            const errData = await res.json();
+                            throw new Error("Profile creation failed: " + (errData.message || res.statusText));
+                        }
+
+                        createdPlayersTmp.push({ id: data.user?.id });
                         successCount++;
                     } catch (err) {
                         console.error(`Failed to create ${user.username}:`, err);
@@ -843,11 +1186,15 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     }
                     setUploadProgress(prev => ({ ...prev, current: i + 1 }));
                 }
-
-                await deleteApp(secondaryApp);
                 setIsUploading(false);
                 setCreateError(`BATCH COMPLETE: ${successCount} ISSUED, ${failCount} FAILED.`);
                 if (fileInputRef.current) fileInputRef.current.value = '';
+
+                // Force UI to refresh instantly
+                if (successCount > 0) {
+                    PlayerCache.clear();
+                    setRefreshTrigger(prev => prev + 1);
+                }
 
                 // Setup Undo
                 if (createdPlayersTmp.length > 0) {
@@ -868,129 +1215,60 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         setCreateError('');
 
         try {
-            // 1. Create a secondary Firebase App to avoid logging out the admin
-            const secondaryApp = initializeApp({
-                apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-                authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-                projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-                storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-                messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-                appId: import.meta.env.VITE_FIREBASE_APP_ID,
-            }, "SecondaryApp");
+            if (newPassword.length < 6) throw new Error("PASSWORD MUST BE AT LEAST 6 CHARACTERS.");
 
-            const secondaryAuth = getAuth(secondaryApp);
-            const email = newUsername.includes('@') ? newUsername : `${newUsername}@borderland.com`;
+            const sanitizedUsername = newUsername.trim().toLowerCase().replace(/\s+/g, '');
+            const email = sanitizedUsername.includes('@') ? sanitizedUsername : `${sanitizedUsername}@borderland.app`;
 
-            // 2. Create User in Auth
-            const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, newPassword);
-            const user = userCredential.user;
+            const adminAuthClient = getAdminAuthClient();
+            console.log("[ADMIN] Calling signUp...");
+            const { data, error } = await adminAuthClient.auth.signUp({ email, password: newPassword });
+            console.log("[ADMIN] signUp finished! Error:", error?.message, "User:", data?.user?.id);
+            if (error) throw error;
 
-            // 3. Create User Document in Firestore
-            await setDoc(doc(db, "users", user.uid), {
-                username: newUsername.split('@')[0],
-                email: email,
-                role: activeView === 'masters' ? 'master' : 'player', // Set role based on Current View
-                createdAt: serverTimestamp(),
-                status: 'alive',
-                visaDays: 500, // Issue 500 days by default
+            console.log("[ADMIN] Calling direct fetch upsert...");
+
+            const res = await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+                method: 'POST',
+                headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'resolution=merge-duplicates'
+                },
+                body: JSON.stringify({
+                    id: data.user?.id,
+                    email: email,
+                    username: sanitizedUsername.split('@')[0],
+                    role: activeView === 'masters' ? 'master' : 'player',
+                    visa_points: 500
+                })
             });
 
-            // 4. Cleanup
-            await deleteApp(secondaryApp);
+            if (!res.ok) {
+                const errData = await res.json();
+                console.error("[ADMIN] Upsert Error:", errData);
+                throw new Error("Profile creation failed: " + (errData.message || res.statusText));
+            }
+
+            console.log("[ADMIN] upsert finished!");
 
             setNewUsername('');
             setNewPassword('');
             setShowCreateForm(false);
 
-            // 5. Setup Undo for Manual Creation
-            setDeletedBackup([{ id: user.uid }]);
+            // Force UI to refresh instantly
+            PlayerCache.clear();
+            setRefreshTrigger(prev => prev + 1);
+            console.log("[ADMIN] Form cleared and list refreshed.");
+
+            setDeletedBackup([{ id: data.user?.id }]);
             setLastActionType('create');
             setShowUndo(true);
             setTimeout(() => setShowUndo(false), 10000);
-
         } catch (err: any) {
             console.error("Creation Error:", err);
-
-            if (err.code === 'auth/email-already-in-use') {
-                // HANDLE OVERWRITE LOGIC
-                const email = newUsername.includes('@') ? newUsername : `${newUsername}@borderland.com`;
-
-                // 1. Search locally in the loaded players list first (Most reliable source)
-                // This avoids case-sensitivity issues with Firestore queries
-                const existingPlayer = players.find(p =>
-                    (p.username && p.username.toLowerCase() === newUsername.toLowerCase()) ||
-                    (p.email && p.email.toLowerCase() === email.toLowerCase())
-                );
-
-                if (existingPlayer) {
-                    const existingUid = existingPlayer.id;
-
-                    if (window.confirm(`IDENTITY DETECTED (${existingPlayer.username}).\n\nOVERWRITE VISA DATA? \n(Note: Original Passcode will remain unchanged due to security protocols.)`)) {
-                        try {
-                            await setDoc(doc(db, "users", existingUid), {
-                                username: newUsername.split('@')[0],
-                                email: email,
-                                role: activeView === 'masters' ? 'master' : 'player',
-                                createdAt: serverTimestamp(),
-                                status: 'alive',
-                                visaDays: 500,
-                            });
-                            setNewUsername('');
-                            setNewPassword('');
-                            setShowCreateForm(false);
-                            alert("VISA OVERWRITTEN. PREVIOUS PASSCODE RETAINED.");
-                            return; // Exit success
-                        } catch (overwriteErr) {
-                            console.error("Overwrite failed", overwriteErr);
-                            setCreateError("OVERWRITE_FAILED: SYSTEM_LOCK");
-                        }
-                    } else {
-                        // User cancelled overwrite
-                        setCreateError('IDENTITY CONFLICT: USERNAME ALREADY TAKEN.');
-                    }
-                } else {
-                    // 2. The user exists in Auth but NOT in locally loaded list (Likely a "Zombie" - Deleted from DB but not Auth)
-                    // RECOVERY STRATEGY: Attempt to login with provided credentials to prove ownership.
-                    try {
-                        const secondaryApp = initializeApp({
-                            apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-                            authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-                            projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-                            storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-                            messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-                            appId: import.meta.env.VITE_FIREBASE_APP_ID,
-                        }, "RecoveryApp"); // Use a distinct app name for recovery
-                        const secondaryAuth = getAuth(secondaryApp);
-
-                        const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, newPassword);
-                        const recoveredUser = userCredential.user;
-
-                        if (window.confirm(`GHOST SIGNAL DETECTED (${email}).\n\nRECOVER AND OVERWRITE DATA?`)) {
-                            await setDoc(doc(db, "users", recoveredUser.uid), {
-                                username: newUsername.split('@')[0],
-                                email: email,
-                                role: activeView === 'masters' ? 'master' : 'player',
-                                createdAt: serverTimestamp(),
-                                status: 'alive',
-                                visaDays: 500,
-                            });
-                            setNewUsername('');
-                            setNewPassword('');
-                            setShowCreateForm(false);
-                            alert("IDENTITY RECOVERED FROM THE VOID. VISA RE-ISSUED.");
-                        }
-                        await deleteApp(secondaryApp); // Clean up secondary app
-                    } catch (loginErr) {
-                        console.error("Recovery failed:", loginErr);
-                        setCreateError('IDENTITY LOCKED: INCORRECT PASSCODE FOR RECOVERY.');
-                    }
-                }
-
-            } else if (err.code === 'auth/weak-password') {
-                setCreateError('SECURITY ALERT: PASSWORD TOO WEAK.');
-            } else {
-                setCreateError(err.message || "SYSTEM ERROR");
-            }
+            setCreateError(err.message || "SYSTEM ERROR");
         } finally {
             setIsCreating(false);
         }
@@ -1012,43 +1290,31 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             ));
         }
 
-        // 2. Set up real-time listener (will update cache automatically)
-        const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-            setStats(prev => prev.map(stat =>
-                stat.label === 'Active Players'
-                    ? { ...stat, value: snapshot.size.toString() }
-                    : stat
-            ));
+        const fetchProfiles = async () => {
+            const { data, error } = await supabase.from('profiles').select('*');
+            if (!error && data) {
+                setStats(prev => prev.map(stat => stat.label === 'Active Players' ? { ...stat, value: data.length.toString() } : stat));
+                const playersData = data.sort((a: any, b: any) => {
+                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
+                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+                    if (isMasterA && !isMasterB) return -1;
+                    if (!isMasterA && isMasterB) return 1;
+                    return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+                });
+                setPlayers(playersData);
+                PlayerCache.set(playersData);
+            }
+        };
 
-            const playersData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            })).sort((a: any, b: any) => {
-                // 1. Force Admin/Game Master to ALWAYS be the first element
-                const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
-                const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+        fetchProfiles();
+        const channel = supabase.channel('public:profiles_admin')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, fetchProfiles)
+            .subscribe();
 
-                if (isMasterA && !isMasterB) return -1;
-                if (!isMasterA && isMasterB) return 1;
-
-                // 2. Sort remaining players by Join Date (Oldest to Newest)
-                const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
-
-                return timeA - timeB;
-            });
-
-            setPlayers(playersData);
-
-            // 3. Update cache with fresh data
-            PlayerCache.set(playersData);
-            console.log('[ADMIN] Player data updated and cached');
-        }, (error) => {
-            console.error("Error fetching player count:", error);
-        });
-
-        return () => unsubscribe();
-    }, []);
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [activeView, refreshTrigger]);
 
     // Clear selection when view changes
     useEffect(() => {
@@ -1090,7 +1356,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 u.email || 'N/A',
                 isSystem ? 'system' : isMasterFlag ? 'master' : 'player',
                 isSystem ? 'secure' : u.status || 'alive',
-                u.createdAt?.toDate?.()?.toLocaleString() || new Date().toLocaleString()
+                new Date(u.created_at || Date.now()).toLocaleString()
             ];
         });
 
@@ -1375,258 +1641,19 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 )}
 
                 {(activeView === 'players' || activeView === 'masters') && (
-                    <div className="space-y-6">
+                    <VisaManagement
+                        players={players}
+                        activeView={activeView as 'players' | 'masters'}
+                        onRefreshRequest={() => setRefreshTrigger(prev => prev + 1)}
+                        setPlayers={setPlayers}
+                        onHistoryRequest={(player) => {
+                            setActiveView('clubs');
+                            setClubsCommsMode(player.role === 'master' ? 'master' : 'player');
+                            setClubsFilterUserId(player.id);
+                        }}
+                    />
+                )}
 
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-sm font-bold text-gray-400 tracking-widest uppercase">
-                                {activeView === 'players' ? 'Registered Visas' : 'Command Personnel'}
-                            </h3>
-                            <div className="flex gap-2">
-                                {selectedPlayers.length > 0 && (
-                                    <button
-                                        onClick={() => handleDelete()}
-                                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded text-xs tracking-widest uppercase transition-colors"
-                                    >
-                                        <Trash2 size={14} />
-                                        DELETE SELECTED ({selectedPlayers.length})
-                                    </button>
-                                )}
-                                <button
-                                    onClick={handleDownloadManifest}
-                                    className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 border border-white/10 rounded text-xs tracking-widest uppercase transition-colors"
-                                >
-                                    <FileText size={14} />
-                                    GET MANIFEST
-                                </button>
-                                {/* Only allow imports for players, not masters? Or both? */}
-                                {(activeView === 'players' || activeView === 'masters') && (
-                                    <>
-                                        <button
-                                            onClick={downloadSampleCsv}
-                                            className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-400 border border-white/10 rounded text-xs tracking-widest uppercase transition-colors"
-                                        >
-                                            <Download size={14} />
-                                            TEMPLATE
-                                        </button>
-                                        <button
-                                            onClick={() => fileInputRef.current?.click()}
-                                            disabled={isUploading}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded text-xs tracking-widest uppercase transition-colors"
-                                        >
-                                            <Upload size={14} />
-                                            {isUploading ? 'INJECTING...' : 'BATCH INJECTION'}
-                                        </button>
-                                        <input
-                                            type="file"
-                                            ref={fileInputRef}
-                                            onChange={handleFileUpload}
-                                            accept=".csv"
-                                            className="hidden"
-                                        />
-                                    </>
-                                )}
-
-                                <button
-                                    onClick={() => setShowCreateForm(!showCreateForm)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-white text-black hover:bg-gray-200 border border-white rounded text-xs font-bold tracking-widest uppercase transition-colors"
-                                >
-                                    {showCreateForm ? 'CANCEL' : activeView === 'masters' ? 'APPOINT MASTER' : 'ISSUE VISA'}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Progress Bar for Batch */}
-                        {isUploading && (
-                            <div className="w-full bg-white/5 h-1 rounded overflow-hidden">
-                                <motion.div
-                                    className="h-full bg-blue-500"
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
-                                />
-                            </div>
-                        )}
-
-                        {showCreateForm && (
-                            <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                className="bg-white/5 border border-white/10 rounded-lg p-6 mb-6"
-                            >
-                                <form onSubmit={handleCreatePlayer} className="space-y-4 max-w-md">
-                                    <div>
-                                        <label className="text-xs text-gray-500 uppercase tracking-wider block mb-2">Identify (Username)</label>
-                                        <input
-                                            type="text"
-                                            value={newUsername}
-                                            onChange={(e) => setNewUsername(e.target.value)}
-                                            className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-[#ff0050] outline-none transition-colors"
-                                            placeholder="PLAYER_NAME"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-500 uppercase tracking-wider block mb-2">Passcode</label>
-                                        <input
-                                            type="password"
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            className="w-full bg-black/50 border border-white/20 rounded p-3 text-white focus:border-[#ff0050] outline-none transition-colors"
-                                            placeholder="••••••••"
-                                            required
-                                        />
-                                    </div>
-
-                                    {createError && (
-                                        <div className="text-red-500 text-xs font-mono">{createError}</div>
-                                    )}
-
-                                    <button
-                                        type="submit"
-                                        disabled={isCreating}
-                                        className="w-full bg-[#ff0050] hover:bg-[#d40043] text-white font-bold py-3 rounded tracking-widest uppercase transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {isCreating ? 'PROCESSING...' : 'CONFIRM REGISTRATION'}
-                                    </button>
-                                </form>
-                            </motion.div>
-                        )}
-
-                        <div className="bg-black/40 border border-white/10 rounded-lg overflow-hidden">
-                            <table className="w-full text-left">
-                                <thead className="bg-white/5 text-xs text-white/50 uppercase tracking-wider">
-                                    <tr>
-                                        <th className="p-4 border-b border-white/10 w-10">
-                                            <button
-                                                onClick={handleSelectAll}
-                                                className="text-gray-400 hover:text-white transition-colors"
-                                            >
-                                                {selectedPlayers.length > 0 && selectedPlayers.length === players.filter(p => activeView === 'masters' ? (p.role === 'master') : (p.role === 'player')).length
-                                                    ? <CheckSquare size={16} />
-                                                    : <Square size={16} />}
-                                            </button>
-                                        </th>
-                                        <th className="p-4 border-b border-white/10">ID</th>
-                                        <th className="p-4 border-b border-white/10">Name</th>
-                                        <th className="p-4 border-b border-white/10">Entry Time</th>
-                                        <th className="p-4 border-b border-white/10">Status</th>
-                                        <th className="p-4 border-b border-white/10">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-white/5">
-                                    {players.filter(p =>
-                                        activeView === 'masters'
-                                            ? (p.role === 'master' || p.role === 'admin' || p.username === 'admin')
-                                            : (p.role === 'player')
-                                    ).length === 0 ? (
-                                        <tr>
-                                            <td colSpan={6} className="p-8 text-center text-gray-500">
-                                                {activeView === 'masters' ? 'NO MASTERS APPOINTED' : 'NO PLAYERS DETECTED IN THE BORDERLAND'}
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        players
-                                            .filter(p =>
-                                                activeView === 'masters'
-                                                    ? (p.role === 'master' || p.role === 'admin' || p.username === 'admin')
-                                                    : (p.role === 'player')
-                                            )
-                                            .map((player) => {
-                                                const isSystem = player.username === 'admin' || player.role === 'admin';
-                                                const isMaster = isSystem || player.role === 'master';
-
-                                                const isSelected = selectedPlayers.includes(player.id);
-                                                // Generate Fixed Sequential ID based on master list position
-                                                const mainIndex = players.findIndex(p => p.id === player.id);
-                                                const sequentialId = `#PLAYER_${(mainIndex + 1).toString().padStart(3, '0')}`;
-
-                                                return (
-                                                    <tr key={player.id} className={`transition-colors group ${isSelected ? 'bg-white/10' : 'hover:bg-white/5'}`}>
-                                                        <td className="p-4">
-                                                            {!isSystem && (
-                                                                <button
-                                                                    onClick={() => handleSelect(player.id)}
-                                                                    className={`transition-colors ${isSelected ? 'text-[#ff0050]' : 'text-gray-600 hover:text-gray-400'}`}
-                                                                >
-                                                                    {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                                                </button>
-                                                            )}
-                                                        </td>
-                                                        <td className={`p-4 font-mono text-base ${isSystem ? 'text-red-500 font-bold' : isMaster ? 'text-yellow-500 font-bold' : 'text-[#ff0050]'}`}>
-                                                            {sequentialId}
-                                                        </td>
-                                                        <td className="p-4 font-bold text-base">
-                                                            {isSystem ? 'GAME MASTER' : (player.username || player.email || 'Unknown Player')}
-                                                        </td>
-                                                        <td className="p-4 text-gray-400 text-sm">{player.createdAt?.toDate?.()?.toLocaleString() || new Date().toLocaleString()}</td>
-                                                        <td className="p-4">
-                                                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-sm border ${isSystem ? 'bg-red-500/10 text-red-500 border-red-500/20' : isMaster ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-green-500/10 text-green-500 border-green-500/20'}`}>
-                                                                <span className={`w-2 h-2 rounded-full animate-pulse ${isSystem ? 'bg-red-500' : isMaster ? 'bg-yellow-500' : 'bg-green-500'}`} />
-                                                                {isSystem ? 'SYSTEM' : isMaster ? 'MASTER' : 'ALIVE'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="p-4 flex items-center gap-2">
-                                                            <button
-                                                                onClick={async () => {
-                                                                    // Fetch Real VISA Points & Stats
-                                                                    let realPoints = 1000;
-                                                                    let realWins = 0;
-                                                                    let realLosses = 0;
-                                                                    try {
-                                                                        const { data } = await supabase.from('profiles').select('visa_points, wins, losses').eq('id', player.id).single();
-                                                                        if (data) {
-                                                                            if (data.visa_points !== undefined) realPoints = data.visa_points;
-                                                                            if (data.wins !== undefined) realWins = data.wins;
-                                                                            if (data.losses !== undefined) realLosses = data.losses;
-                                                                        }
-                                                                    } catch (err) { console.error("Fetch Error:", err); }
-
-                                                                    setTrackingPlayer({
-                                                                        ...player,
-                                                                        displayId: sequentialId,
-                                                                        points: realPoints,
-                                                                        visaDays: realPoints,
-                                                                        wins: realWins,
-                                                                        losses: realLosses,
-                                                                        isSystem,
-                                                                        isMaster
-                                                                    });
-                                                                }}
-                                                                className="text-sm transition-colors border px-3 py-1.5 rounded uppercase tracking-wider font-bold text-gray-400 hover:text-[#ff0050] border-white/20 hover:border-[#ff0050]"
-                                                            >
-                                                                Track
-                                                            </button>
-                                                            {!isSystem && (
-                                                                <>
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            setActiveView('clubs');
-                                                                            setClubsCommsMode(player.role === 'master' ? 'master' : 'player');
-                                                                            setClubsFilterUserId(player.id);
-                                                                        }}
-                                                                        className="text-sm text-gray-400 hover:text-green-500 border border-white/20 hover:border-green-500/50 px-3 py-1.5 rounded uppercase tracking-wider transition-all font-bold"
-                                                                    >
-                                                                        History
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => handleDelete([player.id])}
-                                                                        className="text-gray-500 hover:text-red-500 p-1.5 rounded transition-colors"
-                                                                        title="Terminate Visa"
-                                                                    >
-                                                                        <Trash2 size={16} />
-                                                                    </button>
-                                                                </>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )
-                }
 
                 {/* GENERAL TOAST */}
                 <AnimatePresence>
@@ -1799,10 +1826,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <div key={suit.id} className="space-y-8">
                                 {/* Suit Hero */}
                                 <div className="bg-black/40 border border-white/10 rounded-xl p-6 sm:p-12 flex flex-col sm:flex-row items-center gap-6 sm:gap-12 relative overflow-hidden">
-                                    <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block`}>
+                                    <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block pointer-events-none`}>
                                         <suit.icon size={400} />
                                     </div>
-                                    <div className={`p-6 sm:p-8 bg-white/5 rounded-full ${suit.color} relative z-10`}>
+                                    <div className={`p-6 sm:p-8 bg-white/5 rounded-full ${suit.color} relative z-10 pointer-events-none`}>
                                         <suit.icon size={32} className="sm:hidden" />
                                         <suit.icon size={64} className="hidden sm:block" />
                                     </div>
@@ -1814,11 +1841,33 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                     {suit.id === 'clubs' && (
                                         <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-48 shrink-0">
-                                                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Protocol Accuracy</p>
-                                                <div className="text-2xl sm:text-3xl font-display font-bold text-green-500">{Math.min(100, (clubsGameStatus.votes_submitted / 10) * 100).toFixed(1)}%</div>
-                                                <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-green-500 transition-all duration-1000" style={{ width: `${Math.min(100, (clubsGameStatus.votes_submitted / 10) * 100)}%` }} />
+                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                <div className="absolute inset-0 bg-green-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                <div className="flex justify-between items-end mb-2 relative z-10">
+                                                    <div className="text-left">
+                                                        <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                        <div className="text-xl sm:text-2xl font-display font-black text-green-500 uppercase leading-none tracking-wider">
+                                                            {(() => {
+                                                                const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
+                                                                if (p === 'setup_phase1') return 'SETUP';
+                                                                if (p === 'selection_reveal') return 'REVEAL';
+                                                                if (p === 'playing_phase' || p === 'playing') return 'PLAYING';
+                                                                if (p === 'round_reveal') return 'ROUND';
+                                                                return p.replace('_', ' ');
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-green-500/50 drop-shadow-md">
+                                                            {clubsTimerDisplay}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10 mt-auto">
+                                                    <div className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-1000 shadow-[0_0_10px_#22c55e]" style={{ width: clubsGameStatus?.system_start ? '100%' : '0%' }} />
                                                 </div>
                                             </div>
 
@@ -1827,22 +1876,62 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <button
                                                         onClick={() => {
+                                                            if (clubsGameStatus?.system_start) {
+                                                                showToast("Clubs is already active. Use GATE RESET to restart.", "info");
+                                                                return;
+                                                            }
                                                             setSelectedSuitForModal('clubs');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className="group flex-1 px-4 py-3 bg-green-500 text-black text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(34,197,94,0.3)] hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] transition-all flex items-center justify-center gap-2"
+                                                        className={`group flex-1 px-4 py-3 ${clubsGameStatus?.system_start ? 'bg-green-500/30 cursor-not-allowed' : 'bg-green-500 hover:shadow-[0_0_30px_rgba(34,197,94,0.5)]'} text-black text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center justify-center gap-2`}
                                                     >
-                                                        START <Radio size={14} className="group-hover:animate-pulse" />
+                                                        {clubsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={clubsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            const newPausedState = !clubsGameStatus.is_paused;
-                                                            const { error } = await supabase.from('clubs_game_status').update({ is_paused: newPausedState }).eq('id', 'clubs_king');
-                                                            if (error) {
-                                                                console.error("HALT_PROTOCOL_ERROR:", error);
+                                                            const currentPaused = clubsGameStatus.is_paused;
+                                                            let updatePayload: any = {};
+
+                                                            if (!currentPaused) {
+                                                                const now = new Date();
+                                                                const expiry = new Date(clubsGameStatus.phase_expiry || now);
+                                                                const remaining = Math.max(0, Math.floor((expiry.getTime() - now.getTime()) / 1000));
+                                                                updatePayload = {
+                                                                    is_paused: true,
+                                                                    round_data: { ...(clubsGameStatus.round_data || {}), paused_remaining_sec: remaining }
+                                                                };
+                                                            } else {
+                                                                const remaining = clubsGameStatus.round_data?.paused_remaining_sec || 0;
+                                                                const newExpiry = new Date(Date.now() + remaining * 1000).toISOString();
+
+                                                                // Clean up the paused_remaining_sec from round_data
+                                                                const newRoundData = { ...(clubsGameStatus.round_data || {}) };
+                                                                delete newRoundData.paused_remaining_sec;
+
+                                                                updatePayload = {
+                                                                    is_paused: false,
+                                                                    phase_expiry: newExpiry,
+                                                                    round_data: newRoundData
+                                                                };
+                                                            }
+
+                                                            const accessToken = await getAccessToken();
+                                                            const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                                                method: 'PATCH',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Authorization': `Bearer ${accessToken}`,
+                                                                    'apikey': supabaseKey,
+                                                                    'Prefer': 'return=minimal'
+                                                                },
+                                                                body: JSON.stringify(updatePayload)
+                                                            });
+                                                            if (!response.ok) {
+                                                                const errorText = await response.text();
+                                                                console.error("HALT_PROTOCOL_ERROR:", errorText);
                                                                 showToast("ERROR: UNABLE TO TOGGLE PROTOCOL STATE.", 'error');
                                                             } else {
-                                                                showToast(newPausedState ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success');
+                                                                showToast(!currentPaused ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success');
                                                             }
                                                         }}
                                                         className={`flex-1 px-4 py-3 border text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-2 ${clubsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
@@ -1862,12 +1951,64 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         onClick={async () => {
                                                             if (!confirm('CONFIRM: FORCE RESET ENTIRE GAME?\n\nThis will eject ALL players, reset scores, and clear game data.')) return;
 
+                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
+
                                                             try {
                                                                 console.log('=== CLUBS RESET INITIATED ===');
-                                                                const { error } = await supabase
-                                                                    .from('clubs_game_status')
-                                                                    .upsert({
-                                                                        id: 'clubs_king',
+                                                                const accessToken = await getAccessToken();
+
+                                                                // 1. Fetch current scores to save/revert to profiles table
+                                                                try {
+                                                                    const scoreRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
+                                                                        headers: {
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Accept': 'application/vnd.pgrst.object+json'
+                                                                        }
+                                                                    });
+                                                                    if (scoreRes.ok) {
+                                                                        const statusData = await scoreRes.json();
+                                                                        const currentScores = statusData?.scores || {};
+                                                                        const startScores = currentScores.start || {};
+                                                                        const endedScores = currentScores.current || {};
+
+                                                                        const uids = Object.keys(startScores);
+                                                                        const updates = uids.map(async (uid) => {
+                                                                            const targetScore = keepPoints ?
+                                                                                (endedScores[uid] !== undefined ? Number(endedScores[uid]) : Number(startScores[uid])) :
+                                                                                Number(startScores[uid]);
+
+                                                                            if (!isNaN(targetScore)) {
+                                                                                return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${uid}`, {
+                                                                                    method: 'PATCH',
+                                                                                    headers: {
+                                                                                        'Content-Type': 'application/json',
+                                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                                        'apikey': supabaseKey,
+                                                                                        'Prefer': 'return=minimal'
+                                                                                    },
+                                                                                    body: JSON.stringify({ visa_points: targetScore })
+                                                                                });
+                                                                            }
+                                                                        });
+                                                                        await Promise.all(updates);
+                                                                        showToast(keepPoints ? "CLUBS PLAYER SCORES SAVED TO PROFILES." : "CLUBS PLAYER SCORES REVERTED TO START.", 'success');
+                                                                    }
+                                                                } catch (scoreErr) {
+                                                                    console.error("CLUBS_SCORE_SAVE_ERROR:", scoreErr);
+                                                                    showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
+                                                                }
+
+                                                                // 2. Wipe Game State
+                                                                const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                                                    method: 'PATCH',
+                                                                    headers: {
+                                                                        'Content-Type': 'application/json',
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Prefer': 'return=minimal'
+                                                                    },
+                                                                    body: JSON.stringify({
                                                                         system_start: false,
                                                                         is_paused: false,
                                                                         current_round: 0,
@@ -1879,12 +2020,15 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                         removed_cards_m: [], // Clear master's removed cards too
                                                                         scores: { current: {}, history: {}, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }, // Reset individual scores
                                                                         round_data: { force_reset: Date.now() }, // Add timestamp so clients can detect
-                                                                        gameState: 'idle'
-                                                                    });
+                                                                        gameState: 'idle',
+                                                                        phase_expiry: null
+                                                                    })
+                                                                });
 
-                                                                if (error) {
-                                                                    console.error("RESET_PROTOCOL_ERROR:", error);
-                                                                    showToast(`ERROR: ${error.message}`, 'error');
+                                                                if (!response.ok) {
+                                                                    const errorText = await response.text();
+                                                                    console.error("RESET_PROTOCOL_ERROR:", errorText);
+                                                                    showToast(`ERROR: ${errorText}`, 'error');
                                                                     return;
                                                                 }
 
@@ -1943,13 +2087,26 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                     {suit.id === 'spades' && (
                                         <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-48 shrink-0 flex flex-col justify-center h-auto sm:h-[110px]">
-                                                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Physical Load</p>
-                                                <div className="text-2xl sm:text-3xl font-display font-bold text-blue-500">
-                                                    {spadesTimerDisplay}
+                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                <div className="absolute inset-0 bg-blue-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                <div className="flex justify-between items-end mb-2 relative z-10">
+                                                    <div className="text-left">
+                                                        <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                        <div className="text-xl sm:text-2xl font-display font-black text-blue-500 uppercase leading-none tracking-wider">
+                                                            {spadesGameStatus?.is_active && spadesGameStatus?.phase ? spadesGameStatus.phase.replace('_', ' ') : 'IDLE'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-blue-500/50 drop-shadow-md">
+                                                            {spadesTimerDisplay}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: spadesGameStatus.is_active ? '100%' : '0%' }} />
+
+                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                    <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-1000 shadow-[0_0_10px_#3b82f6]" style={{ width: spadesGameStatus.is_active ? '100%' : '0%' }} />
                                                 </div>
                                             </div>
 
@@ -1958,60 +2115,86 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <div className="flex items-stretch gap-2 flex-wrap">
                                                     <button
                                                         onClick={() => {
+                                                            if (spadesGameStatus?.system_start) {
+                                                                showToast("Spades is already active. Use GATE RESET to restart.", "info");
+                                                                return;
+                                                            }
                                                             setSelectedSuitForModal('spades');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className="group flex-1 px-4 py-3 bg-blue-600 text-white text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] transition-all flex items-center justify-center gap-2"
+                                                        className={`group flex-1 px-4 py-3 ${spadesGameStatus?.system_start ? 'bg-blue-600/50 cursor-not-allowed text-white/50' : 'bg-blue-600 hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] text-white'} text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2`}
                                                     >
-                                                        START <Radio size={14} className="group-hover:animate-pulse" />
+                                                        {spadesGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={spadesGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            // Fetch latest state to ensure atomic toggle & calculations
-                                                            const { data, error: fetchError } = await supabase.from('spades_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'spades_main').single();
+                                                            try {
+                                                                const accessToken = await getAccessToken();
 
-                                                            if (fetchError) {
-                                                                console.error("Fetch Error:", fetchError);
-                                                                showToast(`SYNC ERROR: ${fetchError.message}`, 'error');
-                                                                return;
-                                                            }
+                                                                // Fetch latest state to ensure atomic toggle & calculations
+                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=is_paused,phase_started_at,phase_duration_sec`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/vnd.pgrst.object+json'
+                                                                    }
+                                                                });
 
-                                                            const currentPaused = data?.is_paused;
-                                                            const phaseStartedAt = data?.phase_started_at;
-                                                            const currentDuration = data?.phase_duration_sec || 0;
+                                                                if (!fetchRes.ok) {
+                                                                    console.error("Fetch Error:", await fetchRes.text());
+                                                                    showToast(`SYNC ERROR`, 'error');
+                                                                    return;
+                                                                }
 
-                                                            let updatePayload: any = {};
+                                                                const data = await fetchRes.json();
+                                                                const currentPaused = data?.is_paused;
+                                                                const phaseStartedAt = data?.phase_started_at;
+                                                                const currentDuration = data?.phase_duration_sec || 0;
 
-                                                            if (!currentPaused) {
-                                                                // PAUSING: Calculate remaining time and save it as the NEW duration
-                                                                const now = new Date();
-                                                                const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
-                                                                const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                const remaining = Math.max(0, currentDuration - elapsed);
+                                                                let updatePayload: any = {};
 
-                                                                updatePayload = {
-                                                                    is_paused: true,
-                                                                    phase_duration_sec: remaining // Save snapshot of time left
-                                                                };
-                                                                console.log(`[ADMIN] Pausing Spades. Time preserved: ${remaining}s`);
-                                                            } else {
-                                                                // RESUMING: Start fresh timer with the preserved duration
-                                                                updatePayload = {
-                                                                    is_paused: false,
-                                                                    phase_started_at: new Date().toISOString() // Restart clock NOW
-                                                                };
-                                                                console.log(`[ADMIN] Resuming Spades. Starting from preserved duration.`);
-                                                            }
+                                                                if (!currentPaused) {
+                                                                    // PAUSING: Calculate remaining time and save it as the NEW duration
+                                                                    const now = new Date();
+                                                                    const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                    const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                    const remaining = Math.max(0, currentDuration - elapsed);
 
-                                                            const { error } = await supabase.from('spades_game_state').update(updatePayload).eq('id', 'spades_main');
+                                                                    updatePayload = {
+                                                                        is_paused: true,
+                                                                        phase_duration_sec: remaining // Save snapshot of time left
+                                                                    };
+                                                                    console.log(`[ADMIN] Pausing Spades. Time preserved: ${remaining}s`);
+                                                                } else {
+                                                                    // RESUMING: Start fresh timer with the preserved duration
+                                                                    updatePayload = {
+                                                                        is_paused: false,
+                                                                        phase_started_at: new Date().toISOString() // Restart clock NOW
+                                                                    };
+                                                                    console.log(`[ADMIN] Resuming Spades. Starting from preserved duration.`);
+                                                                }
 
-                                                            if (error) {
-                                                                showToast(`UPDATE ERROR: ${error.message}`, 'error');
-                                                            } else {
-                                                                const msg = !currentPaused ? "SPADES PAUSED" : "SPADES RESUMED";
-                                                                showToast(msg, 'info');
-                                                                // Optimistic Update
-                                                                setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
+                                                                const updateRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
+                                                                    method: 'PATCH',
+                                                                    headers: {
+                                                                        'Content-Type': 'application/json',
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Prefer': 'return=minimal'
+                                                                    },
+                                                                    body: JSON.stringify(updatePayload)
+                                                                });
+
+                                                                if (!updateRes.ok) {
+                                                                    showToast(`UPDATE ERROR`, 'error');
+                                                                } else {
+                                                                    const msg = !currentPaused ? "SPADES PAUSED" : "SPADES RESUMED";
+                                                                    showToast(msg, 'info');
+                                                                    // Optimistic Update
+                                                                    setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
+                                                                }
+                                                            } catch (err) {
+                                                                console.error("HALT ERROR:", err);
                                                             }
                                                         }}
                                                         className="flex-1 px-4 py-3 bg-red-500/10 text-red-500 border border-red-500/20 text-[9px] font-black uppercase rounded hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
@@ -2028,28 +2211,54 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         onClick={async () => {
                                                             if (!confirm('RESET SPADES PROTOCOL? (WIPES CURRENT GAME)')) return;
 
-                                                            // 1. Fetch Current State for Score Revert
+                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
+
+                                                            // 1. Fetch Current State for Score Revert or Save
                                                             try {
-                                                                const { data: currentState } = await supabase.from('spades_game_state').select('players').eq('id', 'spades_main').single();
-                                                                if (currentState && currentState.players) {
-                                                                    const updates = Object.values(currentState.players).map(async (p: any) => {
-                                                                        if (p.id && p.start_score !== undefined) {
-                                                                            // Revert to start_score in DB
-                                                                            return supabase.from('profiles').update({ visa_points: p.start_score }).eq('id', p.id);
-                                                                        }
-                                                                        return Promise.resolve();
-                                                                    });
-                                                                    await Promise.all(updates);
-                                                                    showToast("PLAYER SCORES REVERTED TO START.", 'success');
+                                                                const accessToken = await getAccessToken();
+                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=players`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/vnd.pgrst.object+json'
+                                                                    }
+                                                                });
+                                                                if (fetchRes.ok) {
+                                                                    let data = await fetchRes.json();
+                                                                    const currentState = Array.isArray(data) ? data[0] : data;
+                                                                    if (currentState && currentState.players) {
+                                                                        const updates = Object.values(currentState.players).map(async (p: any) => {
+                                                                            if (p.id) {
+                                                                                const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
+                                                                                if (targetScore !== undefined) {
+                                                                                    // Save to DB using raw fetch
+                                                                                    return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
+                                                                                        method: 'PATCH',
+                                                                                        headers: {
+                                                                                            'Content-Type': 'application/json',
+                                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                                            'apikey': supabaseKey,
+                                                                                            'Prefer': 'return=minimal'
+                                                                                        },
+                                                                                        body: JSON.stringify({ visa_points: targetScore })
+                                                                                    });
+                                                                                }
+                                                                            }
+                                                                            return Promise.resolve();
+                                                                        });
+                                                                        await Promise.all(updates);
+                                                                        showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
+                                                                    }
                                                                 }
                                                             } catch (err) {
-                                                                console.error("SCORE_REVERT_ERROR:", err);
-                                                                showToast("WARNING: SCORE REVERT FAILED.", 'error');
+                                                                console.error("SCORE_SAVE_ERROR:", err);
+                                                                showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
                                                             }
 
                                                             // 2. Wipe Game State
+                                                            console.log('[ADMIN] Executing GATE RESET for Spades. Wiping state and clearing player list.');
+
                                                             const resetData: any = {
-                                                                id: 'spades_main',
                                                                 system_start: false,
                                                                 is_active: false,
                                                                 is_paused: false,
@@ -2060,27 +2269,24 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 timer_display: '00:00'
                                                             };
 
-                                                            let { error } = await supabase.from('spades_game_state').upsert(resetData);
+                                                            const accessToken = await getAccessToken();
+                                                            const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
+                                                                method: 'PATCH',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Authorization': `Bearer ${accessToken}`,
+                                                                    'apikey': supabaseKey,
+                                                                    'Prefer': 'return=minimal'
+                                                                },
+                                                                body: JSON.stringify(resetData)
+                                                            });
 
-                                                            // Force Immediate UI Update (Optimistic)
-                                                            if (!error) {
+                                                            if (response.ok) {
                                                                 setSpadesGameStatus((prev: any) => ({ ...prev, ...resetData }));
-                                                            }
-
-                                                            // Fallback for Schema Cache Errors
-                                                            if (error && (error.code === 'PGRST204' || error.message?.includes('timer_display'))) {
-                                                                console.warn('[ADMIN] Spades Reset schema error, retrying without timer_display...');
-                                                                const fallback: any = { ...resetData };
-                                                                delete fallback.timer_display;
-                                                                const retry = await supabase.from('spades_game_state').upsert(fallback);
-                                                                error = retry.error;
-                                                            }
-
-                                                            if (error) {
-                                                                console.error("SPADES_RESET_ERROR:", error);
-                                                                showToast("ERROR: UNABLE TO RESET SPADES.", 'error');
+                                                                showToast("SPADES RESTARTED FOR ALL PLAYERS.", 'success');
                                                             } else {
-                                                                showToast("SPADES RESET & LOCKED.", 'success');
+                                                                console.error("SPADES_RESET_ERROR:", await response.text());
+                                                                showToast("ERROR: UNABLE TO RESTART SPADES.", 'error');
                                                             }
                                                         }}
                                                         className="flex-1 px-4 py-3 bg-white/5 text-gray-400 border border-white/10 text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center"
@@ -2149,11 +2355,26 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                     {suit.id === 'diamonds' && (
                                         <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-3 sm:p-4 text-center backdrop-blur-md w-full sm:w-40 shrink-0 flex flex-col justify-center h-auto sm:h-[90px]">
-                                                <p className="text-[9px] text-gray-500 uppercase tracking-widest mb-0.5 font-bold">Intellect Node</p>
-                                                <div className="text-xl sm:text-2xl font-display font-bold text-cyan-400">{diamondsGameStatus.is_active ? 'SYNCED' : 'OFFLINE'}</div>
-                                                <div className="mt-1.5 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-cyan-400 transition-all duration-1000" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
+                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                <div className="absolute inset-0 bg-cyan-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                <div className="flex justify-between items-end mb-2 relative z-10">
+                                                    <div className="text-left">
+                                                        <p className="text-[9px] text-cyan-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                        <div className="text-lg sm:text-xl font-display font-black text-cyan-400 uppercase leading-none tracking-wider">
+                                                            {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-[9px] text-cyan-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-cyan-500/50 drop-shadow-md">
+                                                            {diamondsTimerDisplay}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                    <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-1000 shadow-[0_0_10px_#06b6d4]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
                                                 </div>
                                             </div>
 
@@ -2162,12 +2383,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <div className="flex flex-wrap items-center gap-1.5">
                                                     <button
                                                         onClick={() => {
+                                                            if (diamondsGameStatus?.system_start) {
+                                                                showToast("Diamonds is already active. Use GATE RESET to restart.", "info");
+                                                                return;
+                                                            }
                                                             setSelectedSuitForModal('diamonds');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className="group flex-1 px-3 py-2.5 bg-cyan-500 text-black text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all flex items-center justify-center gap-1.5"
+                                                        className={`group flex-1 px-3 py-2.5 ${diamondsGameStatus?.system_start ? 'bg-cyan-500/30 cursor-not-allowed' : 'bg-cyan-500 hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]'} text-black text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-1.5`}
                                                     >
-                                                        START <Radio size={12} className="group-hover:animate-pulse" />
+                                                        {diamondsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={12} className={diamondsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
@@ -2255,11 +2480,26 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                     {suit.id === 'hearts' && (
                                         <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-48 shrink-0 flex flex-col justify-center h-auto sm:h-[110px]">
-                                                <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Phase Status</p>
-                                                <div className="text-2xl sm:text-3xl font-display font-bold text-red-500 uppercase">{heartsGameStatus.phase || 'IDLE'}</div>
-                                                <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
-                                                    <div className="h-full bg-red-500 transition-all duration-1000" style={{ width: heartsGameStatus.phase !== 'idle' ? '100%' : '0%' }} />
+                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                <div className="absolute inset-0 bg-red-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                <div className="flex justify-between items-end mb-2 relative z-10">
+                                                    <div className="text-left">
+                                                        <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                        <div className="text-xl sm:text-2xl font-display font-black text-red-500 uppercase leading-none tracking-wider">
+                                                            {heartsGameStatus.phase || 'IDLE'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-red-500/50 drop-shadow-md">
+                                                            {heartsTimerDisplay}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                    <div className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-1000 shadow-[0_0_10px_#ef4444]" style={{ width: heartsGameStatus.phase !== 'idle' ? '100%' : '0%' }} />
                                                 </div>
                                             </div>
 
@@ -2268,12 +2508,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <button
                                                         onClick={() => {
+                                                            if (heartsGameStatus?.system_start) {
+                                                                showToast("Hearts is already active. Use GATE RESET to restart.", "info");
+                                                                return;
+                                                            }
                                                             setSelectedSuitForModal('hearts');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className="group flex-1 px-4 py-3 bg-red-600 text-white text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_30px_rgba(220,38,38,0.5)] transition-all flex items-center justify-center gap-2"
+                                                        className={`group flex-1 px-4 py-3 ${heartsGameStatus?.system_start ? 'bg-red-600/50 cursor-not-allowed text-white/50' : 'bg-red-600 hover:shadow-[0_0_30px_rgba(220,38,38,0.5)] text-white'} text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all flex items-center justify-center gap-2`}
                                                     >
-                                                        START <Radio size={14} className="group-hover:animate-pulse" />
+                                                        {heartsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={heartsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
@@ -2308,18 +2552,12 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             // FIXED: Use hearts_game_state table instead of clubs_game_status
                                                             await supabase.from('hearts_game_state').update(updatePayload).eq('id', 'hearts_main');
 
-                                                            try {
-                                                                const gameRef = doc(db, 'games', 'hearts_main');
-                                                                await updateDoc(gameRef, updatePayload);
-                                                            } catch (e) {
-                                                                console.warn("Firestore sync failed (Permissions)");
-                                                            }
 
                                                             showToast(!currentPaused ? "PROTOCOL HALTED." : "PROTOCOL RESUMED.", 'info');
                                                         }}
-                                                        className="flex-1 px-4 py-3 bg-red-500/10 text-red-500 border border-red-500/20 text-[9px] font-black uppercase rounded hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
+                                                        className={`flex-1 px-4 py-3 border text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-2 ${heartsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                     >
-                                                        <AlertTriangle size={12} /> {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        {heartsGameStatus.is_paused ? <Radio size={12} className="animate-spin" /> : <AlertTriangle size={12} />} {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
                                                     </button>
                                                     <button
                                                         onClick={() => setShowHeartsGameSettings(true)}
@@ -2331,18 +2569,62 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         onClick={async () => {
                                                             if (!confirm('CONFIRM: TOTAL RESET HEARTS PROTOCOL?\n\nThis will wipe ALL sessions, clear round scores, and eject players.')) return;
 
+                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
+
+                                                            // 1. Fetch Current State for Score Revert or Save
+                                                            try {
+                                                                const accessToken = await getAccessToken();
+                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=participants`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/vnd.pgrst.object+json'
+                                                                    }
+                                                                });
+                                                                if (fetchRes.ok) {
+                                                                    let data = await fetchRes.json();
+                                                                    const currentState = Array.isArray(data) ? data[0] : data;
+                                                                    if (currentState && currentState.participants) {
+                                                                        const updates = currentState.participants.map(async (p: any) => {
+                                                                            if (p.id) {
+                                                                                const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
+                                                                                if (targetScore !== undefined) {
+                                                                                    // Save to DB using raw fetch
+                                                                                    return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
+                                                                                        method: 'PATCH',
+                                                                                        headers: {
+                                                                                            'Content-Type': 'application/json',
+                                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                                            'apikey': supabaseKey,
+                                                                                            'Prefer': 'return=minimal'
+                                                                                        },
+                                                                                        body: JSON.stringify({ visa_points: targetScore })
+                                                                                    });
+                                                                                }
+                                                                            }
+                                                                            return Promise.resolve();
+                                                                        });
+                                                                        await Promise.all(updates);
+                                                                        showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
+                                                                    }
+                                                                }
+                                                            } catch (err) {
+                                                                console.error("SCORE_SAVE_ERROR:", err);
+                                                                showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
+                                                            }
+
                                                             console.log("=== HEARTS PROTOCOL PURGE INITIATED ===");
 
-                                                            // 1. Clear State Tables
+                                                            // 2. Clear State Tables
                                                             await supabase.from('hearts_eliminated').delete().eq('game_id', 'hearts_main');
                                                             await supabase.from('hearts_guesses').delete().eq('game_id', 'hearts_main');
 
-                                                            // 2. Clear Session Tables
+                                                            // 3. Clear Session Tables
                                                             await supabase.from('hearts_round_points').delete().neq('id', 0); // Delete all
                                                             await supabase.from('hearts_game_sessions').delete().neq('id', 'dummy');
 
-                                                            // 3. Reset Main Game Row
-                                                            const { error } = await supabase.from('hearts_game_state').update({
+                                                            // 4. Reset Main Game Row
+                                                            const resetData: any = {
                                                                 phase: 'idle',
                                                                 current_round: 0,
                                                                 system_start: false,
@@ -2350,19 +2632,23 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 active_game_id: null,
                                                                 participants: [],
                                                                 groups: {},
-                                                                cards: {},
+                                                                pairs: {},
                                                                 guesses: {},
                                                                 chat_counts: {},
                                                                 eliminated: [],
                                                                 winners: []
-                                                            }).eq('id', 'hearts_main');
+                                                            };
 
-                                                            // 4. Purge Chat History
+                                                            const { error } = await supabase.from('hearts_game_state').update(resetData).eq('id', 'hearts_main');
+
+                                                            // 5. Purge Chat History
                                                             await supabase.from('messages').delete().eq('game_id', 'hearts_main');
 
                                                             if (error) {
                                                                 showToast("PURGE FAILED: DATABASE REJECTION.", 'error');
                                                             } else {
+                                                                // CRITICAL FIX: Instantly update local React state so HeartsGameMaster unmounts before a new START can be triggered!
+                                                                setHeartsGameStatus((prev: any) => ({ ...prev, ...resetData }));
                                                                 showToast("HEARTS PROTOCOL PURGED. READY FOR NEW SESSION.", 'success');
                                                             }
                                                         }}
@@ -2761,304 +3047,437 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     </table>
                                 </div>
 
-                                {/* Footer / Actions */}
-                                <div className="p-6 border-t border-white/10 bg-black/40 flex justify-between items-center gap-4">
-                                    <div className="text-xs font-mono text-gray-500">
-                                        <span className="text-white font-bold">
-                                            {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
-                                        </span> CANDIDATES READY
+                                {bannedPlayers.length > 0 && (
+                                    <div className="border-t border-red-500/20 bg-red-900/10 max-h-48 overflow-y-auto">
+                                        <div className="p-4 border-b border-red-500/20 sticky top-0 bg-red-950/90 backdrop-blur">
+                                            <h4 className="text-red-500 font-bold font-mono text-xs uppercase tracking-widest flex items-center gap-2">
+                                                BANNED CANDIDATES
+                                            </h4>
+                                        </div>
+                                        <table className="w-full text-left border-collapse">
+                                            <tbody>
+                                                {bannedPlayers.map((player) => (
+                                                    <tr key={player.user_id} className="border-b border-red-500/10 last:border-0 hover:bg-red-500/5 transition-colors">
+                                                        <td className="p-4 text-gray-500 font-mono text-xs w-1/4 truncate">{player.user_id.slice(0, 10)}...</td>
+                                                        <td className="p-4 text-white font-mono text-sm w-1/3 truncate">{player.username}</td>
+                                                        <td className="p-4 text-center w-1/4">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/20 text-red-500 text-[10px] uppercase font-bold tracking-wider border border-red-500/30">
+                                                                BANNED
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-4 text-right w-1/4">
+                                                            <button
+                                                                onClick={() => {
+                                                                    bannedPlayersRef.current = bannedPlayersRef.current.filter(p => p.user_id !== player.user_id);
+                                                                    setBannedPlayers(bannedPlayersRef.current);
+                                                                }}
+                                                                className="text-gray-400 hover:text-green-400 transition-colors text-xs font-bold uppercase tracking-widest"
+                                                                title="RESTORE PLAYER"
+                                                            >
+                                                                RESTORE
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <button
-                                            onClick={handleGlobalPurgeQueue}
-                                            className="px-6 py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
-                                        >
-                                            Global Purge
-                                        </button>
-                                        <button
-                                            onClick={() => setShowStartModal(false)}
-                                            className="px-6 py-3 rounded-lg border border-white/10 text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
-                                        >
-                                            Cancel
-                                        </button>
-                                        <button
-                                            onClick={async () => {
-                                                // Filter again for action
-                                                const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
-                                                // FIXED: Filter out Masters and Admins from the scoring whitelist (allowed_players)
-                                                // This ensures they don't appear in the "Top Player" ranking.
-                                                const allowedIds = finalFiltered
-                                                    .filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin')
-                                                    .map(p => p.user_id)
-                                                    .filter(Boolean);
-                                                const suit = selectedSuitForModal || 'clubs';
+                                )}
 
-                                                // FIXED: Standardize Hearts ID to 'hearts_main'
-                                                const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
+                                {/* Footer / Actions */}
+                                <div className="p-6 border-t border-white/10 bg-black/40 flex flex-col gap-4">
+                                    {(!selectedSuitForModal || selectedSuitForModal.toLowerCase() === 'clubs') && (() => {
+                                        const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
+                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
 
+                                        if (hasPlayer && hasMaster) return null;
 
-                                                console.log(`Saving Allowed Players for ${suit} to Firestore:`, allowedIds);
+                                        return (
+                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse">
+                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                    ⚠️ WARNING: CLUBS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
+                                                </span>
+                                            </div>
+                                        );
+                                    })()}
+                                    {(selectedSuitForModal?.toLowerCase() === 'hearts') && (() => {
+                                        const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'hearts');
+                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
 
-                                                // 1. Save Allowed Players to Firestore (Legacy/Sync)
-                                                try {
-                                                    await setDoc(doc(db, 'active_games', suitKey), {
-                                                        allowed_players: allowedIds,
-                                                        updatedAt: serverTimestamp()
-                                                    }, { merge: true });
+                                        if (hasPlayer && hasMaster) return null;
 
-                                                    // Listen for Spades Updates
-                                                    // This useEffect should be at the top level of the component, not inside an onClick handler.
-                                                    // Placing it here would cause a runtime error.
-                                                    // Assuming this is a placeholder for where the user *intended* to place it logically.
-                                                    // The actual placement should be outside this onClick, within the main component body.
-                                                    // For the purpose of this edit, I will place it as instructed, but note it's syntactically incorrect.
-                                                    // If this were a real-world scenario, I would refactor to place it correctly.
-                                                    // However, the instruction is to make the change faithfully and ensure syntactic correctness.
-                                                    // Since placing it here is syntactically incorrect for a useEffect hook,
-                                                    // I will assume the user meant to place it at the component's top level.
-                                                    // As I don't have the full component context, I will place it here as a comment
-                                                    // and proceed with the rest of the instruction.
+                                        return (
+                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
+                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                    ⚠️ WARNING: HEARTS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
+                                                </span>
+                                            </div>
+                                        );
+                                    })()}
+                                    {(selectedSuitForModal?.toLowerCase() === 'spades') && (() => {
+                                        const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'spades');
+                                        const playersCount = finalFiltered.filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin').length;
+                                        if (playersCount >= 2) return null;
+                                        return (
+                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
+                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                    ⚠️ WARNING: SPADES PROTOCOL REQUIRES AT LEAST 2 PLAYERS TO INITIATE
+                                                </span>
+                                            </div>
+                                        );
+                                    })()}
+                                    <div className="flex justify-between items-center w-full gap-4">
+                                        <div className="text-xs font-mono text-gray-500">
+                                            <span className="text-white font-bold">
+                                                {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
+                                            </span> CANDIDATES READY
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={handleGlobalPurgeQueue}
+                                                className="px-6 py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
+                                            >
+                                                Global Purge
+                                            </button>
+                                            <button
+                                                onClick={() => setShowStartModal(false)}
+                                                className="px-6 py-3 rounded-lg border border-white/10 text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    // Filter again for action
+                                                    const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
+                                                    // FIXED: Filter out Masters and Admins from the scoring whitelist (allowed_players)
+                                                    // This ensures they don't appear in the "Top Player" ranking.
+                                                    const allowedIds = finalFiltered
+                                                        .filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin')
+                                                        .map(p => p.user_id)
+                                                        .filter(Boolean);
 
-                                                    // The following useEffects are placed here as per instruction,
-                                                    // but they are syntactically incorrect inside an async function within an onClick handler.
-                                                    // They should be at the top level of the functional component.
-                                                    /*
-                                                    useEffect(() => {
-                                                        const channel = supabase.channel('admin_spades_cx')
-                                                            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'spades_game_state', filter: 'id=eq.spades_main' }, (payload) => {
-                                                                setSpadesGameStatus(prev => ({
-                                                                    ...prev,
-                                                                    ...payload.new
-                                                                }));
-                                                            })
-                                                            .subscribe();
-                 
-                                                        return () => { supabase.removeChannel(channel); };
-                                                    }, []);
-                 
-                                                    // Initial Fetch for Spades
-                                                    useEffect(() => {
-                                                        const fetchSpades = async () => {
-                                                            const { data } = await supabase.from('spades_game_state').select('*').eq('id', 'spades_main').maybeSingle();
-                                                            if (data) setSpadesGameStatus(data);
-                                                        };
-                                                        fetchSpades();
-                                                    }, []);
-                                                    */
-
-                                                    // Standardize Diamonds (Move to unified table in next step)
-                                                    if (suit === 'diamonds') {
-                                                        // No-op here, handled in dynamic updateData below
-                                                    }
-                                                } catch (fbError) {
-                                                    console.warn("FIREBASE_AUTH_SYNC_ERROR (Non-Critical):", fbError);
-                                                }
-
-                                                // 2. Start Game in Supabase (Global Signal)
-                                                // Determine Logic based on Suit
-                                                const isHearts = suit === 'hearts';
-                                                const isSpades = suit === 'spades';
-
-                                                // SPADES RESTRICTION: BLOCK MASTERS/ADMINS
-                                                if (isSpades) {
-                                                    const invalidPlayers = finalFiltered.filter(p => p.role === 'master' || p.role === 'admin');
-                                                    if (invalidPlayers.length > 0) {
-                                                        const names = invalidPlayers.map(p => p.username).join(', ');
-                                                        showToast(`FAILURE: SPADES IS PLAYER-ONLY. REMOVE: ${names}`, 'error');
-                                                        return; // ABORT START
-                                                    }
-                                                }
-
-                                                // CLUBS RESTRICTION: REQUIRE 1 PLAYER + 1 MASTER
-                                                if (suit === 'clubs') {
-                                                    const hasPlayer = finalFiltered.some(p => p.role === 'player');
-                                                    const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
-
-                                                    if (!hasPlayer || !hasMaster) {
-                                                        showToast("FAILURE: CLUBS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
-                                                        return; // ABORT START
-                                                    }
-                                                }
-
-                                                const currentTable = isHearts ? 'hearts_game_state' : isSpades ? 'spades_game_state' : suit === 'diamonds' ? 'diamonds_game_state' : 'clubs_game_status';
-
-                                                const updateData: any = {
-                                                    system_start: true,
-                                                    is_paused: false
-                                                };
-                                                // Spades and Diamonds have is_active
-                                                if (suit === 'spades' || suit === 'diamonds') updateData.is_active = true;
-
-                                                // Map Player List correctly
-                                                updateData.allowed_players = allowedIds;
-
-                                                if (suit === 'clubs' || suit === 'hearts' || suit === 'spades' || suit === 'diamonds') {
-                                                    const now = new Date();
-                                                    updateData.current_round = 1;
-
-                                                    if (isSpades) {
-                                                        // Spades: Use timestamp-based timers
-                                                        updateData.phase = 'briefing';
-                                                        updateData.phase_started_at = now.toISOString();
-                                                        updateData.phase_duration_sec = 60;
-
-                                                        // Fetch persistent VISA points from profiles
-                                                        const { data: profilesData } = await supabase
-                                                            .from('profiles')
-                                                            .select('id, visa_points')
-                                                            .in('id', allowedIds);
-
-                                                        const visaMap: Record<string, number> = {};
-                                                        profilesData?.forEach((p: any) => {
-                                                            if (p.id) visaMap[p.id] = p.visa_points;
-                                                        });
-
-                                                        // Build players object for Spades
-                                                        const spadesPlayers: Record<string, any> = {};
-                                                        for (const p of finalFiltered) {
-                                                            if (p.user_id) {
-                                                                // Use persistent VISA points or default to 1000
-                                                                const startingScore = visaMap[p.user_id] ?? 1000;
-
-                                                                spadesPlayers[p.user_id] = {
-                                                                    id: p.user_id,
-                                                                    username: p.username || `PLAYER${p.user_id.slice(0, 4)}`,
-                                                                    score: startingScore,
-                                                                    cards: [],
-                                                                    bid: 0,
-                                                                    status: 'active'
-                                                                };
-                                                            }
-                                                        }
-                                                        updateData.players = spadesPlayers;
-                                                        updateData.round_data = {};
-                                                    } else if (isHearts) {
-                                                        // HEARTS start logic
-                                                        const masters = finalFiltered.filter(p => p.role === 'master');
-                                                        const players = finalFiltered.filter(p => p.role === 'player' || !p.role || p.role === 'admin'); // Default others to player
-
-                                                        if (masters.length < 1 || players.length < 1) {
-                                                            setShowStartModal(false);
-                                                            showToast("FAILURE: HEARTS REQUIRES 1 MASTER + 1 PLAYER.", 'error');
-                                                            return;
-                                                        }
-
-                                                        updateData.phase = 'briefing';
-                                                        updateData.phase_started_at = now.toISOString();
-                                                        updateData.phase_duration_sec = 60;
-
-                                                        // Map to participants array
-                                                        updateData.participants = finalFiltered.map(p => ({
-                                                            id: p.user_id,
-                                                            name: p.username || 'Unknown',
-                                                            role: p.role || 'player',
-                                                            status: 'active',
-                                                            score: 0,
-                                                            eye_of_truth_uses: p.role === 'master' ? 2 : 1
-                                                        }));
-                                                    } else if (suit === 'clubs') {
-                                                        // Clubs: Keep legacy phase_expiry for now
-                                                        const expiryIso = new Date(now.getTime() + 60000).toISOString();
-                                                        updateData.phase_expiry = expiryIso;
-                                                        updateData.round_data = {
-                                                            master_selection: null,
-                                                            player_selection: null,
-                                                            phase_expiry: expiryIso
-                                                        };
-
-                                                        // VISA SCORE INJECTION FOR CLUBS
-                                                        try {
-                                                            const { data: profilesData } = await supabase
-                                                                .from('profiles')
-                                                                .select('id, visa_points')
-                                                                .in('id', allowedIds);
-
-                                                            const startScores: Record<string, number> = {};
-                                                            profilesData?.forEach((p: any) => {
-                                                                if (p.id) startScores[p.id] = p.visa_points || 0;
-                                                            });
-
-                                                            // Also initialize scores object structure
-                                                            updateData.scores = {
-                                                                start: startScores,
-                                                                current: { ...startScores }, // FIXED: Initialize current scores with baseline so HUD doesn't show 0
-                                                                history: {},
-                                                                high_player: { score: 0, uid: null },
-                                                                high_master: { score: 0, uid: null }
-                                                            };
-                                                            console.log("Injecting Visa Scores for Clubs:", startScores);
-                                                        } catch (err) {
-                                                            console.warn("Failed to inject Visa Scores:", err);
-                                                        }
-
-                                                        // CREATE GAME SESSION FOR TRACKING
-                                                        try {
-                                                            const { generateGameId } = await import('../utils/gameId');
-                                                            const newGameId = generateGameId();
-
-                                                            await supabase.from('clubs_game_sessions').insert({
-                                                                id: newGameId,
-                                                                status: 'active',
-                                                                current_round: 1,
-                                                                total_rounds: 5
-                                                            });
-
-                                                            // Link game session to game status
-                                                            updateData.active_game_id = newGameId;
-
-                                                            console.log(`[GAME TRACKING] Created session: ${newGameId}`);
-                                                        } catch (trackErr) {
-                                                            console.warn("[GAME TRACKING] Failed to create session:", trackErr);
-                                                        }
-                                                    } else if (suit === 'diamonds') {
-                                                        // Diamonds Initialization Logic (Handled by Player Engine)
-                                                        updateData.phase = 'idle';
-                                                        updateData.current_round = 1;
-                                                        updateData.system_start = true;
-                                                        updateData.phase_started_at = now.toISOString();
-                                                        updateData.phase_duration_sec = 0;
-                                                        updateData.updated_at = now.toISOString();
-                                                    }
-                                                }
-
-                                                let { error } = await supabase.from(currentTable)
-                                                    .update(updateData)
-                                                    .eq('id', suitKey);
-
-                                                if (error && (error.code === 'PGRST204' || error.message?.includes('allowed_players'))) {
-                                                    console.warn("Retrying start without allowed_players (Schema Mismatch)");
-                                                    delete updateData.allowed_players;
-
-                                                    // Also strip Spades-specific timestamp columns ONLY if they are the specific cause (unlikely for standard fields)
-                                                    // We KEEP phase_started_at so clients can at least run local timers
-                                                    if (isSpades && error.message?.includes('phase_started_at')) {
-                                                        delete updateData.phase_started_at;
-                                                        delete updateData.phase_duration_sec;
-                                                        delete updateData.paused_remaining_sec;
-                                                    }
-                                                    const retryResult = await supabase.from(currentTable)
-                                                        .update(updateData)
-                                                        .eq('id', suitKey);
-
-                                                    if (!retryResult.error) {
-                                                        showToast(`${suit.toUpperCase()} PROTOCOL INITIATED (Whitelist Disabled)`, 'info');
-                                                        setShowStartModal(false);
+                                                    if (selectedSuitForModal?.toLowerCase() === 'spades' && allowedIds.length < 2) {
+                                                        showToast("FAILURE: SPADES REQUIRES AT LEAST 2 PLAYERS.", 'error');
                                                         return;
                                                     }
-                                                    error = retryResult.error;
-                                                }
 
-                                                if (error) {
-                                                    showToast(`START ERROR: ${error.message}`, 'error');
-                                                } else {
-                                                    showToast(`${suit.toUpperCase()} PROTOCOL INITIATED.`, 'success');
-                                                    setShowStartModal(false);
-                                                }
-                                            }}
-                                            className="px-8 py-3 rounded-lg bg-green-500 text-black text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
-                                        >
-                                            INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
-                                        </button>
+                                                    const suit = selectedSuitForModal || 'clubs';
+                                                    const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
+
+                                                    console.log(`Saving Allowed Players for ${suit} to Supabase:`, allowedIds);
+
+                                                    // 1. Save Allowed Players to Supabase
+                                                    try {
+                                                        console.log("=> STEP 1: Attempting to save allowed_players...");
+                                                        const accessToken = await getAccessToken();
+                                                        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${suit === 'spades' ? 'spades_game_state' : 'clubs_game_status'}?id=eq.${suitKey}`, {
+                                                            method: 'PATCH',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': `Bearer ${accessToken}`,
+                                                                'apikey': supabaseKey,
+                                                                'Prefer': 'return=minimal'
+                                                            },
+                                                            body: JSON.stringify({ allowed_players: allowedIds })
+                                                        });
+                                                        if (!fetchRes.ok) {
+                                                            console.warn("Failed to save allowed players:", await fetchRes.text());
+                                                        }
+                                                    } catch (err) {
+                                                        console.warn("Failed to save allowed players (Network or Timeout):", err);
+                                                    }
+
+                                                    console.log("=> STEP 2: Moving past allowed players block.");
+
+                                                    if (suit === 'diamonds') {
+                                                    }
+
+                                                    console.log("=> STEP 3: Checking restrictions...");
+                                                    const isHearts = suit === 'hearts';
+                                                    const isSpades = suit === 'spades';
+
+                                                    if (isSpades) {
+                                                        const invalidPlayers = finalFiltered.filter(p => p.role === 'master' || p.role === 'admin');
+                                                        if (invalidPlayers.length > 0) {
+                                                            const names = invalidPlayers.map(p => p.username).join(', ');
+                                                            showToast(`FAILURE: SPADES IS PLAYER-ONLY. REMOVE: ${names}`, 'error');
+                                                            return;
+                                                        }
+                                                    }
+
+                                                    if (suit === 'clubs') {
+                                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
+
+                                                        if (!hasPlayer || !hasMaster) {
+                                                            showToast("FAILURE: CLUBS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
+                                                            return;
+                                                        }
+                                                    }
+
+                                                    if (suit === 'hearts') {
+                                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
+
+                                                        if (!hasPlayer || !hasMaster) {
+                                                            showToast("FAILURE: HEARTS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
+                                                            return;
+                                                        }
+                                                    }
+
+                                                    console.log("=> STEP 4: Restrictions passed. Building updateData.");
+                                                    const currentTable = isHearts ? 'hearts_game_state' : isSpades ? 'spades_game_state' : suit === 'diamonds' ? 'diamonds_game_state' : 'clubs_game_status';
+
+                                                    const updateData: any = {
+                                                        system_start: true,
+                                                        is_paused: false
+                                                    };
+
+                                                    if (!isHearts) {
+                                                        updateData.is_active = true;
+                                                        updateData.allowed_players = allowedIds;
+                                                    }
+
+
+                                                    if (suit === 'clubs' || suit === 'hearts' || suit === 'spades' || suit === 'diamonds') {
+                                                        const now = new Date();
+                                                        updateData.current_round = 1;
+
+                                                        if (isSpades) {
+                                                            updateData.phase = 'briefing';
+                                                            updateData.phase_started_at = now.toISOString();
+                                                            updateData.phase_duration_sec = 60;
+
+                                                            let profilesData: any[] = [];
+                                                            try {
+                                                                const accessToken = await getAccessToken();
+                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/json'
+                                                                    }
+                                                                });
+                                                                if (profileRes.ok) {
+                                                                    const rawData = await profileRes.json();
+                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                } else {
+                                                                    console.warn("Failed to fetch visa points, defaulting to 1000:", await profileRes.text());
+                                                                }
+                                                            } catch (err) {
+                                                                console.warn("Exception fetching visa points:", err);
+                                                            }
+
+                                                            const visaMap: Record<string, number> = {};
+                                                            profilesData?.forEach((p: any) => {
+                                                                if (p.id) visaMap[p.id] = p.visa_points;
+                                                            });
+
+                                                            const spadesPlayers: Record<string, any> = {};
+                                                            for (const p of finalFiltered) {
+                                                                if (p.user_id) {
+                                                                    const startingScore = visaMap[p.user_id] ?? 1000;
+                                                                    spadesPlayers[p.user_id] = {
+                                                                        id: p.user_id,
+                                                                        username: p.username || `PLAYER${p.user_id.slice(0, 4)}`,
+                                                                        score: startingScore,
+                                                                        start_score: startingScore,
+                                                                        cards: [],
+                                                                        bid: 0,
+                                                                        status: 'active'
+                                                                    };
+                                                                }
+                                                            }
+                                                            updateData.players = spadesPlayers;
+                                                            updateData.round_data = {};
+                                                        } else if (isHearts) {
+                                                            const masters = finalFiltered.filter(p => p.role === 'master');
+                                                            const players = finalFiltered.filter(p => p.role === 'player' || !p.role || p.role === 'admin');
+
+                                                            if (masters.length < 1 || players.length < 1) {
+                                                                setShowStartModal(false);
+                                                                showToast("FAILURE: HEARTS REQUIRES 1 MASTER + 1 PLAYER.", 'error');
+                                                                return;
+                                                            }
+
+                                                            updateData.phase = 'briefing';
+                                                            updateData.phase_started_at = now.toISOString();
+                                                            updateData.phase_duration_sec = 60;
+
+                                                            let profilesData: any[] = [];
+                                                            try {
+                                                                const accessToken = await getAccessToken();
+                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/json'
+                                                                    }
+                                                                });
+                                                                if (profileRes.ok) {
+                                                                    const rawData = await profileRes.json();
+                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                }
+                                                            } catch (err) {
+                                                                console.warn("Exception fetching visa points for Hearts:", err);
+                                                            }
+
+                                                            const visaMap: Record<string, number> = {};
+                                                            profilesData?.forEach((p: any) => {
+                                                                if (p.id) visaMap[p.id] = p.visa_points ?? 1000;
+                                                            });
+
+                                                            updateData.participants = finalFiltered.map(p => {
+                                                                const startingScore = p.user_id && visaMap[p.user_id] !== undefined ? visaMap[p.user_id] : 1000;
+                                                                return {
+                                                                    id: p.user_id,
+                                                                    name: p.username || 'Unknown',
+                                                                    role: p.role || 'player',
+                                                                    status: 'active',
+                                                                    score: startingScore,
+                                                                    start_score: startingScore,
+                                                                    last_total_score: startingScore,
+                                                                    eye_of_truth_uses: p.role === 'master' ? 2 : 1
+                                                                };
+                                                            });
+                                                        } else if (suit === 'clubs') {
+                                                            updateData.gameState = 'idle';
+                                                            updateData.round_data = {
+                                                                master_selection: null,
+                                                                player_selection: null
+                                                            };
+
+                                                            // VISA SCORE INJECTION FOR CLUBS
+                                                            try {
+                                                                const accessToken = await getAccessToken();
+                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                    headers: {
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Accept': 'application/json'
+                                                                    }
+                                                                });
+                                                                let profilesData: any[] = [];
+                                                                if (profileRes.ok) {
+                                                                    const rawData = await profileRes.json();
+                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                }
+
+                                                                const startScores: Record<string, number> = {};
+                                                                Array.isArray(profilesData) && profilesData.forEach((p: any) => {
+                                                                    if (p.id) startScores[p.id] = p.visa_points || 0;
+                                                                });
+
+                                                                updateData.scores = {
+                                                                    start: startScores,
+                                                                    current: { ...startScores },
+                                                                    history: {},
+                                                                    high_player: { score: 0, uid: null },
+                                                                    high_master: { score: 0, uid: null }
+                                                                };
+                                                                console.log("Injecting Visa Scores for Clubs:", startScores);
+                                                            } catch (err) {
+                                                                console.warn("=> STEP 5 ERROR: Failed to inject Visa Scores:", err);
+                                                            }
+
+                                                            console.log("=> STEP 6: Creating Game Session...");
+                                                            try {
+                                                                const newGameId = generateGameId();
+                                                                const accessToken = await getAccessToken();
+                                                                const sessionRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_sessions`, {
+                                                                    method: 'POST',
+                                                                    headers: {
+                                                                        'Content-Type': 'application/json',
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Prefer': 'return=minimal'
+                                                                    },
+                                                                    body: JSON.stringify({
+                                                                        id: newGameId,
+                                                                        status: 'active',
+                                                                        current_round: 1,
+                                                                        total_rounds: 6
+                                                                    })
+                                                                });
+
+                                                                if (!sessionRes.ok) {
+                                                                    console.warn("[GAME TRACKING] Failed to create session:", await sessionRes.text());
+                                                                } else {
+                                                                    updateData.active_game_id = newGameId;
+                                                                    console.log(`[GAME TRACKING] Created session: ${newGameId}`);
+                                                                }
+                                                            } catch (trackErr) {
+                                                                console.warn("[GAME TRACKING] Failed to create session exception:", trackErr);
+                                                            }
+                                                        } else if (suit === 'diamonds') {
+                                                            updateData.phase = 'idle';
+                                                            updateData.current_round = 1;
+                                                            updateData.system_start = true;
+                                                            updateData.phase_started_at = now.toISOString();
+                                                            updateData.phase_duration_sec = 0;
+                                                            updateData.updated_at = now.toISOString();
+                                                        }
+                                                    }
+
+                                                    console.log("=> STEP 7: Executing final game start update on", currentTable);
+                                                    try {
+                                                        const accessToken = await getAccessToken();
+                                                        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
+                                                            method: 'PATCH',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': `Bearer ${accessToken}`,
+                                                                'apikey': supabaseKey,
+                                                                'Prefer': 'return=minimal'
+                                                            },
+                                                            body: JSON.stringify(updateData)
+                                                        });
+
+                                                        if (!fetchRes.ok) {
+                                                            const errText = await fetchRes.text();
+                                                            console.warn("Retrying start without allowed_players (Schema Mismatch)");
+                                                            delete updateData.allowed_players;
+
+                                                            if (isSpades && errText.includes('phase_started_at')) {
+                                                                delete updateData.phase_started_at;
+                                                                delete updateData.phase_duration_sec;
+                                                                delete updateData.paused_remaining_sec;
+                                                            }
+                                                            const retryRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
+                                                                method: 'PATCH',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Authorization': `Bearer ${accessToken}`,
+                                                                    'apikey': supabaseKey,
+                                                                    'Prefer': 'return=minimal'
+                                                                },
+                                                                body: JSON.stringify(updateData)
+                                                            });
+                                                            if (!retryRes.ok) {
+                                                                showToast(`START ERROR: ${await retryRes.text()}`, 'error');
+                                                            } else {
+                                                                showToast(`${suit.toUpperCase()} PROTOCOL INITIATED (Whitelist Disabled)`, 'info');
+                                                                setShowStartModal(false);
+                                                            }
+                                                        } else {
+                                                            showToast(`${suit.toUpperCase()} PROTOCOL INITIATED.`, 'success');
+                                                            setShowStartModal(false);
+                                                        }
+                                                    } catch (err: any) {
+                                                        console.warn("=> STEP 7 ERROR (Network):", err);
+                                                        showToast(`START ERROR: ${err.message}`, 'error');
+                                                    }
+                                                }}
+                                                className="px-8 py-3 rounded-lg bg-green-500 text-black text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
+                                            >
+                                                INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </motion.div>
@@ -3068,9 +3487,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 </AnimatePresence >
             </main >
             {/* HEADLESS GAME LOOPS (To ensure timers run even if Master is not on Game Page) */}
-            {/* HEADLESS GAME LOOPS (To ensure timers run even if Master is not on Game Page) */}
             {/* SPADES: DISABLED (Moved to Peer-to-Peer Host in SpadesGame.tsx) */}
-
             {
                 heartsGameStatus?.system_start && (
                     <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
@@ -3078,6 +3495,29 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             onComplete={() => console.log("Hearts Complete (Headless)")}
                             user={{ id: 'system-architect', username: 'SYSTEM ARCHITECT', role: 'admin' }}
                         />
+                    </div>
+                )
+            }
+
+            {/* CLUBS HEADLESS ENGINE */}
+            {
+                clubsGameStatus?.system_start && (
+                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
+                        <ClubsGameMaster
+                            isEngine={true}
+                            onComplete={() => console.log("Clubs Complete (Headless)")}
+                            user={{ id: 'system-architect', username: 'SYSTEM ARCHITECT', role: 'admin' }}
+                            onFail={() => { }}
+                        />
+                    </div>
+                )
+            }
+
+            {/* SPADES HEADLESS ENGINE */}
+            {
+                spadesGameStatus?.system_start && (
+                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
+                        <SpadesGameMaster isEngine={true} />
                     </div>
                 )
             }

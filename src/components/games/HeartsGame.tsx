@@ -1,14 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { supabase } from '../../supabaseClient';
-import { db } from '../../firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { supabase as originalSupabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        storageKey: 'borderland-fresh-token-v2',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        lock: async (_name: string, ...args: any[]) => {
+            const acquire = args.pop();
+            if (typeof acquire === 'function') {
+                return await acquire();
+            }
+        }
+    }
+});
 import {
     type HeartsGameState,
     type HeartsPlayer
 } from '../../game/hearts';
 import { Eye, ShieldAlert, Send, Heart, User as UserIcon, RotateCcw, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const getPlayerDisplayName = (playerId: string | undefined, gameState: HeartsGameState | null) => {
+    if (!playerId || !gameState || !gameState.participants) return 'Agent';
+    const index = gameState.participants.findIndex(p => p.id === playerId);
+    if (index === -1) return 'Agent';
+    return `player${index + 1}`;
+};
 
 interface HeartsGameProps {
     user: any; // User object from auth
@@ -27,63 +48,59 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     const [selectedSuit, setSelectedSuit] = useState<string | null>(null);
     const [hasSubmitted, setHasSubmitted] = useState(false);
 
-    // Player ID Mapping
-    const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
-
-    // Fetch Player ID Mapping from Firebase (Consistent Anonymity)
-    useEffect(() => {
-        const fetchPlayerIds = async () => {
-            try {
-                const querySnapshot = await getDocs(collection(db, 'users'));
-                const usersList = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as any[];
-
-                usersList.sort((a: any, b: any) => {
-                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
-                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
-                    if (isMasterA && !isMasterB) return -1;
-                    if (!isMasterA && isMasterB) return 1;
-                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
-                    return timeA - timeB;
-                });
-
-                const mapping: Record<string, string> = {};
-                let pCount = 1;
-                usersList.forEach((u: { id: string, username?: string }) => {
-                    const pid = `#PLAYER_${pCount.toString().padStart(3, '0')}`;
-                    if (u.id) mapping[u.id] = pid;
-                    if (u.username) mapping[u.username] = pid;
-                    pCount++;
-                });
-                setPlayerIdMap(mapping);
-            } catch (error) {
-                console.error('Error fetching player IDs (Firebase):', error);
-            }
-        };
-        fetchPlayerIds();
-    }, []);
+    // Player real names are pulled directly from gameState.participants
 
     // --- Sync ---
     useEffect(() => {
+        let isFetching = false;
         const fetchState = async () => {
-            const { data } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
-            if (data) {
-                setGameState(data);
-            }
+            if (isFetching) return;
+            isFetching = true;
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    const rawData = await response.json();
+                    const data = Array.isArray(rawData) ? rawData[0] : rawData;
+                    setGameState(prev => {
+                        if (prev?.phase_started_at && data?.phase_started_at) {
+                            if (new Date(data.phase_started_at).getTime() < new Date(prev.phase_started_at).getTime()) {
+                                return prev;
+                            }
+                        }
+                        return data;
+                    });
+                }
+            } catch (err) {
+                console.warn("[HEARTS SYNC] Fetch error:", err);
+            } finally { isFetching = false; }
         };
         fetchState();
+        const intervalId = setInterval(fetchState, 15000);
 
-        const channel = supabase.channel('hearts_player_sync')
+        const channel = originalSupabase.channel('hearts_player_sync')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'hearts_game_state', filter: 'id=eq.hearts_main' }, (payload) => {
-                setGameState(payload.new as HeartsGameState);
+                setGameState(prev => {
+                    const data = payload.new as HeartsGameState;
+                    if (prev?.phase_started_at && data?.phase_started_at) {
+                        if (new Date(data.phase_started_at).getTime() < new Date(prev.phase_started_at).getTime()) {
+                            return prev;
+                        }
+                    }
+                    return data;
+                });
             })
             .subscribe();
 
         joinGame();
-        return () => { supabase.removeChannel(channel); };
+        return () => { clearInterval(intervalId); originalSupabase.removeChannel(channel); };
     }, []);
 
     // --- HUD Sync: Keep myPlayer updated with latest gameState ---
@@ -93,9 +110,11 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
             const p = gameState.participants?.find((p: any) => p.id === userId);
             if (p) {
                 setMyPlayer(p);
+            } else if (!p && (gameState.phase === 'idle' || gameState.phase === 'briefing')) {
+                joinGame();
             }
         }
-    }, [gameState, user]);
+    }, [gameState?.participants, gameState?.phase, user]);
 
     const joinGame = async () => {
         const userId = user?.id || user?.uid;
@@ -128,7 +147,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                     }
                 }
                 const isMaster = user.role === 'master' || user.username?.toLowerCase().includes('master');
-                const displayName = playerIdMap[userId] || user.displayName || user.username || 'Agent';
+                const displayName = `player${participants.length + 1}`;
                 const newPlayer: HeartsPlayer = {
                     id: userId, email: userEmail, name: displayName,
                     role: isMaster ? 'master' : 'player', score: initialScore,
@@ -136,7 +155,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                     start_score: initialScore,
                     last_total_score: initialScore
                 };
-                console.log(`[HEARTS] Registering new participant with score ${initialScore}`);
+                console.log(`[HEARTS] Registering new participant with name ${displayName} and score ${initialScore}`);
                 await supabase.from('hearts_game_state').update({ participants: [...participants, newPlayer] }).eq('id', 'hearts_main');
             } else if (existingPlayer) {
                 setMyPlayer(existingPlayer);
@@ -278,7 +297,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
         };
         fetchMessages();
 
-        const channel = supabase.channel(`hearts_chat_${myChannel}`)
+        const channel = originalSupabase.channel(`hearts_chat_${myChannel}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `game_id=eq.${currentGameId}` }, (payload) => {
                 if (payload.new.channel === myChannel) {
                     const m = payload.new;
@@ -289,7 +308,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                 }
             })
             .subscribe();
-        return () => { supabase.removeChannel(channel); };
+        return () => { originalSupabase.removeChannel(channel); };
     }, [myPlayer?.groupId, gameState?.active_game_id]);
 
 
@@ -327,38 +346,95 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     const myGroupMembers = (myGroupId && (gameState?.groups || {})[myGroupId]) ? (gameState?.groups || {})[myGroupId] : [];
     const othersInGroup = myGroupMembers.filter(pid => pid !== (user?.id || user?.uid)).filter(pid => {
         const p = (gameState?.participants || []).find(part => part.id === pid);
-        return p && p.name && p.status !== 'eliminated';
+        return p && p.status !== 'eliminated';
     });
 
     const handleVote = async () => {
-        if (!selectedSuit || !myPlayer || !gameState) return;
-        const { error } = await supabase.from('hearts_guesses').upsert({
-            game_id: gameState.active_game_id || 'hearts_main',
-            round: gameState.current_round, player_id: user?.id || user?.uid, suit: selectedSuit
-        });
-        if (!error) setHasSubmitted(true);
+        console.log('[HEARTS VOTE CLICKED] selectedSuit:', selectedSuit, 'myPlayer:', myPlayer, 'gameState:', gameState);
+        if (!selectedSuit || !myPlayer || !gameState) {
+            console.warn('[HEARTS VOTE EARLY EXIT] Missing dependencies');
+            return;
+        }
+        const playerId = user?.id || user?.uid;
+        const gameId = gameState.active_game_id || 'hearts_main';
+        const round = gameState.current_round;
+        console.log('[HEARTS VOTE DETAILS] playerId:', playerId, 'gameId:', gameId, 'round:', round);
+
+        try {
+            const { data: existing } = await supabase.from('hearts_guesses')
+                .select('id')
+                .eq('game_id', gameId)
+                .eq('round', round)
+                .eq('player_id', playerId)
+                .maybeSingle();
+
+            console.log('[HEARTS VOTE DB CHECK] existing guess:', existing);
+
+            let error;
+            if (existing) {
+                const res = await supabase.from('hearts_guesses')
+                    .update({ suit: selectedSuit })
+                    .eq('id', existing.id);
+                error = res.error;
+            } else {
+                const res = await supabase.from('hearts_guesses').insert({
+                    game_id: gameId,
+                    round: round,
+                    player_id: playerId,
+                    suit: selectedSuit
+                });
+                error = res.error;
+            }
+            
+            if (error) {
+                console.error('[HEARTS VOTE ERROR]', error);
+                alert("Failed to submit vote! Please check console.");
+            } else {
+                console.log('[HEARTS VOTE SUCCESS] Vote submitted successfully');
+                setHasSubmitted(true);
+            }
+        } catch (err) {
+            console.error('[HEARTS VOTE EXCEPTION]', err);
+        }
     };
 
     const handleChat = async (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!chatInput.trim() || !myPlayer || !gameState) return;
-        const currentC = gameState.chat_counts?.[myPlayer.id] || 0;
-        if (currentC >= 10) { alert("COMMUNICATION LIMIT REACHED"); return; }
-
         const temp = chatInput.trim(); setChatInput('');
-        const newCounts = { ...(gameState.chat_counts || {}), [myPlayer.id]: currentC + 1 };
-        await supabase.from('hearts_game_state').update({ chat_counts: newCounts }).eq('id', 'hearts_main');
+        let senderId = myPlayer.id;
+        let senderName = getPlayerDisplayName(myPlayer.id, gameState);
 
-        const senderName = playerIdMap[myPlayer.id] || myPlayer.name || 'Unknown Agent';
-        await supabase.from('messages').insert({
+        const { error } = await supabase.from('messages').insert({
             game_id: gameState.active_game_id || 'hearts_main',
-            channel: myPlayer.groupId, user_id: myPlayer.id,
-            user_name: senderName, content: temp, is_system: false
+            channel: myPlayer.groupId, 
+            user_id: senderId,
+            user_name: senderName, 
+            content: temp, 
+            is_system: false
         });
+
+        if (error) {
+            console.error('[HEARTS CHAT ERROR]', error);
+            alert("Failed to send message: " + error.message);
+        }
     };
 
     const [revealMyCard, setRevealMyCard] = useState(false);
-    useEffect(() => { if (!gameState?.system_start || gameState.phase === 'briefing') setRevealMyCard(false); }, [gameState?.system_start, gameState?.phase]);
+    useEffect(() => { 
+        if (!gameState?.system_start || gameState.phase === 'briefing' || gameState.phase === 'shuffle' || gameState.phase === 'reveal') {
+            setRevealMyCard(false); 
+            setHasSubmitted(false);
+            setSelectedSuit(null);
+        }
+    }, [gameState?.system_start, gameState?.phase]);
+
+    // Keep revealed state active if they already used their only reveal and refreshed
+    useEffect(() => {
+        if (myPlayer && myPlayer.role === 'player' && myPlayer.eye_of_truth_uses === 0) {
+            setRevealMyCard(true);
+        }
+    }, [myPlayer?.eye_of_truth_uses]);
 
     const handleEyeOfTruth = async () => {
         if (!gameState || !myPlayer || myPlayer.eye_of_truth_uses <= 0) return;
@@ -393,7 +469,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-rose-900/20 via-[#0a0a0a] to-[#050505] pointer-events-none" />
 
             {/* Header / HUD */}
-            <header className="fixed top-20 left-0 right-0 z-[160] bg-black/60 backdrop-blur-xl border-b border-rose-500/20 px-4 py-3 sm:px-8 sm:py-4">
+            <header className="sticky top-0 left-0 right-0 z-[160] bg-black/60 backdrop-blur-xl border-b border-rose-500/20 px-4 py-3 sm:px-8 sm:py-4">
                 <div className="max-w-7xl mx-auto flex items-center justify-between">
                     {/* Left: Brand / Title */}
                     <div className="flex flex-col">
@@ -463,7 +539,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
             </header>
 
             {/* MAIN STAGE */}
-            <div className="flex min-h-full items-start justify-center p-8 relative z-10 pt-40 sm:pt-32 pb-20 ">
+            <div className="flex min-h-full items-start justify-center p-8 relative z-10 pt-8 sm:pt-8 pb-20 ">
                 {myPlayer?.status === 'eliminated' && gameState.phase !== 'result' && gameState.phase !== 'end' && (
                     <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-8">
                         <ShieldAlert size={80} className="text-red-600 mb-8" />
@@ -473,7 +549,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                 )}
 
                 {gameState.phase === 'briefing' && myPlayer?.status !== 'eliminated' && (
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 pt-20 sm:pt-0">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 pt-10 sm:pt-0">
                         <div className="bg-black/60 backdrop-blur-md p-8 rounded-3xl border border-rose-500/30 text-center">
                             <h1 className="text-3xl md:text-6xl font-black font-oswald text-white mb-6 uppercase tracking-tighter leading-none">
                                 MISSION <span className="text-rose-600">BRIEFING</span>
@@ -485,7 +561,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                         {myGroupMembers.map(pid => (
                                             <div key={pid} className={`p-4 rounded-xl border min-w-[100px] ${pid === (user?.id || user?.uid) ? 'bg-rose-500/20 border-rose-500' : 'bg-white/5 border-white/10'}`}>
                                                 <UserIcon className="mx-auto mb-2 text-white/70" />
-                                                <div className="text-xs font-mono uppercase truncate max-w-[100px]">{playerIdMap[pid] || 'Agent'}</div>
+                                                <div className="text-xs font-mono uppercase truncate max-w-[100px]">{getPlayerDisplayName(pid, gameState)}</div>
                                             </div>
                                         ))}
                                     </div>
@@ -541,11 +617,11 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                 )}
 
                 {gameState.phase === 'reveal' && myPlayer?.status !== 'eliminated' && (
-                    <div className="w-full h-full flex items-center justify-center p-4">
-                        <div className="max-w-6xl w-full flex flex-wrap justify-center content-center gap-4 sm:gap-12 overflow-y-auto max-h-full py-4 no-scrollbar">
+                    <div className="w-full flex items-center justify-center p-4">
+                        <div className="max-w-6xl w-full flex flex-wrap justify-center content-center gap-4 sm:gap-12 py-4">
                             <div className="flex flex-col items-center gap-4 shrink-0">
                                 <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-rose-500">
-                                    Your Identity <span className="text-rose-500/50">({playerIdMap[user?.id || user?.uid] || '...'})</span>
+                                    Your Identity <span className="text-rose-500/50">({getPlayerDisplayName(myPlayer?.id, gameState)})</span>
                                 </span>
                                 <div className="w-40 sm:w-64 h-56 sm:h-96 bg-[#111] rounded-2xl border-2 border-rose-500/60 flex flex-col items-center justify-center relative overflow-hidden group">
                                     {!revealMyCard ? (
@@ -575,7 +651,9 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                 const card = (gameState?.pairs || {})[pid];
                                 return (
                                     <div key={pid} className="flex flex-col items-center gap-4 shrink-0">
-                                        <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-white/50">{playerIdMap[pid] || 'Agent'}</span>
+                                        <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-white/50">
+                                            {getPlayerDisplayName(pid, gameState)}
+                                        </span>
                                         <div className="w-40 sm:w-64 h-56 sm:h-96 rounded-2xl shadow-2xl overflow-hidden border-2 border-white/50">
                                             {card ? <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} alt="Card" className="w-full h-full object-cover" />
                                                 : <div className="w-full h-full bg-white/5 flex items-center justify-center text-white/10">NO DATA</div>}
@@ -659,22 +737,22 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
 
                 {gameState.phase === 'choosing' && myPlayer?.status !== 'eliminated' && (
                     <div className="text-center">
-                        <h2 className="text-2xl sm:text-4xl font-black font-oswald text-white mb-8">CONFIRM IDENTITY</h2>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+                        <h2 className="text-xl sm:text-4xl font-black font-oswald text-white mb-4 sm:mb-8">CONFIRM IDENTITY</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 mb-4 sm:mb-8">
                             {['hearts', 'diamonds', 'clubs', 'spades'].map(suit => (
                                 <button
                                     key={suit}
                                     onClick={() => setSelectedSuit(suit)}
-                                    className={`w-32 h-40 rounded-2xl border-2 flex flex-col items-center justify-center gap-4 transition-all ${selectedSuit === suit
+                                    className={`w-24 h-28 sm:w-32 sm:h-40 rounded-xl sm:rounded-2xl border-2 flex flex-col items-center justify-center gap-2 sm:gap-4 transition-all ${selectedSuit === suit
                                         ? 'bg-rose-600 border-rose-500 scale-105 shadow-[0_0_30px_rgba(225,29,72,0.5)]'
                                         : 'bg-white/5 border-white/10 hover:border-white/30'
                                         }`}
                                 >
-                                    <div className={`text-4xl ${selectedSuit === suit ? 'text-white' : 'text-white/50'}`}>
+                                    <div className={`text-3xl sm:text-4xl ${selectedSuit === suit ? 'text-white' : 'text-white/50'}`}>
                                         {suit === 'hearts' && '♥'} {suit === 'diamonds' && '♦'}
                                         {suit === 'clubs' && '♣'} {suit === 'spades' && '♠'}
                                     </div>
-                                    <div className="text-xs font-mono uppercase tracking-widest">{suit}</div>
+                                    <div className="text-[10px] sm:text-xs font-mono uppercase tracking-widest">{suit}</div>
                                 </button>
                             ))}
                         </div>
@@ -752,7 +830,7 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                 <div className="bg-rose-600/20 border-b border-rose-500/30 px-6 py-4 flex items-center justify-between">
                                     <div className="flex flex-col">
                                         <span className="text-white font-bold text-xs uppercase tracking-widest">Group Comms</span>
-                                        <span className="text-white/40 text-[9px]">Channel: {myPlayer.groupId} | Limit: {gameState?.chat_counts?.[myPlayer.id] || 0}/10</span>
+                                        <span className="text-white/40 text-[9px]">Channel: {myPlayer.groupId}</span>
                                     </div>
                                     <button
                                         onClick={() => setIsChatOpen(false)}
@@ -765,12 +843,12 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
                                 <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col-reverse custom-scrollbar">
                                     {messages.length === 0 ? (
                                         <div className="text-center text-white/20 text-[10px] italic py-8 flex flex-col items-center gap-3">
-                                            <div className="w-1 h-1 bg-rose-500 rounded-full animate-ping" />
-                                            Establishing connection...
+                                            <div className="w-1 h-1 bg-white/20 rounded-full" />
+                                            No messages yet. Send a hint to your group!
                                         </div>
                                     ) : messages.slice().reverse().map((msg, i) => (
                                         <div key={i} className={`flex flex-col ${msg.userId === (user?.id || user?.uid) ? 'items-end' : 'items-start'}`}>
-                                            <span className="text-[9px] text-white/30 mb-1 px-1">{playerIdMap[msg.userId] || 'Agent'}</span>
+                                            <span className="text-[9px] text-white/30 mb-1 px-1">{msg.isSystem ? 'SYSTEM' : getPlayerDisplayName(msg.userId, gameState)}</span>
                                             <div className={`px-4 py-2.5 rounded-2xl text-[11px] sm:text-xs max-w-[85%] break-words leading-relaxed shadow-sm ${msg.userId === (user?.id || user?.uid) ? 'bg-rose-500 text-white rounded-br-none' : 'bg-white/10 text-white/90 rounded-bl-none border border-white/5'}`}>
                                                 {msg.text}
                                             </div>

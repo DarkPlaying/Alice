@@ -155,6 +155,36 @@ export const PlayerCardModal = ({ user, onClose, currentGameScore }: PlayerCardM
     }, [user]);
 
     const { points, wins, losses, visaDays } = stats;
+    const isMaster = user?.role === 'master' || user?.isMaster;
+    const isDead = visaDays < 0 || user?.status === 'dead' || user?.visa_status === 'inactive';
+
+    let grade = 'F';
+    let gradeColor = 'text-red-500';
+    let gradeBg = 'bg-red-500/10 border-red-500/20';
+
+    if (isDead) {
+        grade = 'F';
+    } else if (points >= 2000) {
+        grade = 'A';
+        gradeColor = 'text-[#00ffff]';
+        gradeBg = 'bg-[#00ffff]/10 border-[#00ffff]/20';
+    } else if (points >= 1200) {
+        grade = 'B';
+        gradeColor = 'text-purple-500';
+        gradeBg = 'bg-purple-500/10 border-purple-500/20';
+    } else if (points >= 800) {
+        grade = 'C';
+        gradeColor = 'text-yellow-500';
+        gradeBg = 'bg-yellow-500/10 border-yellow-500/20';
+    } else if (points >= 500) {
+        grade = 'D';
+        gradeColor = 'text-orange-500';
+        gradeBg = 'bg-orange-500/10 border-orange-500/20';
+    } else {
+        grade = 'E';
+        gradeColor = 'text-red-400';
+        gradeBg = 'bg-red-400/10 border-red-400/20';
+    }
 
 
     return (
@@ -209,32 +239,35 @@ export const PlayerCardModal = ({ user, onClose, currentGameScore }: PlayerCardM
                                 <div className="space-y-1">
                                     <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">Visa Status</label>
                                     <div className="flex items-center gap-2 text-xs font-mono">
-                                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                                        <span className="text-green-500">ACTIVE • {visaDays} DAYS</span>
+                                        <div className={`w-2 h-2 rounded-full ${isDead ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`} />
+                                        <span className={isDead ? 'text-red-500 font-bold' : 'text-green-500'}>
+                                            {isDead ? 'DEAD' : 'ACTIVE'} • {visaDays} DAYS
+                                        </span>
                                     </div>
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">Role Classification</label>
-                                    <div className="text-green-500 font-bold tracking-wider text-sm">CITIZEN</div>
+                                    <div className={`${isMaster ? 'text-yellow-500' : 'text-green-500'} font-bold tracking-wider text-sm uppercase`}>
+                                        {isMaster ? 'GAME MASTER' : 'CITIZEN'}
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Stats Grid */}
                         <div className="space-y-2 pt-4 border-t border-white/5">
                             <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">Performance Metrics</label>
                             <div className="grid grid-cols-3 gap-3">
-                                <div className="bg-yellow-500/10 rounded p-3 border border-yellow-500/20 flex flex-col items-center justify-center">
+                                <div className="bg-yellow-500/10 rounded py-2 px-3 border border-yellow-500/20 flex flex-col items-center justify-center">
                                     <div className="text-2xl font-bold text-yellow-500 mb-1">{points}</div>
                                     <div className="text-[9px] text-yellow-600/60 uppercase tracking-wider font-bold">Points</div>
                                 </div>
-                                <div className="bg-green-500/10 rounded p-3 border border-green-500/20 flex flex-col items-center justify-center">
+                                <div className="bg-green-500/10 rounded py-2 px-3 border border-green-500/20 flex flex-col items-center justify-center">
                                     <div className="text-2xl font-bold text-green-500 mb-1">{wins}</div>
                                     <div className="text-[9px] text-green-600/60 uppercase tracking-wider font-bold">Games Cleared</div>
                                 </div>
-                                <div className="bg-red-500/10 rounded p-3 border border-red-500/20 flex flex-col items-center justify-center">
-                                    <span className="text-2xl font-bold text-red-500">{losses}</span>
-                                    <span className="text-[9px] text-red-600/60 uppercase tracking-wider font-bold">FAILURES</span>
+                                <div className={`rounded py-2 px-3 border flex flex-col items-center justify-center ${gradeBg}`}>
+                                    <div className={`text-2xl font-bold mb-1 ${gradeColor}`}>{grade}</div>
+                                    <div className={`text-[9px] uppercase tracking-wider font-bold ${gradeColor} opacity-70`}>Grade</div>
                                 </div>
                             </div>
                         </div>

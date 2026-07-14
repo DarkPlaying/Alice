@@ -6,9 +6,7 @@ import { GameContainer } from './components/GameContainer';
 import { LoginPage } from './components/LoginPage';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GameStatusGuard } from './components/GameStatusGuard';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { supabase } from './supabaseClient';
 import { Loader } from './components/Loader';
 
 // Wrapper for GameContainer to extract params
@@ -32,20 +30,31 @@ function AppContent() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    console.log("LOCAL STORAGE DUMP ON BOOT:", localStorage.getItem('borderland-fresh-token-v2'));
+    
+    // Fallback: forcefully remove loader after 5s if auth state change doesn't fire
+    const fallbackTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
         try {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
+          const { data: userData, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('email', session.user.email)
+            .single();
+
+          if (userData && !error) {
             setIsLoggedIn(true);
             // MERGE AUTH DATA: Ensure critical fields like uid/email are present (ID last to overwrite matches)
-            const finalUser = { ...userData, uid: user.uid, email: user.email, id: user.uid };
+            const finalUser = { ...userData, uid: session.user.id, email: session.user.email, id: session.user.id };
             console.log("APP: User Login Success:", finalUser);
             setUser(finalUser);
-            setIsAdmin(userData.role === 'admin' || userData.username === 'admin');
+            setIsAdmin(userData.role === 'admin' || userData.username === 'admin' || userData.role === 'master');
           } else {
-            console.error("DATA CORRUPTION: USER PROFILE MISSING");
+            console.error("DATA CORRUPTION: USER PROFILE MISSING", error);
             setIsLoggedIn(false);
             setUser(null);
             setIsAdmin(false);
@@ -61,24 +70,34 @@ function AppContent() {
         setUser(null);
         setIsAdmin(false);
       }
+      clearTimeout(fallbackTimer);
       setTimeout(() => {
         setIsLoading(false);
-      }, 3000);
+      }, 1500); // reduced to 1.5s since it's already fast
     });
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(fallbackTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
-      setIsAdmin(false);
-      setIsLoggedIn(false);
-      setUser(null);
-      navigate('/login');
+      // The custom lock function causes ANY Supabase Auth method (like signOut) to permanently hang the in-memory mutex.
+      // We completely bypass it by clearing localStorage and doing a hard page reload to destroy the stuck mutex in memory!
+      localStorage.removeItem('borderland-fresh-token-v2');
+      window.location.href = '/login';
     } catch (error) {
       console.error("LOGOUT ERROR", error);
     }
   };
+
+  useEffect(() => {
+    // Check if user is running old cached code with the broken lock
+    if ((window as any).__supabaseLocks && (window as any).__supabaseLocks.size > 0) {
+      alert("WARNING: Your browser is running OLD cached code that causes the game to freeze. Please press Ctrl+Shift+R right now to Hard Refresh this tab!");
+    }
+  }, []);
 
   if (isLoading) {
     return <Loader />;
@@ -109,12 +128,15 @@ function AppContent() {
               <Navigate to="/home" replace />
             ) : (
               <LoginPage
-                onLogin={() => {
+                onLogin={(loggedInUser) => {
+                  setUser(loggedInUser);
                   setIsLoggedIn(true);
                   navigate('/home');
                 }}
-                onAdminLogin={() => {
+                onAdminLogin={(loggedInUser) => {
+                  setUser(loggedInUser);
                   setIsAdmin(true);
+                  setIsLoggedIn(true);
                   navigate('/home');
                 }}
               />

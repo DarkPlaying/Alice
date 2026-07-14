@@ -43,8 +43,8 @@ export const GameStatusGuard = ({ children, isAdmin = false, isLoggedIn = false 
                 }
 
                 // Moved logic to include auth check
-                const { auth } = await import('../firebase');
-                const currentUserId = auth.currentUser?.uid;
+                const { data: { session } } = await supabase.auth.getSession();
+                const currentUserId = session?.user?.id;
 
                 // If allowed_players list exists, check if user is in it
                 if (data.allowed_players && Array.isArray(data.allowed_players) && data.allowed_players.length > 0) {
@@ -76,8 +76,8 @@ export const GameStatusGuard = ({ children, isAdmin = false, isLoggedIn = false 
                 const newData = payload.new;
                 if (newData.system_start) {
                     // Check Access Control Real-time
-                    const { auth } = await import('../firebase');
-                    const currentUserId = auth.currentUser?.uid;
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const currentUserId = session?.user?.id;
 
                     // If allowed_players list exists, check if user is in it
                     if (newData.allowed_players && Array.isArray(newData.allowed_players) && newData.allowed_players.length > 0) {

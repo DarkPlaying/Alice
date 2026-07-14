@@ -82,21 +82,39 @@ export const ClubsPointsTable: React.FC<ClubsPointsTableProps> = ({
                             <div className="bg-gradient-to-br from-purple-900/10 to-transparent border border-purple-500/20 rounded-xl p-5 space-y-4">
                                 <h4 className="text-purple-400 font-bold uppercase text-xs tracking-widest flex items-center gap-2">
                                     <AlertCircle className="w-4 h-4" />
-                                    End Game Logic
+                                    End Game Bonus & Penalty
                                 </h4>
                                 <div className="space-y-3 text-sm">
-                                    <div className="flex items-start gap-4 p-3 bg-red-500/5 rounded-lg border border-red-500/10">
-                                        <span className="text-red-400 font-black uppercase text-xs tracking-wider min-w-[40px] mt-0.5">LOSE</span>
-                                        <div className="space-y-1">
-                                            <p className="text-gray-300">If Master Score &gt; Player Score</p>
-                                            <p className="text-xs text-red-400/50">Player loses earned points.</p>
+                                    <div className="flex flex-col sm:flex-row gap-4 p-3 bg-green-500/5 rounded-lg border border-green-500/10">
+                                        <span className="text-green-500 font-black uppercase text-xs tracking-wider min-w-[100px] mt-0.5">PLAYER WINS</span>
+                                        <div className="space-y-1 flex-1">
+                                            <p className="text-gray-300">If Player Score &gt; Master Score</p>
+                                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                                <div className="bg-white/5 p-2 rounded">
+                                                    <p className="text-[10px] text-white/40 uppercase mb-1">Player</p>
+                                                    <p className="font-mono font-bold text-green-400">+500 pts</p>
+                                                </div>
+                                                <div className="bg-white/5 p-2 rounded">
+                                                    <p className="text-[10px] text-white/40 uppercase mb-1">Master</p>
+                                                    <p className="font-mono font-bold text-red-400">-500 pts</p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-start gap-4 p-3 bg-green-500/5 rounded-lg border border-green-500/10">
-                                        <span className="text-green-500 font-black uppercase text-xs tracking-wider min-w-[40px] mt-0.5">WIN</span>
-                                        <div className="space-y-1">
-                                            <p className="text-gray-300">If Player Score &gt; Master Score</p>
-                                            <p className="text-xs text-green-500/50">Player adds points to Visa Balance.</p>
+                                    <div className="flex flex-col sm:flex-row gap-4 p-3 bg-red-500/5 rounded-lg border border-red-500/10">
+                                        <span className="text-red-400 font-black uppercase text-xs tracking-wider min-w-[100px] mt-0.5">MASTER WINS</span>
+                                        <div className="space-y-1 flex-1">
+                                            <p className="text-gray-300">If Master Score &gt; Player Score</p>
+                                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                                <div className="bg-white/5 p-2 rounded">
+                                                    <p className="text-[10px] text-white/40 uppercase mb-1">Player</p>
+                                                    <p className="font-mono font-bold text-red-400">-500 pts</p>
+                                                </div>
+                                                <div className="bg-white/5 p-2 rounded">
+                                                    <p className="text-[10px] text-white/40 uppercase mb-1">Master</p>
+                                                    <p className="font-mono font-bold text-green-400">+500 pts</p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

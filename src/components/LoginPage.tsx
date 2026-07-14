@@ -2,22 +2,22 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, useAnimation } from 'framer-motion';
 import { User, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { db, auth } from '../firebase';
-
+import { supabase, supabaseUrl, supabaseKey } from '../supabaseClient';
 interface LoginPageProps {
-    onLogin: () => void;
-    onAdminLogin: () => void;
+    onLogin: (user?: any) => void;
+    onAdminLogin: (user?: any) => void;
 }
 
 export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [isRegistering, setIsRegistering] = useState(false);
     const [error, setError] = useState<string | false>(false);
     const [isFocused, setIsFocused] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+
+
     const controls = useAnimation();
 
     useEffect(() => {
@@ -36,47 +36,73 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
+        setError(false);
 
         try {
-            // 1. AUTHENTICATION (Firebase Auth)
-            // Construct email if user entered a username
-            const email = username.includes('@') ? username : `${username}@borderland.com`;
+            const sanitizedUsername = username.trim().toLowerCase().replace(/\s+/g, '');
+            let email = sanitizedUsername;
+            
+            if (!email.includes('@')) {
+                const { data: profile } = await supabase.from('profiles').select('email').eq('username', sanitizedUsername).single();
+                if (profile && profile.email) {
+                    email = profile.email;
+                } else {
+                    email = `${sanitizedUsername}@borderland.app`;
+                }
+            }
+            
+            console.log("Login attempt for:", email);
 
-            await signInWithEmailAndPassword(auth, email, password);
+            if (isRegistering) {
+                const { data, error: authError } = await supabase.auth.signUp({ email, password });
+                if (authError) throw authError;
 
-            // 2. AUTHORIZATION (Firestore Data)
-            // Fetch role from Firestore based on username
-            const usersRef = collection(db, "users");
-            const q = query(usersRef, where("username", "==", username));
-            const querySnapshot = await getDocs(q);
+                // Ensure profile is correctly initialized if they didn't exist
+                const { data: upsertData, error: profileError } = await supabase.from('profiles').upsert({
+                    email,
+                    username,
+                    role: 'player'
+                }, { onConflict: 'email' }).select().single();
+                if (profileError) throw profileError;
 
-            if (querySnapshot.empty) {
-                // User authenticated but has no data profile
+                const finalUser = { ...upsertData, uid: data?.user?.id, email: email, id: data?.user?.id };
+                onLogin(finalUser);
+                return;
+            }
+
+            const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+            if (authError) throw authError;
+
+            // Fetch profile
+            const { data: userData, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('email', email)
+                .single();
+
+            if (profileError || !userData) {
                 setError("IDENTITY UNLINKED. CONTACT GAME MASTER.");
                 shakeForm();
                 return;
             }
-
-            const userData = querySnapshot.docs[0].data();
+            
+            const finalUser = { ...userData, uid: data?.user?.id, email: email, id: data?.user?.id };
 
             if (userData.role === 'master' || userData.role === 'admin' || userData.username === 'admin') {
-                onAdminLogin();
+                onAdminLogin(finalUser);
             } else {
-                onLogin();
+                onLogin(finalUser);
             }
-            setError(false);
-
         } catch (err: any) {
             console.error("Login Error:", err);
 
-            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+            const msg = err.message || '';
+            if (msg.includes('Invalid login credentials')) {
                 setError("ACCESS DENIED. INVALID CREDENTIALS.");
-            } else if (err.code === 'auth/too-many-requests') {
-                setError("SYSTEM LOCKOUT. TOO MANY FAILED ATTEMPTS.");
-            } else if (err.code === 'permission-denied') {
-                setError("DATABASE LOCKED. CHECK SECURITY PROTOCOLS.");
+            } else if (msg.includes('User already registered')) {
+                setError("IDENTITY ALREADY REGISTERED.");
             } else {
-                setError(`SYSTEM ERROR: ${err.code || 'UNKNOWN'}`);
+                setError(`SYSTEM ERROR: ${msg}`);
             }
             shakeForm();
         }
@@ -274,10 +300,10 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             >
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-wider">
-                        LOGIN
+                        {isRegistering ? 'REGISTER' : 'LOGIN'}
                     </h1>
                     <p className="text-gray-400 font-mono text-xs tracking-widest uppercase">
-                        Identify Yourself, Player
+                        {isRegistering ? 'Establish Identity, Player' : 'Identify Yourself, Player'}
                     </p>
                 </div>
 
@@ -334,18 +360,29 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                         </motion.div>
                     )}
 
-                    {/* Login Button */}
+                    {/* Submit Button */}
                     <motion.button
+                        type="submit"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         className="w-full relative overflow-hidden group bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-display font-bold py-3 px-6 rounded-lg uppercase tracking-widest shadow-lg transition-all duration-300"
                     >
                         <span className="relative z-10 flex items-center justify-center gap-2">
-                            Enter The Borderland <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                            {isRegistering ? 'Create Identity' : 'Enter The Borderland'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         {/* Shine effect */}
                         <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 skew-x-12" />
                     </motion.button>
+
+                    <div className="text-center mt-4">
+                        <button
+                            type="button"
+                            onClick={() => { setIsRegistering(!isRegistering); setError(false); }}
+                            className="text-cyan-400 hover:text-pink-400 font-mono text-xs transition-colors"
+                        >
+                            {isRegistering ? 'ALREADY HAVE AN IDENTITY? LOGIN' : 'NO IDENTITY? REGISTER'}
+                        </button>
+                    </div>
                 </form>
             </motion.div>
         </div>

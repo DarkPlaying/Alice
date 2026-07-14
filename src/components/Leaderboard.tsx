@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react';
 import { Crown, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../supabaseClient';
-import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
 
 interface PlayerData {
     rank: number;
@@ -25,42 +23,36 @@ export const Leaderboard = () => {
             try {
                 setLoading(true);
 
-                // 1. Fetch all users from Firebase to establish ID mapping
-                const usersRef = collection(db, "users");
-                const userSnapshot = await getDocs(usersRef);
-                const allFirebaseUsers = userSnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })).sort((a: any, b: any) => {
-                    // Match AdminDashboard logic: admin first, then by createdAt
+                // Fetch profiles from Supabase and establish ID mapping
+                const { data: allProfiles, error: fetchError } = await supabase
+                    .from('profiles')
+                    .select('*');
+
+                if (fetchError) throw fetchError;
+
+                const sortedProfiles = [...(allProfiles || [])].sort((a: any, b: any) => {
                     const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
                     const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
                     if (isMasterA && !isMasterB) return -1;
                     if (!isMasterA && isMasterB) return 1;
-                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+                    const timeA = new Date(a.created_at || 0).getTime();
+                    const timeB = new Date(b.created_at || 0).getTime();
                     return timeA - timeB;
                 });
 
-                // Create Mapping: username -> Player ID
                 const idMap: Record<string, string> = {};
-                allFirebaseUsers.forEach((u: any, index) => {
+                sortedProfiles.forEach((u: any, index) => {
                     const pid = `PLAYER${(index + 1).toString().padStart(3, '0')}`;
                     if (u.username) {
                         idMap[u.username.toLowerCase()] = pid;
                     }
                 });
 
-                // 2. Fetch profiles from Supabase
-                const { data: profiles, error: pError } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .order('visa_points', { ascending: false });
+                // Sort again by visa_points for leaderboard
+                const leaderboardProfiles = [...sortedProfiles].sort((a: any, b: any) => (b.visa_points || 0) - (a.visa_points || 0));
 
-                if (pError) throw pError;
-
-                // 3. Merge data
-                const mergedPlayers: PlayerData[] = (profiles || []).map((profile, index) => {
+                // Merge data
+                const mergedPlayers: PlayerData[] = leaderboardProfiles.map((profile, index) => {
                     const username = profile.username?.toLowerCase() || '';
                     const playerId = idMap[username] || `PLAYER_EXT`;
 

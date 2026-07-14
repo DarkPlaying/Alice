@@ -1,5 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../../supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseKey } from '../../supabaseClient';
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        storageKey: 'borderland-fresh-token-v2',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        lock: async (_name: string, ...args: any[]) => {
+            const acquire = args.pop();
+            if (typeof acquire === 'function') {
+                return await acquire();
+            }
+        }
+    }
+});
 import type { DiamondsGameState, DiamondsPlayer, DiamondsCard, DiamondsPhase } from '../../game/diamonds';
 import { getCardImagePath } from '../../game/diamonds';
 import { generateDiamondsDeck } from '../../game/diamonds/actions/dealing';
@@ -8,8 +23,6 @@ import { assignGroups } from '../../game/diamonds/actions/shuffling';
 import { evaluateRound } from '../../game/diamonds/actions/evaluation';
 import { resolveSteals } from '../../game/diamonds/actions/picking';
 import { updateScores } from '../../game/diamonds/actions/scoring';
-import { db } from '../../firebase';
-import { collection, getDocs } from 'firebase/firestore';
 import { Swords, Skull, Timer, CheckCircle2, AlertTriangle, X, Activity, Scan, Info, Shield, Syringe, Biohazard, User, ChevronRight } from 'lucide-react';
 
 
@@ -112,23 +125,21 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         console.log(`[DIAMONDS_DEBUG] Phase: ${gameState?.phase}, Total: ${myHand.length}, Available: ${available.length}`);
     }, [gameState?.phase, myHand, mySlots]);
 
-    // Fetch Player ID Mapping from Firebase (Consistent Anonymity)
+    // Fetch Player ID Mapping from Supabase (Consistent Anonymity)
     useEffect(() => {
         const fetchPlayerIds = async () => {
             try {
-                const querySnapshot = await getDocs(collection(db, 'users'));
-                const usersList = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as any[];
+                const { data, error } = await supabase.from('profiles').select('*');
+                if (error) throw error;
+                const usersList = data || [];
 
                 usersList.sort((a: any, b: any) => {
                     const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
                     const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
                     if (isMasterA && !isMasterB) return -1;
                     if (!isMasterA && isMasterB) return 1;
-                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+                    const timeA = new Date(a.created_at || 0).getTime();
+                    const timeB = new Date(b.created_at || 0).getTime();
                     return timeA - timeB;
                 });
 
@@ -142,7 +153,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 });
                 setPlayerIdMap(mapping);
             } catch (error) {
-                console.error('Error fetching player IDs (Firebase):', error);
+                console.error('Error fetching player IDs (Supabase):', error);
             }
         };
         fetchPlayerIds();
@@ -324,27 +335,14 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 console.log("[DIAMONDS_BRIEFING] Initializing participants...");
                 console.log("[DIAMONDS_BRIEFING] Candidate IDs:", candidateIds);
 
-                // 2. Fetch User Metadata from Firestore (Authoritative IDs/Emails/Roles)
-                console.log("[DIAMONDS_BRIEFING] Fetching user metadata from Firestore...");
-                const fsSnapshot = await getDocs(collection(db, 'users'));
-                const fsUsers = fsSnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as any[];
-                console.log(`[DIAMONDS_BRIEFING] Fetched ${fsUsers.length} users from Firestore.`);
+                // 2. Fetch User Metadata from Supabase Profiles (Authoritative IDs/Emails/Roles)
+                console.log("[DIAMONDS_BRIEFING] Fetching user metadata from Supabase profiles...");
+                const { data: fsUsers, error: fsError } = await supabase.from('profiles').select('*');
+                if (fsError) console.error("[DIAMONDS_ENGINE] Profiles fetch error:", fsError);
+                console.log(`[DIAMONDS_BRIEFING] Fetched ${fsUsers?.length || 0} users from Supabase.`);
 
-                // 3. Fetch Scores from Supabase Profiles (Authoritative Visa Points)
-                console.log("[DIAMONDS_BRIEFING] Fetching scores from Supabase profiles...");
-                const { data: profiles, error: pError } = await supabase.from('profiles').select('email, visa_points, username');
-                if (pError) console.error("[DIAMONDS_ENGINE] Profiles fetch error:", pError);
-
-                const profileMap = new Map();
-                profiles?.forEach(p => {
-                    if (p.email) profileMap.set(p.email.toLowerCase(), p);
-                });
-
-                // 4. Construct Participants
-                const initialParticipants: DiamondsPlayer[] = fsUsers
+                // 3. Construct Participants
+                const initialParticipants: DiamondsPlayer[] = (fsUsers || [])
                     .filter(u => {
                         const isCandidate = candidateIds.length > 0 ? candidateIds.includes(u.id) : true;
                         const isMaster = u.role === 'master' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
@@ -353,11 +351,10 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         return isAllowed;
                     })
                     .map(u => {
-                        const profile = profileMap.get(u.email?.toLowerCase());
-                        const finalScore = profile?.visa_points !== undefined ? profile.visa_points : 1000;
+                        const finalScore = u.visa_points !== undefined ? u.visa_points : 1000;
                         return {
                             id: u.id,
-                            username: profile?.username || u.username || 'Agent',
+                            username: u.username || 'Agent',
                             role: (u.role as any) || 'player',
                             score: finalScore,
                             status: 'active',
@@ -914,11 +911,20 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             })
             .subscribe();
 
+        const broadcastChannel = supabase.channel('diamonds_king_game')
+            .on('broadcast', { event: 'force_exit' }, (payload: any) => {
+                console.log('!!! FORCE EXIT DETECTED !!!', payload);
+                if (onClose) onClose();
+                else window.location.href = '/home/card';
+            })
+            .subscribe();
+
         fetchMyHand();
         fetchMySlots();
 
         return () => {
             supabase.removeChannel(channel);
+            supabase.removeChannel(broadcastChannel);
             clearInterval(pollInterval);
         };
     }, [user, onClose]);

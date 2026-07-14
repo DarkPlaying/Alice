@@ -3,8 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Timer, Shield, CheckCircle2, MessageSquare, X, FileText } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { RealtimeChannel } from '@supabase/supabase-js';
-import { collection, getDocs } from 'firebase/firestore';
-import { auth, db } from '../../firebase';
 import { ClubsGameMaster } from './ClubsGameMaster';
 import { Loader } from '../Loader';
 import { ClubsPointsTable } from './ClubsPointsTable';
@@ -86,32 +84,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     // Hint Cards State (Tactical Intel)
     const [hintCards, setHintCards] = useState<string[]>([]);
 
-    useEffect(() => {
-        if ((round === 1 || round === 4) && masterSelection && masterSelection.angel && masterSelection.demon && cards.length > 0) {
-            const targets = masterSelection;
-            const otherCards = cards.filter(c =>
-                c.id !== targets.angel &&
-                c.id !== targets.demon &&
-                !c.isRemoved
-            );
 
-            // True Random Decoy Selection (Shuffle then Pick)
-            const shuffledOthers = [...otherCards].sort(() => Math.random() - 0.5);
-            const randoms = shuffledOthers.slice(0, 2);
-
-            const combinedIds = [
-                targets.angel!,
-                targets.demon!,
-                ...randoms.map(c => c.id)
-            ];
-
-            // True Random Display Order
-            const finalHintList = [...combinedIds].sort(() => Math.random() - 0.5);
-            setHintCards(finalHintList);
-        } else {
-            setHintCards([]);
-        }
-    }, [round, masterSelection?.angel, masterSelection?.demon, cards.length]);
 
     // Player ID Mapping (UID → #PLAYER_XXX)
     const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
@@ -125,6 +98,23 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     const chatEndRef = useRef<HTMLDivElement>(null);
     const channelRef = useRef<RealtimeChannel | null>(null);
     const [isPaused, setIsPaused] = useState(false);
+
+    // Phase Notification Banner
+    const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (gameState === 'setup_phase1') {
+            setPhaseBanner('ANGEL & DEMON SELECTION');
+            const t = setTimeout(() => setPhaseBanner(null), 3000);
+            return () => clearTimeout(t);
+        } else if (gameState === 'playing') {
+            setPhaseBanner('VOTING PHASE');
+            const t = setTimeout(() => setPhaseBanner(null), 3000);
+            return () => clearTimeout(t);
+        } else {
+            setPhaseBanner(null);
+        }
+    }, [gameState]);
 
     // Identification
     const [roundResults, setRoundResults] = useState<{ name: string, team: string, change: number, reason: string, targetId?: string | null }[] | null>(null);
@@ -177,14 +167,14 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
         const syncPlayerScore = async () => {
             if (myScore === 0 && !hasCorrectedScoreRef.current &&
                 gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost' &&
-                auth.currentUser?.email) {
+                user?.email) {
                 console.log('[CLUBS PLAYER] My score is 0, checking profile...');
                 hasCorrectedScoreRef.current = true;
 
                 const { data: profile } = await supabase
                     .from('profiles')
                     .select('visa_points')
-                    .eq('email', auth.currentUser.email)
+                    .eq('email', user.email)
                     .single();
 
                 if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
@@ -193,7 +183,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     // Fetch latest status to get current scores object
                     const { data: latestStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
                     const currentScores = latestStatus?.scores || { current: {}, history: {}, start: {} };
-                    const myUid = auth.currentUser?.uid || '';
+                    const myUid = (user?.id as string) || '';
 
                     if (!myUid) return;
 
@@ -231,7 +221,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
         if (status.scores && status.scores.current) {
             const currentScores = status.scores.current;
 
-            const myUid = auth.currentUser?.uid || '';
+            const myUid = (user?.id as string) || '';
 
             // Get my own score - TOTAL ACCUMULATED POINTS
             if (myUid) {
@@ -318,7 +308,6 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     useEffect(() => {
         // Only run if game is over (won/lost) and we haven't persisted yet
         if ((gameState === 'won' || gameState === 'lost') && !hasPersistedRef.current) {
-            const user = auth.currentUser;
             if (user?.email) {
                 console.log('[CLUBS PLAYER] ===== PERSISTENCE TRIGGERED =====');
                 console.log('[CLUBS PLAYER] Game State:', gameState);
@@ -357,7 +346,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         const finalCurrentScores = finalScoresObj.current || {};
                         // startScoresObj removed
 
-                        const myUid = auth.currentUser?.uid || (user as any)?.id || '';
+                        const myUid = (user?.id as string) || '';
                         const myGameTotal = Number(finalCurrentScores[myUid]) || myScore;
 
                         // PASTE LOGIC: The new balance IS the final absolute game score (HUD value).
@@ -407,7 +396,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
     useEffect(() => {
         // Hydrate from phase1Votes (which comes from DB)
-        const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+        const myId = (user?.id as string) || user?.username || 'PLAYER';
         if (phase1Votes[myId] && !hasHydratedSelectionRef.current) {
             // Only hydrate if local selection is empty to be safe
             if (!selection.angel && !selection.demon) {
@@ -422,11 +411,9 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     useEffect(() => {
         const fetchPlayerIds = async () => {
             try {
-                const querySnapshot = await getDocs(collection(db, 'users'));
-                const users = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
+                const { data: users, error } = await supabase.from('profiles').select('*');
+                if (error) throw error;
+                if (!users) return;
 
                 // Sort users to match Admin Dashboard logic
                 users.sort((a: any, b: any) => {
@@ -438,42 +425,38 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     if (!isMasterA && isMasterB) return 1;
 
                     // 2. Sort remaining players by Join Date (Oldest to Newest)
-                    const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                    const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
+                    const timeA = new Date(a.created_at || 0).getTime();
+                    const timeB = new Date(b.created_at || 0).getTime();
 
                     return timeA - timeB;
                 });
 
                 const mapping: Record<string, string> = {};
 
-
                 users.forEach((u: any, index: number) => {
-                    // Match Admin Dashboard: Use GLOBAL index for ID generation
-                    // This ensures #PLAYER_011 in Admin remains #PLAYER_011 in Game
                     const globalId = (index + 1).toString().padStart(3, '0');
                     const pid = `#PLAYER_${globalId}`;
+                    const displayName = u.username || u.email?.split('@')[0] || pid;
 
-
-
-                    // Optional: You can keep #MASTER_ prefix if preferred, but user requested Admin Code match (which uses #PLAYER_)
-                    // For now, we standardize to #PLAYER_ to ensure 1:1 match with Visa IDs.
-                    // If visual distinction is needed, we can add it back, but the NUMBER must be global.
-
-                    if (u.id) mapping[u.id] = pid;
-                    if (u.uid) mapping[u.uid] = pid;
-                    if (u.username) mapping[u.username] = pid;
+                    if (u.id) mapping[u.id] = displayName;
+                    if (u.username) mapping[u.username] = displayName;
                 });
 
                 console.log('Role Standardisation (Player):', { mapping });
                 setPlayerIdMap(mapping);
             } catch (error) {
-                console.error('Error fetching player IDs (Firebase):', error);
+                console.error('Error fetching player IDs:', error);
             }
         };
         fetchPlayerIds();
     }, []);
 
-    // Initial Load
+    // Reset votes on round change
+    useEffect(() => {
+        setMyVote([]);
+    }, [round]);
+
+    // Handle initialization on mount
     useEffect(() => {
         const verifyAccessAndSync = async () => {
             try {
@@ -485,6 +468,11 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     // Sync State (Move up for timer logic)
                     const serverState = statusData.gameState || 'setup_phase1';
                     setGameState(serverState);
+
+                    const hP = statusData.round_data?.hint_cards_p || statusData.round_data?.hint_cards;
+                    if (hP) {
+                        setHintCards(hP);
+                    }
 
                     // Sync Fix: Check round_data if column is null
                     const phaseExpirySource = statusData.phase_expiry || statusData.round_data?.phase_expiry;
@@ -522,11 +510,6 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                             return init.map((c: Card) => ({ ...c, isRemoved: removed.includes(c.id) }));
                         });
 
-                        // Sync Player Selection (Fix for Reloading)
-                        if (statusData.round_data?.player_selection) {
-                            setSelection(statusData.round_data.player_selection);
-                        }
-
                         // Sync Master Locked status (if Master has selected)
                         if (statusData.round_data && statusData.round_data.master_selection) {
                             setMasterLocked(true);
@@ -534,11 +517,17 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
                         // Sync Player Selection (Consensus)
                         if (statusData.round_data && statusData.round_data.player_selection) {
-                            setSelection(statusData.round_data.player_selection);
+                            const hasSelection = statusData.round_data.player_selection.angel || statusData.round_data.player_selection.demon;
+                            if (statusData.gameState !== 'setup_phase1' || hasSelection) {
+                                setSelection(statusData.round_data.player_selection);
+                            }
                         }
                         // Sync Master Selection
                         if (statusData.round_data && statusData.round_data.master_selection) {
-                            setMasterSelection(statusData.round_data.master_selection);
+                            const hasMasterSelection = statusData.round_data.master_selection.angel || statusData.round_data.master_selection.demon;
+                            if (statusData.gameState !== 'setup_phase1' || hasMasterSelection) {
+                                setMasterSelection(statusData.round_data.master_selection);
+                            }
                         }
 
                         if (statusData.is_briefing_shown) setBriefingShown(true);
@@ -549,17 +538,21 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             }
         };
         verifyAccessAndSync();
+        // Autorefresh fallback (3s) to prevent state staleness
+        let isFetchingSync = false;
+        const syncInterval = setInterval(async () => {
+            if (isFetchingSync) return;
+            isFetchingSync = true;
+            try {
+                await verifyAccessAndSync();
+            } finally {
+                isFetchingSync = false;
+            }
+        }, 15000);
+        return () => clearInterval(syncInterval);
     }, [initializeBoard]);
 
-    // Clear votes & selections on new round
-    useEffect(() => {
-        setMyVote([]);
-        setGlobalVotes({});
-        setPhase1Votes({});
-        setSelection({ angel: null, demon: null });
-        setMasterLocked(false);
-    }, [round]);
-
+    // (Redundant useEffect removed: state clearing is handled by postgres_changes round sync)
     // Realtime Management
     useEffect(() => {
         const fetchMessages = async () => {
@@ -610,25 +603,38 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 // CRITICAL: Check for force reset
                 if (status.round_data?.force_reset) {
                     console.log('!!! FORCE RESET DETECTED IN DATABASE !!!');
-                    setShowResetOverlay(true);
+                    window.location.href = '/home/card';
                     return; // Exit early
                 }
 
                 if (status.is_paused !== undefined) setIsPaused(status.is_paused);
 
                 // Sync Fix: Check round_data if column is null, fallback to local default
-                const phaseExpirySource = status.phase_expiry || status.round_data?.phase_expiry;
+                const phaseExpirySource = status.phase_expiry !== undefined ? status.phase_expiry : status.round_data?.phase_expiry;
+                let expiryDate: Date | null = null;
+
                 if (phaseExpirySource) {
-                    setPhaseExpiry(new Date(phaseExpirySource));
+                    expiryDate = new Date(phaseExpirySource);
+                } else if (status.phase_expiry === null) {
+                    // Explicitly cleared in database
+                    expiryDate = null;
+                    setPhaseExpiry(null);
+                    setTimeLeft(0);
                 } else if (!phaseExpiry && status.gameState) {
                     const now = new Date();
-                    let expiryDate = null;
                     if (status.gameState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
                     else if (status.gameState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
                     else if (status.gameState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
                     else if (status.gameState === 'playing') expiryDate = new Date(now.getTime() + 120000);
                     else if (status.gameState === 'round_reveal') expiryDate = new Date(now.getTime() + 30000);
-                    if (expiryDate) setPhaseExpiry(expiryDate);
+                }
+
+                if (expiryDate) {
+                    setPhaseExpiry(expiryDate);
+                    // Force immediate update of timeLeft
+                    const now = new Date();
+                    const diff = Math.floor((expiryDate.getTime() - now.getTime()) / 1000);
+                    setTimeLeft(Math.max(0, diff));
                 }
 
                 // Sync Game State
@@ -659,7 +665,12 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     setGlobalVotes({});
 
                     setCards(prev => {
-                        const init = initializeBoard(status.current_round, prev);
+                        let init: Card[] = [];
+                        if (status.round_data?.decks?.active) {
+                            init = status.round_data.decks.active;
+                        } else {
+                            init = initializeBoard(status.current_round, prev);
+                        }
                         const removed = status.removed_cards_p || [];
                         return init.map(c => ({ ...c, isRemoved: removed.includes(c.id) }));
                     });
@@ -672,8 +683,10 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 updateScoreState(status);
 
                 // Sync Selections (Individual)
-                if (status.round_data) {
-                    if (status.round_data.phase1_selections) {
+            if (status.round_data) {
+                const hP = status.round_data.hint_cards_p || status.round_data.hint_cards;
+                if (hP) setHintCards(hP);
+                if (status.round_data.phase1_selections) {
                         const selections = status.round_data.phase1_selections;
                         setPhase1Votes(selections);
 
@@ -689,8 +702,11 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     // Sync Final Consensus (Overrides individual)
                     // IMPORTANT: Always sync player_selection from DB, especially during selection_reveal
                     if (status.round_data?.player_selection) {
-                        console.log('[CLUBS PLAYER] Syncing player selection:', status.round_data.player_selection);
-                        setSelection(status.round_data.player_selection);
+                        const hasSelection = status.round_data.player_selection.angel || status.round_data.player_selection.demon;
+                        if (status.gameState !== 'setup_phase1' || hasSelection) {
+                            console.log('[CLUBS PLAYER] Syncing player selection:', status.round_data.player_selection);
+                            setSelection(status.round_data.player_selection);
+                        }
                     }
 
                     if (status.round_data.master_selection) {
@@ -700,11 +716,13 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         setMasterLocked(false);
                     }
 
-                    // Sync In-Game Votes (Late Joiner Fix)
-                    if (status.round_data.player_votes) {
-                        setGlobalVotes(status.round_data.player_votes);
-                    } else if (Object.keys(globalVotes).length === 0) {
-                        // Optional: If empty in DB and empty locally, keep empty
+                    // Sync In-Game Votes (Late Joiner Fix) - Only sync from DB outside active play to prevent deselect glitches
+                    if (status.gameState !== 'playing') {
+                        if (status.round_data.player_votes) {
+                            setGlobalVotes(status.round_data.player_votes);
+                        } else if (Object.keys(globalVotes).length === 0) {
+                            // Optional: If empty in DB and empty locally, keep empty
+                        }
                     }
                 }
 
@@ -720,7 +738,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             })
             .on('broadcast', { event: 'force_exit' }, (p: any) => {
                 console.log("FORCE EXIT RECEIVED", p);
-                setShowResetOverlay(true);
+                window.location.href = '/home/card';
             })
             // REMOVED: timer_sync listener - was causing glitches
             // Each client now calculates their own countdown from phaseExpiry
@@ -752,7 +770,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 const payload = p.payload || {};
                 const finalScores = payload.finalScores;
                 if (finalScores) {
-                    const myUid = auth.currentUser?.uid || (user as any)?.id || '';
+                    const myUid = (user?.id as string) || '';
                     const scoresMap = finalScores as Record<string, number>;
                     const myFinalScore = scoresMap[myUid] !== undefined ? Number(scoresMap[myUid]) : myScore;
                     console.log('[GAME OVER] Final score boost received:', myFinalScore);
@@ -771,21 +789,12 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 setPhase1Votes(prev => ({ ...prev, [userId]: selection }));
             })
             .on('broadcast', { event: 'master_vote' }, (_p: any) => {
-                // const { votes } = p.payload;
-                // Currently ignoring master votes for players (Blind Mode until reveal)
-                // But Prompt said "player can see players, master can other masters".
                 // Players usually shouldn't see Master's live hunting?
-                // Actually, players usually DON'T see Master's hunting until reveal.
-                // But the prompt was specific: "player can see players ,master can other masters".
-                // So Players see Players. Master see Masters.
-                // I will NOT show Master votes to players here.
-                // But I'll listen just in case we need it later, or filter it out.
-                // For now, do nothing with master_vote for players.
             })
-            .subscribe((status) => {
+            .subscribe((status, err) => {
                 if (status === 'SUBSCRIBED') {
                     channel.track({
-                        userId: auth.currentUser?.uid || user?.username || 'ANON',
+                        userId: user?.id as string || user?.username || 'ANON',
                         online_at: new Date().toISOString(),
                     });
                 }
@@ -815,19 +824,19 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
     // Timer Logic
     useEffect(() => {
-        const timer = setInterval(() => {
-            // Don't countdown if game is paused
-            if (isPaused) return;
+        if (gameState === 'won' || gameState === 'lost') return;
 
+        const timer = setInterval(() => {
+            if (isPaused) return;
+            
             if (phaseExpiry) {
                 const now = new Date();
                 const diff = Math.floor((phaseExpiry.getTime() - now.getTime()) / 1000);
                 setTimeLeft(Math.max(0, diff));
             } else {
-                setTimeLeft(prev => Math.max(0, prev - 1));
+                setTimeLeft(0);
             }
         }, 1000);
-
         return () => clearInterval(timer);
     }, [phaseExpiry, isPaused]);
 
@@ -852,28 +861,25 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             const isAngel = selection.angel === cardId;
             const isDemon = selection.demon === cardId;
 
-            if (isAngel) next.angel = null;
-            else if (isDemon) next.demon = null;
-            else {
-                if (!next.angel) next.angel = cardId;
-                else if (!next.demon) next.demon = cardId;
-                else next.angel = cardId; // Overwrite Angel
+            if (isAngel) {
+                next.angel = null;
+            } else if (isDemon) {
+                next.demon = null;
+            } else {
+                if (next.angel === null || next.angel === undefined) {
+                    next.angel = cardId;
+                } else if (next.demon === null || next.demon === undefined) {
+                    next.demon = cardId;
+                } else {
+                    // Both are filled, overwrite Angel
+                    next.angel = cardId;
+                }
             }
 
             setSelection(next);
 
             // Execute Side Effects Async
             submitPhase1Selection(next);
-
-            // Broadcast Phase 1 Vote (Live Indicator)
-            const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
-            if (channelRef.current) {
-                channelRef.current.send({
-                    type: 'broadcast',
-                    event: 'phase1_vote',
-                    payload: { userId: myId, selection: next }
-                });
-            }
             return;
         }
 
@@ -894,7 +900,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             setMyVote(newVotes);
 
             // Broadcast Vote
-            const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+            const myId = (user?.id as string) || user?.username || 'PLAYER';
             console.log('=== PLAYER VOTING ===', { votes: newVotes, userId: myId });
 
             channelRef.current?.send({
@@ -920,37 +926,19 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
     const submitPhase1Selection = async (sel: { angel: string | null; demon: string | null }) => {
         console.log('=== PLAYER INDIVIDUAL SELECTION ===', sel);
-        // RACE CONDITION FIX:
-        // We now rely on BROADCASTING to the Master, who acts as the Single Writer to the database.
-        // This prevents players from overwriting each other's selections in the JSONB blob.
-
-        /* 
-        const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
-        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
-        const currentData = data?.round_data || {};
-        const currentSelections = currentData.phase1_selections || {};
-     
-        const { error } = await supabase.from('clubs_game_status').update({
-            round_data: {
-                ...currentData,
-                phase1_selections: {
-                    ...currentSelections,
-                    [myId]: sel
-                }
-            }
-        }).eq('id', 'clubs_king');
-     
-        if (error) {
-            console.error('!!! SELECTION SAVE FAILED !!!', error);
-            showToast(`ERROR: Could not save selection: ${error.message}`, 'error');
-        } else {
-            console.log('Individual selection saved successfully');
-        }
-        */
+        const myId = (user?.id as string) || user?.username || 'PLAYER';
+        
+        channelRef.current?.send({
+            type: 'broadcast',
+            event: 'phase1_vote',
+            payload: { userId: myId, selection: sel }
+        });
+        
         console.log('Selection broadcasted to Master for persistence.');
     };
 
     const sendMessage = async (e?: React.FormEvent) => {
+
         e?.preventDefault();
         if (!inputMessage.trim()) return;
         const senderName = user?.username || 'PLAYER';
@@ -961,7 +949,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             const { error } = await supabase.from('messages').insert({
                 game_id: 'clubs_king',
                 user_name: senderName,
-                user_id: auth.currentUser?.uid,
+                user_id: user?.id as string,
                 content: tempContent,
                 is_system: false,
                 channel: 'player'
@@ -982,6 +970,25 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     if ((!cards || cards.length === 0) && gameState !== 'idle') return <Loader />;
     return (
         <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+            {/* PHASE NOTIFICATION BANNER */}
+            <AnimatePresence>
+                {phaseBanner && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 50 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
+                        className="absolute inset-0 z-[200] flex items-center justify-center pointer-events-none"
+                    >
+                        <div className="bg-black/80 border border-white/20 p-8 sm:p-12 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(255,255,255,0.1)] text-center">
+                            <p className="text-white/50 text-sm tracking-[0.3em] uppercase mb-2">PHASE INITIATED</p>
+                            <h2 className="text-3xl sm:text-5xl font-mono text-white tracking-widest font-bold drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+                                {phaseBanner}
+                            </h2>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* PAUSE OVERLAY */}
             <AnimatePresence>
                 {isPaused && (
@@ -1305,7 +1312,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             {/* Show Global Votes Count */}
                                             <div className="absolute top-2 right-2 z-30">
                                                 {(() => {
-                                                    const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                    const myId = (user?.id as string) || user?.username || 'PLAYER';
                                                     const effectiveVotes = { ...globalVotes, [myId]: myVote };
                                                     const count = Object.values(effectiveVotes).filter(votes => votes.includes(card.id)).length;
 
@@ -1325,7 +1332,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                         <div className="absolute top-2 right-2 flex flex-col gap-1 items-end z-30">
                                             {/* Angel Count */}
                                             {(() => {
-                                                const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                const myId = (user?.id as string) || user?.username || 'PLAYER';
                                                 const effectiveVotes = { ...phase1Votes, [myId]: selection };
                                                 const angelCount = Object.values(effectiveVotes).filter(v => v.angel === card.id).length;
 
@@ -1338,7 +1345,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             })()}
                                             {/* Demon Count */}
                                             {(() => {
-                                                const myId = auth.currentUser?.uid || user?.username || 'PLAYER';
+                                                const myId = (user?.id as string) || user?.username || 'PLAYER';
                                                 const effectiveVotes = { ...phase1Votes, [myId]: selection };
                                                 const demonCount = Object.values(effectiveVotes).filter(v => v.demon === card.id).length;
 
@@ -1452,15 +1459,15 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                 initial={{ opacity: 0, y: 100 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: 100 }}
-                                className="absolute bottom-0 left-0 right-0 lg:top-1/2 lg:left-1/2 lg:right-auto lg:bottom-auto lg:-translate-x-1/2 lg:-translate-y-1/2 lg:w-full lg:max-w-lg lg:max-h-[80vh] lg:rounded-2xl lg:border lg:border-white/10 bg-[#050508]/98 backdrop-blur-2xl border-t border-white/20 p-8 sm:p-12 lg:p-8 z-50 max-h-[60vh] overflow-y-auto shadow-[0_-30px_60px_rgba(0,0,0,0.9)] lg:shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-t-[2rem] lg:rounded-[2rem]"
+                                className="absolute bottom-0 left-0 right-0 lg:top-1/2 lg:left-1/2 lg:right-auto lg:bottom-auto lg:-translate-x-1/2 lg:-translate-y-1/2 lg:w-full lg:max-w-lg lg:max-h-[80vh] lg:rounded-2xl lg:border lg:border-white/10 bg-[#050508]/98 backdrop-blur-2xl border-t border-white/20 p-6 sm:p-8 z-50 max-h-[60vh] overflow-y-auto shadow-[0_-30px_60px_rgba(0,0,0,0.9)] lg:shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-t-[2rem] lg:rounded-[2rem]"
                             >
                                 <div className="max-w-4xl mx-auto space-y-6">
-                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                                        <h3 className="text-2xl sm:text-4xl font-cinzel font-black text-white uppercase tracking-[0.2em]">ROUND EVALUATION</h3>
-                                        <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Protocol Sync: Round {round}</span>
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-2">
+                                        <h3 className="text-xl sm:text-3xl font-cinzel font-black text-white uppercase tracking-[0.2em] leading-tight">ROUND EVALUATION</h3>
+                                        <span className="text-[9px] sm:text-[10px] font-mono text-white/40 uppercase tracking-widest text-left sm:text-right">Protocol Sync: Round {round}</span>
                                     </div>
                                     <div className="space-y-3">
-                                        {roundResults.filter(res => res.team === 'player' && (!res.targetId || res.targetId === (auth.currentUser?.uid || user?.username))).map((res, i) => (
+                                        {roundResults.filter(res => !res.targetId || res.targetId === ((user?.id as string) || user?.username)).map((res, i) => (
                                             <motion.div
                                                 initial={{ opacity: 0, x: -20 }}
                                                 animate={{ opacity: 1, x: 0 }}
@@ -1669,7 +1676,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                             <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
                                                 <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
                                                 <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
-                                                    {playerIdMap[(auth.currentUser?.uid || '') as string] || user?.username || 'YOU'}
+                                                    {playerIdMap[(user?.id || '') as string] || user?.username || 'YOU'}
                                                 </p>
                                                 <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
                                                 <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
@@ -1707,7 +1714,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
 
                                         {/* Return Button */}
                                         <button
-                                            onClick={() => window.location.href = '/home'}
+                                            onClick={() => window.location.href = '/home/card'}
                                             className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
                                         >
                                             RETURN TO LOBBY
@@ -1754,7 +1761,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                             </div>
                             <div className="pt-4">
                                 <button
-                                    onClick={() => window.location.href = '/home'}
+                                    onClick={() => window.location.href = '/home/card'}
                                     className="px-8 py-3 bg-red-500/10 border border-red-500 hover:bg-red-500 hover:text-black text-red-500 font-bold font-mono tracking-widest transition-all uppercase"
                                 >
                                     RETURN TO LOBBY

@@ -81,34 +81,37 @@ export const AboutGame = () => {
                     className="text-left"
                 >
                     <h3 className="text-xl md:text-2xl font-mono text-gray-400 mb-2 tracking-[0.5em] uppercase hover:animate-glitch cursor-default transition-all duration-300">
-                        WELCOME PLAYERS
+                        PROJECT ALICE
                     </h3>
 
                     <h2 className="text-6xl md:text-8xl font-display text-[#ff0050] mb-6 tracking-tighter leading-none relative group w-fit">
-                        <span className="relative z-10">HOLD</span>
+                        <span className="relative z-10">BEYOND</span>
                         <br />
-                        <span className="text-white text-4xl md:text-6xl tracking-normal relative z-10">THE CARD</span>
+                        <span className="text-white text-4xl md:text-6xl tracking-normal relative z-10">THE BORDERLINE</span>
 
                         {/* Glitch Shadow for Title */}
-                        <span className="absolute top-0 left-0 text-[#00ffff] opacity-0 group-hover:opacity-60 animate-glitch blur-[1px] mix-blend-screen -z-10 translate-x-1">HOLD</span>
+                        <span className="absolute top-0 left-0 text-[#00ffff] opacity-0 group-hover:opacity-60 animate-glitch blur-[1px] mix-blend-screen -z-10 translate-x-1">BEYOND</span>
                     </h2>
 
                     <div className="space-y-6 text-gray-400 font-mono text-sm md:text-base leading-relaxed max-w-md">
                         <p>
-                            Begin the game. <span className="text-white">Accept it</span> or <span className="text-white">walk away</span>.
+                            ALICE is an immersive survival game platform powered by <span className="text-white">React</span> and <span className="text-white">Supabase</span>. Inspired by the high-stakes world of Borderland, every game is a test of your will to survive.
                         </p>
                         <p className="opacity-70">
-                            The moment you take the card, your fate is sealed. The suits will determine your challenge.
+                            Explore four distinct challenge types—<span className="text-cyan-400">Physical</span>, <span className="text-blue-400">Intellectual</span>, <span className="text-purple-400">Balanced</span>, and <span className="text-[#ff0050]">Psychological</span>. The suit you choose defines your fate.
+                        </p>
+                        <p>
+                            Real-time synchronization, cinematic animations, and a merciless scoring system ensure that no two games are the same. Are you ready to hold the card?
                         </p>
                     </div>
 
                     <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
+                        onClick={() => document.getElementById('games-section')?.scrollIntoView({ behavior: 'smooth' })}
                         className="group relative mt-10 px-10 py-3 bg-[#ff0050] text-white font-display text-sm tracking-[0.2em] hover:bg-[#ff0050]/80 transition-all uppercase rounded-full shadow-[0_0_20px_rgba(255,0,80,0.5)] overflow-hidden"
                     >
-                        <span className="relative z-10">ACCEPT</span>
-                        {/* Removed Scan Effect */}
+                        <span className="relative z-10">SELECT YOUR SUIT</span>
                     </motion.button>
                 </motion.div>
             </div>

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PlayerCache } from '../../lib/playerCache';
-import { supabase } from '../../supabaseClient';
-import { auth } from '../../firebase';
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Timer, AlertTriangle, ShieldCheck, Loader2, LogOut, X, Info, Scan, User } from 'lucide-react';
 import { PlayerCardModal } from '../PlayerCardModal';
@@ -14,13 +13,6 @@ import {
     validateBid,
     calculateProjectedScore,
     scoreCard,
-    selectRandomCard,
-    buildHint,
-    generateDeck,
-    removeCardFromDeck,
-    awardCard,
-    applyGameFailurePenalty,
-    type Card
 } from '../../game/spades';
 
 interface SpadesGameProps {
@@ -42,9 +34,6 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
     const [roundData, setRoundData] = useState<RoundData>({}); // Map of groupId -> Round Info
     const [_connectedPlayers, setConnectedPlayers] = useState<PresenceState[]>([]);
 
-    // Host State
-    const deckRef = useRef<Card[]>(generateDeck());
-
     // Local bid input state
     const [myBidInput, setMyBidInput] = useState('');
     const [_hostError, setHostError] = useState<string | null>(null); // Track host failures
@@ -59,124 +48,54 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
     const [pointsPage, setPointsPage] = useState(0);
 
     // Refs
-    const myId = user?.id || auth.currentUser?.uid || 'PLAYER';
+    const myId = user?.id || 'PLAYER';
     const phaseStartedAtRef = useRef<Date | null>(null);
     const phaseDurationRef = useRef<number>(0);
     const bidDebounceRef = useRef<NodeJS.Timeout | null>(null);
-
-    // --- Helper: Assign Groups (P2P Host Support) ---
-    const assignPlayerGroups = (currentPlayers: PlayersMap): PlayersMap => {
-        // Fisher-Yates Shuffle for robust randomization
-        const ids = Object.keys(currentPlayers);
-        for (let i = ids.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [ids[i], ids[j]] = [ids[j], ids[i]];
-        }
-        if (ids.length === 0) return currentPlayers;
-
-        const n = ids.length;
-        const newPlayers = { ...currentPlayers };
-        let groups: string[][] = [];
-
-        if (n < 2) {
-            // Very small lobbies: just one group
-            groups.push(ids);
-        } else {
-            // USER REQUEST: Use 3 and 2 only (Not 4). Maximize 3s.
-            // Solve: n = 3x + 2y (Maximize x)
-            let num3s = Math.floor(n / 3);
-            let remainder = n % 3;
-            let num2s = 0;
-
-            if (remainder === 1) {
-                // n = 3x + 1 -> n = 3(x-1) + 2 + 2
-                if (num3s >= 1) {
-                    num3s -= 1;
-                    num2s = 2;
-                } else {
-                    // Small lobby n=4 -> 2x2 handled by math above (num3s=1 -> num3s=0, num2s=2)
-                    // If n=1 handled by n < 2
-                }
-            } else if (remainder === 2) {
-                // n = 3x + 2 -> 1 group of 2
-                num2s = 1;
-            }
-            // remainder 0 -> Perfect split of 3s
-
-            let currentIdx = 0;
-            // Create 3-player groups
-            for (let k = 0; k < num3s; k++) {
-                groups.push(ids.slice(currentIdx, currentIdx + 3));
-                currentIdx += 3;
-            }
-            // Create 2-player groups
-            for (let k = 0; k < num2s; k++) {
-                groups.push(ids.slice(currentIdx, currentIdx + 2));
-                currentIdx += 2;
-            }
-
-            // Safety cleanup (should be 0)
-            if (currentIdx < n) {
-                if (groups.length > 0) {
-                    groups[groups.length - 1].push(...ids.slice(currentIdx));
-                } else {
-                    groups.push(ids.slice(currentIdx));
-                }
-            }
-        }
-
-        groups.forEach((groupParams, idx) => {
-            const groupId = idx + 1;
-            groupParams.forEach(pid => {
-                if (newPlayers[pid]) newPlayers[pid].groupId = groupId;
-            });
-        });
-        return newPlayers;
-    };
+    const isFetchingRef = useRef<boolean>(false);
 
     // --- Initial State Fetch ---
     useEffect(() => {
         const fetchState = async () => {
-            const { data, error } = await supabase
-                .from('spades_game_state')
-                .select('*')
-                .eq('id', GAME_ID)
-                .maybeSingle();
+            if (isFetchingRef.current) return;
+            isFetchingRef.current = true;
+            try {
+                // console.log('[SPADES PLAYER] fetchState() executing...');
+                
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.${GAME_ID}&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store'
+                });
+
+                let data = null;
+                let error = null;
+                
+                if (response.ok) {
+                    data = await response.json();
+                } else {
+                    error = await response.text();
+                }
+                
+                // console.log('[SPADES PLAYER] fetchState() completed! Data:', data, 'Error:', error);
+                console.log('[SPADES PLAYER] fetchState() completed! Data:', data, 'Error:', error);
 
             if (error) {
-                console.warn('[SPADES PLAYER] Initial select(*) failed, retrying with minimal columns...');
-                const { data: retryData, error: retryError } = await supabase
-                    .from('spades_game_state')
-                    .select('id, phase, current_round, players, round_data, system_start, is_paused, phase_started_at, phase_duration_sec, timer_display')
-                    .eq('id', GAME_ID)
-                    .maybeSingle();
-
-                if (retryError) {
-                    console.warn('[SPADES PLAYER] Secondary fetch failed (likely schema mismatch), trying fallback without timer...', retryError);
-
-                    // Final Fallback: Select ONLY standard columns + timestamp, NO timer_display
-                    const { data: fallbackData, error: fallbackError } = await supabase
-                        .from('spades_game_state')
-                        .select('id, phase, current_round, players, round_data, system_start, is_paused, phase_started_at, phase_duration_sec') // NO timer_display
-                        .eq('id', GAME_ID)
-                        .maybeSingle();
-
-                    if (fallbackError) {
-                        console.error('[SPADES PLAYER] CRITICAL: All fetch attempts failed.', fallbackError);
-                        return;
-                    }
-                    if (fallbackData) {
-                        console.log('[SPADES PLAYER] Fallback fetch successful (local timer mode)');
-                        syncState(fallbackData);
-                    }
-                    return;
-                }
-                if (retryData) syncState(retryData);
+                console.error('[SPADES PLAYER] CRITICAL: Raw fetch failed:', error);
                 return;
             }
 
             if (data) {
                 syncState(data);
+            }
+        } catch (err) {
+                console.error('[SPADES PLAYER] fetchState() THREW AN EXCEPTION:', err);
+            } finally {
+                isFetchingRef.current = false;
             }
         };
 
@@ -486,13 +405,15 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
             // This prevents overwriting user input while they type/delete
             if (data.players[myId]) {
                 const myPlayer = data.players[myId];
+            // Update my bid input ONLY one time (initial load) OR if phase is not bidding
+            if (myPlayer) {
                 if (myPlayer.bid !== null && myPlayer.bid !== undefined) {
-                    // FIX: Use currentPhase from ref to ensure we truly know if we are in 'bidding'
                     if (!bidInitializedRef.current || currentPhase !== 'bidding') {
                         setMyBidInput(String(myPlayer.bid));
                         bidInitializedRef.current = true;
                     }
                 }
+            }
             }
         }
 
@@ -502,10 +423,26 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
 
         if (data.is_paused !== undefined) setIsPaused(data.is_paused);
 
+        // Prevent reverting to an older state due to read replica lag
+        if (data.phase_started_at && phaseStartedAtRef.current) {
+            let dStr = data.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const fetchedStart = new Date(dStr);
+            if (fetchedStart.getTime() < phaseStartedAtRef.current.getTime()) {
+                return; // Ignore stale data
+            }
+        }
+
         // Sync timer
         if (data.phase_started_at && data.phase_duration_sec) {
             // Only update refs, don't trigger render unless needed
-            const newStart = new Date(data.phase_started_at);
+            let dStr = data.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const newStart = new Date(dStr);
             if (newStart.getTime() !== phaseStartedAtRef.current?.getTime()) {
                 console.log('[SPADES PLAYER] Syncing Timer:', data.phase_started_at);
                 phaseStartedAtRef.current = newStart;
@@ -514,213 +451,8 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
         }
     };
 
-    // --- HOST LOGIC (Dynamic Peer-to-Peer Host) ---
-    // The first player in the sorted list acts as the host to drive game state.
-    // ENABLED: Fallback for Headless operation.
-    const sortedPlayerIds = Object.keys(players).sort();
-    const isHost = sortedPlayerIds.length > 0 && sortedPlayerIds[0] === myId;
-    const isProcessingRef = useRef(false);
 
-    useEffect(() => {
-        // Prevent Host Logic if not host, idle, completed OR PAUSED
-        if (!isHost || phase === 'idle' || phase === 'completed' || isPaused) return;
-
-        // DEBUG: Confirm Host Status
-        if (timeLeft % 5 === 0 && timeLeft > 0) {
-            console.log(`[SPADES HOST] Host active (${myId}). Waiting for timer...`, timeLeft);
-        }
-
-        // CRITICAL FIX: Re-calculate remaining time to avoid Stale State Race Condition
-        let realTimeLeft = timeLeft;
-        if (phaseStartedAtRef.current && phaseDurationRef.current) {
-            const now = new Date();
-            const elapsed = Math.floor((now.getTime() - phaseStartedAtRef.current.getTime()) / 1000);
-            realTimeLeft = Math.max(0, phaseDurationRef.current - elapsed);
-        }
-
-        if (realTimeLeft === 0 && !isProcessingRef.current) {
-            isProcessingRef.current = true;
-            console.log('[SPADES HOST] Timer expired. Attempting to advance phase...');
-
-            const durationMap: Record<string, number> = {
-                'briefing': 60,
-                'shuffle': 30, // Added Interval
-                'hint': 10,    // Added duration
-                'bidding': 45, // Duration stays same
-                'reveal': 15,
-                'completed': 0
-            };
-
-            let nextPhase: SpadesPhase = 'idle';
-            let nextRound = round;
-            // Define temp variables at top scope
-            let tempRoundData: RoundData = { ...roundData };
-            let playersPayload = JSON.parse(JSON.stringify(players)); // Deep clone to prevent mutations
-
-            if (phase === 'briefing') {
-                nextPhase = 'shuffle';
-                playersPayload = assignPlayerGroups(playersPayload);
-                tempRoundData = {};
-            }
-            else if (phase === 'shuffle') {
-                nextPhase = 'hint';
-                // Identify groups
-                const groupIds = new Set<number>();
-                Object.values(playersPayload).forEach((p: any) => { if (p.groupId) groupIds.add(p.groupId); });
-
-                tempRoundData = {}; // Clear previous round data
-
-                groupIds.forEach(gid => {
-                    const targetCard = selectRandomCard(deckRef.current);
-                    if (targetCard) {
-                        tempRoundData[gid] = {
-                            target_card: targetCard,
-                            hint: buildHint(targetCard),
-                            winner_id: null,
-                            ties: []
-                        };
-                        // Remove card from deck so it doesn't appear in other groups or future rounds
-                        deckRef.current = removeCardFromDeck(deckRef.current, targetCard);
-                    }
-                });
-            }
-            else if (phase === 'hint') {
-                nextPhase = 'bidding';
-                // Reset Bids
-                Object.keys(playersPayload).forEach(pid => {
-                    playersPayload[pid].bid = null;
-                });
-            }
-            else if (phase === 'bidding') {
-                nextPhase = 'reveal';
-                // LOGIC: Resolve Bids PER GROUP
-                const groups: Record<number, string[]> = {};
-                Object.values(playersPayload).forEach((p: any) => {
-                    if (p.groupId) {
-                        if (!groups[p.groupId]) groups[p.groupId] = [];
-                        groups[p.groupId].push(p.id);
-                    }
-                });
-
-                Object.entries(groups).forEach(([gidStr, memberIds]) => {
-                    const gid = parseInt(gidStr);
-                    const groupData = tempRoundData[gid];
-                    if (!groupData || !groupData.target_card) return;
-
-                    let highestBid = 0; // Require > 0 to win
-                    let winners: string[] = [];
-
-                    memberIds.forEach(pid => {
-                        const bid = playersPayload[pid]?.bid || 0;
-                        if (bid > highestBid) { highestBid = bid; winners = [pid]; }
-                        else if (bid === highestBid && bid > 0) winners.push(pid);
-                    });
-
-                    let winnerId: string | null = null;
-                    let sortedWinners: string[] = [];
-
-                    if (winners.length >= 1) {
-                        // Handle Single Winner OR Tie (Random Pick)
-                        sortedWinners = winners.sort(); // Consistent sort
-                        const randomIndex = Math.floor(Math.random() * sortedWinners.length);
-                        winnerId = sortedWinners[randomIndex];
-
-                        // Award Card to Winner
-                        playersPayload = awardCard(playersPayload, winnerId, groupData.target_card);
-                        console.log(`[SPADES HOST] Awarded ${groupData.target_card.rank}${groupData.target_card.suit} to ${winnerId}. New points: ${playersPayload[winnerId].score}`);
-                    }
-
-                    // --- BID DEDUCTION RULE: Everyone pays their bid ---
-                    memberIds.forEach(pid => {
-                        if (playersPayload[pid]) {
-                            const bidAmount = playersPayload[pid].bid || 0;
-                            if (bidAmount > 0) {
-                                playersPayload[pid].score -= bidAmount;
-                                console.log(`[SPADES HOST] Deducted ${bidAmount} bid from ${pid}. Final Score: ${playersPayload[pid].score}`);
-                            }
-                        }
-                    });
-
-                    tempRoundData[gid] = {
-                        ...groupData,
-                        winner_id: winnerId,
-                        ties: winners.length > 1 ? sortedWinners : []
-                    };
-                });
-
-                // --- PERSISTENCE: Live Visa Points Update (Round-Based) ---
-                const persistSpadesHost = async () => {
-                    try {
-                        const playerIds = Object.values(playersPayload).map((p: any) => p.id).filter(id => id.length > 5);
-                        if (playerIds.length > 0) {
-                            const { data: usersData, error: usersError } = await supabase
-                                .from('users')
-                                .select('id, email')
-                                .in('id', playerIds);
-
-                            if (!usersError && usersData) {
-                                for (const userObj of usersData) {
-                                    const player = Object.values(playersPayload).find((p: any) => p.id === userObj.id);
-                                    if (player && userObj.email) {
-                                        await supabase
-                                            .from('profiles')
-                                            .update({ visa_points: (player as any).score })
-                                            .eq('email', userObj.email);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        console.error('[SPADES HOST] Persistence error:', err);
-                    }
-                };
-                persistSpadesHost();
-            }
-            else if (phase === 'reveal') {
-                if (round < 5) {
-                    nextPhase = 'shuffle';
-                    nextRound = round + 1;
-                    playersPayload = assignPlayerGroups(playersPayload);
-                    tempRoundData = {};
-                } else {
-                    nextPhase = 'completed';
-                }
-            }
-
-            // Auto-End Game Logic
-            if (round >= 5 && phase === 'reveal') {
-                nextPhase = 'completed';
-                playersPayload = applyGameFailurePenalty(playersPayload);
-            }
-
-            const nextDuration = durationMap[nextPhase] || 0;
-
-            // Prepare Payload
-            const updatePayload: any = {
-                phase: nextPhase,
-                current_round: nextPhase === 'completed' ? 5 : nextRound,
-                phase_started_at: new Date().toISOString(),
-                phase_duration_sec: nextDuration,
-                timer_display: `${Math.floor(nextDuration / 60)}:${String(nextDuration % 60).padStart(2, '0')}`,
-                round_data: tempRoundData,
-                players: playersPayload
-            };
-
-            supabase.from('spades_game_state')
-                .update(updatePayload)
-                .eq('id', 'spades_main')
-                .then(async ({ error }) => {
-                    if (error) {
-                        console.error('[SPADES HOST] Update failed:', error);
-                        setHostError(error.message);
-                    } else {
-                        console.log('[SPADES HOST] Successfully advanced to:', nextPhase);
-                        setHostError(null);
-                    }
-                    setTimeout(() => isProcessingRef.current = false, 5000);
-                });
-        }
-    }, [timeLeft, isHost, phase, round, players, roundData]);
+    // --- HOST LOGIC (Removed, now managed by SpadesGameMaster on Admin Dashboard) ---
 
 
     // --- Timer (Client-side countdown) ---
@@ -739,17 +471,18 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                 const remaining = Math.max(0, duration - elapsed);
                 setTimeLeft(remaining);
             }
-        }, 500);
+        }, 100); // 100ms for accurate visual sync
 
         return () => clearInterval(timer);
     }, [phase, isPaused]);
 
     // --- Bid Input Handling ---
     const handleBidChange = (value: string) => {
-        setMyBidInput(value);
+        let sanitizedValue = value.replace(/^0+(?=\d)/, '');
+        setMyBidInput(sanitizedValue);
         setBidError('');
 
-        const numericBid = parseInt(value);
+        const numericBid = parseInt(sanitizedValue);
         if (isNaN(numericBid) || numericBid < 0) {
             setProjectedScore(players[myId]?.score || 1000);
             return;
@@ -767,38 +500,62 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
         // Calculate projected score
         const projected = calculateProjectedScore(currentScore, numericBid);
         setProjectedScore(projected);
+    };
 
-        // Debounce database write
-        if (bidDebounceRef.current) {
-            clearTimeout(bidDebounceRef.current);
+    const submitBid = () => {
+        const numericBid = parseInt(myBidInput);
+        if (isNaN(numericBid) || numericBid < 0) {
+            setBidError('Invalid bid amount');
+            return;
+        }
+        
+        const currentScore = players[myId]?.score || 1000;
+        if (!validateBid(currentScore, numericBid)) {
+            setBidError('Bid exceeds your current score!');
+            return;
         }
 
-        bidDebounceRef.current = setTimeout(() => {
-            updateBidInDatabase(numericBid);
-        }, 300);
+        updateBidInDatabase(numericBid);
     };
 
     const updateBidInDatabase = async (bidAmount: number) => {
-        // Fetch latest players to avoid overwrite
-        const { data } = await supabase
-            .from('spades_game_state')
-            .select('players')
-            .eq('id', GAME_ID)
-            .single();
+        try {
+            const accessToken = await getAccessToken();
+            
+            // Fetch latest players to avoid overwrite
+            const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.${GAME_ID}&select=players`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'apikey': supabaseKey,
+                    'Accept': 'application/vnd.pgrst.object+json'
+                }
+            });
 
-        if (data?.players) {
-            const updatedPlayers = { ...data.players };
-            if (updatedPlayers[myId]) {
-                updatedPlayers[myId] = {
-                    ...updatedPlayers[myId],
-                    bid: bidAmount
-                };
+            if (!fetchRes.ok) return;
+            const data = await fetchRes.json();
 
-                await supabase
-                    .from('spades_game_state')
-                    .update({ players: updatedPlayers })
-                    .eq('id', GAME_ID);
+            if (data?.players) {
+                const updatedPlayers = { ...data.players };
+                if (updatedPlayers[myId]) {
+                    updatedPlayers[myId] = {
+                        ...updatedPlayers[myId],
+                        bid: bidAmount
+                    };
+
+                    await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.${GAME_ID}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`,
+                            'apikey': supabaseKey,
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({ players: updatedPlayers })
+                    });
+                }
             }
+        } catch (e) {
+            console.error('Error updating bid:', e);
         }
     };
 
@@ -813,7 +570,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
         if (hasStartedRef.current && phase === 'idle') {
             setIsTerminated(true);
             setTimeout(() => {
-                window.location.href = '/home';
+                window.location.href = '/home/card';
             }, 3000);
         }
     }, [phase]);
@@ -821,58 +578,17 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
     // --- Global Player ID Mapping (Admin Consistency) ---
     const [globalIdMap, setGlobalIdMap] = useState<Record<string, string>>({});
 
-    useEffect(() => {
-        const loadGlobalPlayers = async () => {
-            let allPlayers = PlayerCache.get();
+    const loadGlobalPlayers = async () => {
+        let allPlayers = PlayerCache.get();
 
-            if (!allPlayers) {
-                console.log('[SPADES] Global Player Cache miss, fetching...');
-                try {
-                    // Fetch from Firestore to match Admin Dashboard logic
-                    // We assume 'users' collection contains the master list
-                    // Dynamic import to avoid SSR/Initial load issues if needed
-                    const { collection, getDocs, query } = await import('firebase/firestore');
-                    const { db } = await import('../../firebase');
+        if (!allPlayers) {
+            console.log('[SPADES] Global Player Cache miss, fetching...');
+            try {
+                const { data, error } = await supabase.from('profiles').select('*');
+                if (error) throw error;
+                allPlayers = data || [];
 
-                    const q = query(collection(db, 'users')); // Fetch ALL, sort locally to match complex Admin logic
-                    const snapshot = await getDocs(q);
-                    allPlayers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-
-                    // MATCH ADMIN DASHBOARD SORT EXACTLY
-                    allPlayers.sort((a: any, b: any) => {
-                        const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
-                        const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
-
-                        if (isMasterA && !isMasterB) return -1;
-                        if (!isMasterA && isMasterB) return 1;
-
-                        const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
-                        const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
-                        return timeA - timeB;
-                    });
-
-                    // Cache the result
-                    PlayerCache.set(allPlayers);
-                } catch (err) {
-                    console.error('[SPADES] Failed to load global players for ID mapping', err);
-                }
-            }
-
-            if (allPlayers) {
-                // INJECTION FIX: Ensure 'admin' exists for ID consistency
-                // If the current user cannot see the 'admin' doc (due to permissions), IDs will be off by 1.
-                const hasAdmin = allPlayers.some((p: any) => p.username === 'admin' || p.role === 'admin');
-                if (!hasAdmin) {
-                    allPlayers.push({
-                        id: 'system_admin_placeholder',
-                        username: 'admin',
-                        role: 'admin',
-                        createdAt: { seconds: 0 } // Oldest possible time
-                    });
-                }
-
-                // FORCE SORT to match Admin Dashboard (Masters -> Join Date)
-                // This ensures IDs are consistent regardless of Cache order
+                // MATCH ADMIN DASHBOARD SORT EXACTLY
                 allPlayers.sort((a: any, b: any) => {
                     const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
                     const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
@@ -880,35 +596,89 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                     if (isMasterA && !isMasterB) return -1;
                     if (!isMasterA && isMasterB) return 1;
 
-                    // Robust Time Helper (Handle Timestamp, Date, String, or Null)
-                    const getTime = (p: any) => {
-                        if (typeof p.createdAt === 'number') return p.createdAt; // Handle injected 0
-                        if (!p.createdAt) return 0;
-                        if (p.createdAt.seconds) return p.createdAt.seconds * 1000;
-                        if (typeof p.createdAt.toMillis === 'function') return p.createdAt.toMillis();
-                        if (p.createdAt instanceof Date) return p.createdAt.getTime();
-                        if (typeof p.createdAt === 'string') {
-                            const d = new Date(p.createdAt);
-                            return isNaN(d.getTime()) ? 0 : d.getTime();
-                        }
-                        return 0;
-                    };
-
-                    return getTime(a) - getTime(b);
+                    const timeA = new Date(a.created_at || 0).getTime();
+                    const timeB = new Date(b.created_at || 0).getTime();
+                    return timeA - timeB;
                 });
 
-                const map: Record<string, string> = {};
-                allPlayers.forEach((p: any, idx: number) => {
-                    const pid = `#PLAYER_${String(idx + 1).padStart(3, '0')}`;
-                    if (p.id) map[p.id] = pid;
-                    if (p.uid) map[p.uid] = pid;
-                });
-                setGlobalIdMap(map);
+                // Cache the result
+                PlayerCache.set(allPlayers);
+            } catch (err) {
+                console.error('[SPADES] Failed to load global players for ID mapping', err);
             }
-        };
+        }
 
+        if (allPlayers) {
+            // INJECTION FIX: Ensure 'admin' exists for ID consistency
+            const hasAdmin = allPlayers.some((p: any) => p.username === 'admin' || p.role === 'admin');
+            if (!hasAdmin) {
+                allPlayers.push({
+                    id: 'system_admin_placeholder',
+                    username: 'admin',
+                    role: 'admin',
+                    createdAt: { seconds: 0 } // Oldest possible time
+                });
+            }
+
+            // FORCE SORT to match Admin Dashboard (Masters -> Join Date)
+            allPlayers.sort((a: any, b: any) => {
+                const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
+                const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+
+                if (isMasterA && !isMasterB) return -1;
+                if (!isMasterA && isMasterB) return 1;
+
+                // Robust Time Helper
+                const getTime = (p: any) => {
+                    if (typeof p.createdAt === 'number') return p.createdAt;
+                    if (!p.createdAt) return 0;
+                    if (p.createdAt.seconds) return p.createdAt.seconds * 1000;
+                    if (typeof p.createdAt.toMillis === 'function') return p.createdAt.toMillis();
+                    if (p.createdAt instanceof Date) return p.createdAt.getTime();
+                    if (typeof p.createdAt === 'string') {
+                        const d = new Date(p.createdAt);
+                        return isNaN(d.getTime()) ? 0 : d.getTime();
+                    }
+                    return 0;
+                };
+
+                return getTime(a) - getTime(b);
+            });
+
+            const map: Record<string, string> = {};
+            allPlayers.forEach((p: any, idx: number) => {
+                const rawName = p.username || p.displayName || `#PLAYER_${String(idx + 1).padStart(3, '0')}`;
+                let pid = rawName.toUpperCase();
+                if (/^PLAYER\d+$/.test(pid)) {
+                    pid = pid.replace('PLAYER', 'PLAYER ');
+                }
+                if (p.id) map[p.id] = pid;
+                if (p.uid) map[p.uid] = pid;
+            });
+            setGlobalIdMap(map);
+        }
+    };
+
+    useEffect(() => {
         loadGlobalPlayers();
     }, []);
+
+    // Reload players on mount AND whenever the game restarts (briefing phase)
+    useEffect(() => {
+        if (phase === 'briefing') {
+            PlayerCache.clear(); // Force bypass of memory cache
+            loadGlobalPlayers();
+        }
+    }, [phase]);
+
+    // Force reload if a player is missing during an active game (fixes "stuck on loading" bug)
+    useEffect(() => {
+        if (!players[myId] && phase !== 'idle' && phase !== 'completed') {
+            console.log('[SPADES PLAYER] Player missing from cache! Forcing reload...');
+            PlayerCache.clear();
+            loadGlobalPlayers();
+        }
+    }, [players, myId, phase]);
 
     // --- Player ID Mapping (Memoized for Render) ---
     const playerIdMap = React.useMemo(() => {
@@ -919,7 +689,13 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
             if (globalIdMap[uid]) {
                 newMap[uid] = globalIdMap[uid];
             } else {
-                newMap[uid] = `#PLAYER_${String(idx + 1).padStart(3, '0')}`;
+                const p = players[uid];
+                const rawName = p?.username || `#PLAYER_${String(idx + 1).padStart(3, '0')}`;
+                let pid = String(rawName).toUpperCase();
+                if (/^PLAYER\d+$/.test(pid)) {
+                    pid = pid.replace('PLAYER', 'PLAYER ');
+                }
+                newMap[uid] = pid;
             }
         });
         return newMap;
@@ -1335,7 +1111,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                     <div className="flex flex-col items-center sm:items-end bg-blue-500/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded border border-blue-500/20">
                         <p className="text-[7px] sm:text-[9px] text-blue-400/70 font-mono uppercase tracking-[0.2em]">BALANCE</p>
                         <p className="text-sm sm:text-xl font-black font-oswald text-blue-400">
-                            {myPlayer?.score || 1000}
+                            {myPlayer?.score ?? 0}
                         </p>
                     </div>
                 </div>
@@ -1422,8 +1198,11 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                                     <h3 className="text-white font-bold flex items-center gap-2 mb-2">
                                         <ShieldCheck size={16} /> OBJECTIVE
                                     </h3>
-                                    <p>
+                                    <p className="mb-2">
                                         Win cards through strategic bidding. You have 5 rounds to collect cards and maximize your score.
+                                    </p>
+                                    <p className="text-blue-300">
+                                        <strong>NOTE:</strong> In Rounds 2 and 4, the actual card will be revealed during the target analysis phase.
                                     </p>
                                 </div>
                                 <div className="p-4 bg-red-900/10 border-l-2 border-red-500">
@@ -1489,14 +1268,23 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                                 <label className="block text-xs font-mono text-slate-500 mb-4 uppercase tracking-widest">
                                     INPUT WAGER PARAMETER
                                 </label>
-                                <input
-                                    type="number"
-                                    autoFocus
-                                    placeholder="0000"
-                                    value={myBidInput}
-                                    onChange={(e) => handleBidChange(e.target.value)}
-                                    className="w-full bg-transparent border-b-2 border-slate-700 text-5xl font-black font-oswald text-center text-white focus:border-blue-500 focus:outline-none transition-colors py-4 mb-4"
-                                />
+                                <div className="flex gap-2 w-full mb-4">
+                                    <input
+                                        type="number"
+                                        autoFocus
+                                        placeholder="0000"
+                                        value={myBidInput}
+                                        onChange={(e) => handleBidChange(e.target.value)}
+                                        className="w-full bg-transparent border-b-2 border-slate-700 text-5xl font-black font-oswald text-center text-white focus:border-blue-500 focus:outline-none transition-colors py-4"
+                                    />
+                                    <button 
+                                        onClick={submitBid}
+                                        className={`px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border ${myPlayer?.bid === parseInt(myBidInput) ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'} `}
+                                    >
+                                        <span>{myPlayer?.bid === parseInt(myBidInput) ? 'LOCKED' : 'SUBMIT'}</span>
+                                        <span className="text-[10px] opacity-70">WAGER</span>
+                                    </button>
+                                </div>
                                 {bidError && (
                                     <div className="mb-4 px-3 py-2 bg-red-900/20 border border-red-500/30 text-red-400 text-xs rounded text-center">
                                         {bidError}
@@ -1611,7 +1399,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
 
                             <div className="mt-4 w-full max-w-xs">
                                 <button
-                                    onClick={() => window.location.href = '/home'}
+                                    onClick={() => window.location.href = '/home/card'}
                                     className="group relative w-full h-14 bg-green-600 hover:bg-green-500 border border-green-400/50 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
                                 >
                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
@@ -1736,7 +1524,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user }) => {
                             </p>
                             <div className="pt-4">
                                 <button
-                                    onClick={() => window.location.href = '/home'}
+                                    onClick={() => window.location.href = '/home/card'}
                                     className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all uppercase tracking-wider"
                                 >
                                     Return to Command

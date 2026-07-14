@@ -1,5 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../../supabaseClient';
+import { supabase as originalSupabase, supabaseUrl, supabaseKey } from '../../supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        storageKey: 'borderland-fresh-token-v2',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        lock: async (_name: string, ...args: any[]) => {
+            const acquire = args.pop();
+            if (typeof acquire === 'function') {
+                return await acquire();
+            }
+        }
+    }
+});
 import {
     type HeartsGameState,
     type HeartsPhase,
@@ -19,6 +35,7 @@ interface HeartsGameMasterProps {
         role: string;
     };
     onComplete?: () => void;
+    disableEngine?: boolean;
 }
 
 const PHASE_TIMINGS: Record<HeartsPhase, number> = {
@@ -33,7 +50,7 @@ const PHASE_TIMINGS: Record<HeartsPhase, number> = {
 
 const MAX_ROUNDS = 5;
 
-export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComplete }) => {
+export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComplete, disableEngine }) => {
     // --- State Initialization ---
     const [gameState, setGameState] = useState<HeartsGameState>({
         id: 'hearts_main',
@@ -79,6 +96,21 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
     useEffect(() => { phaseRef.current = phase; }, [phase]);
     useEffect(() => { roundRef.current = round; }, [round]);
 
+    // Reset local refs and states when game is reset (system_start === false)
+    useEffect(() => {
+        if (gameState && !gameState.system_start) {
+            console.log('[HEARTS MASTER] Resetting local refs and states to idle...');
+            setPhase('idle');
+            phaseRef.current = 'idle';
+            setRound(0);
+            roundRef.current = 0;
+            phaseStartedAtRef.current = null;
+            phaseDurationRef.current = 0;
+            isProcessingRef.current = false;
+            setIsPaused(false);
+        }
+    }, [gameState?.system_start]);
+
 
     // --- Supabase Subscription ---
     useEffect(() => {
@@ -109,7 +141,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
         };
         fetchInitial();
 
-        const channel = supabase.channel('hearts_master_sync')
+        const channel = originalSupabase.channel('hearts_master_sync')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'hearts_game_state', filter: 'id=eq.hearts_main' }, (payload) => {
                 const newData = payload.new as Partial<HeartsGameState>;
                 setGameState(prevState => ({ ...prevState, ...newData }));
@@ -121,6 +153,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 // Sync local tracking if updated remotely
                 if (newData.phase !== undefined && newData.phase !== phaseRef.current) {
                     setPhase(newData.phase);
+                    phaseRef.current = newData.phase;
                     // Update timer refs on phase change from server
                     if (newData.phase_started_at) {
                         phaseStartedAtRef.current = newData.phase_started_at; // Fix: Assign string
@@ -133,7 +166,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             })
             .subscribe();
 
-        return () => { supabase.removeChannel(channel); };
+        return () => { originalSupabase.removeChannel(channel); };
     }, []);
 
     // --- Auto-Start / Recovery ---
@@ -246,10 +279,8 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
     };
 
     const transitionToPhase = async (nextPhase: HeartsPhase, nextRound: number, endReason?: 'survival' | 'master_defeat' | 'master_victory' | 'max_rounds', extraUpdates: Partial<HeartsGameState> = {}) => {
-        // --- AUTHORITATIVE FETCH ---
-        // Crucial to avoid stale local state after scoring/resets
-        const { data: authoritativeState } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
-        const currentState = authoritativeState || gameStateRef.current || gameState;
+        // Use latest local state to avoid database query overhead and potential hangs
+        const currentState = gameStateRef.current || gameState;
 
         if (!currentState) {
             console.error('[HEARTS MASTER] No GameState available for transition!');
@@ -260,12 +291,10 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
         console.log(`[HEARTS MASTER] Transitioning to ${nextPhase} (Round ${nextRound})`);
 
-        const now = new Date();
         const duration = PHASE_TIMINGS[nextPhase];
         let updates: Partial<HeartsGameState> = {
             phase: nextPhase,
             current_round: nextRound,
-            phase_started_at: now.toISOString(),
             phase_duration_sec: duration,
             timer_display: `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`,
             ...extraUpdates // Merge remote updates
@@ -331,7 +360,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
             // 1. Fetch User Emails
             const { data: userData } = await supabase
-                .from('users')
+                .from('profiles')
                 .select('id, email')
                 .in('id', activePlayers.map((p: HeartsPlayer) => p.id));
 
@@ -398,13 +427,14 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             });
         }
         else if (nextPhase === 'shuffle') {
-            // CLEAR CHAT for NEW ROUNDS
-            console.log(`[HEARTS MASTER] Clearing chat history for start of Round ${nextRound}...`);
-            await supabase.from('messages').delete().eq('game_id', currentSessionId);
+            // CLEAR CHAT, GUESSES & SYNC ELIMINATED IN PARALLEL
+            const [_, eliminatedRes, __] = await Promise.all([
+                supabase.from('messages').delete().eq('game_id', currentSessionId),
+                supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId),
+                supabase.from('hearts_guesses').delete().eq('game_id', currentSessionId)
+            ]);
 
-            // Robust Check: Sync with hearts_eliminated table
-            const { data: eliminatedData } = await supabase.from('hearts_eliminated').select('player_id').eq('game_id', currentSessionId);
-            const eliminatedIds = eliminatedData ? eliminatedData.map(e => e.player_id) : [];
+            const eliminatedIds = eliminatedRes.data ? eliminatedRes.data.map((e: any) => e.player_id) : [];
 
             let activePlayers = currentState.participants.filter((p: HeartsPlayer) =>
                 p.status !== 'eliminated' &&
@@ -434,10 +464,6 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 groupId: undefined,
                 cards_visible: undefined
             }));
-
-            // CLEANUP: Clear the persistent guesses table for this round/game to prevent stale evaluations
-            console.log(`[HEARTS MASTER] Clearing stale guesses from database for ${currentSessionId}...`);
-            await supabase.from('hearts_guesses').delete().eq('game_id', currentSessionId);
 
             updates.guesses = {}; // Clear local guesses state too
         }
@@ -493,14 +519,8 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             updates.participants = [...updatedActive, ...updatedEliminated];
         }
         else if (nextPhase === 'result') {
-            // Fetch absolute latest state matching DB to avoid React state lag issues (Cards/Participants)
-            console.log(`[HEARTS MASTER] Fetching authoritative state for Round ${currentState.current_round} results...`);
-            const { data: freshState, error: stateError } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
-
-            if (stateError || !freshState) {
-                console.error('[HEARTS MASTER] CRITICAL: Failed to fetch fresh state for scoring!', stateError);
-                return;
-            }
+            // Use latest local state to avoid database query overhead and potential hangs
+            const freshState = gameStateRef.current || gameState;
 
             const targetRound = freshState.current_round || 1;
 
@@ -558,77 +578,53 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 }
             });
 
-            // Persist Eliminations to internal table
-            if (newEliminated.length > 0) {
-                await supabase.from('hearts_eliminated').upsert(newEliminated.map(pid => ({ game_id: 'hearts_main', player_id: pid })));
-            }
+            // Run database updates in parallel/background to prevent blocking the phase transition
+            (async () => {
+                try {
+                    // 1. Persist Eliminations
+                    if (newEliminated.length > 0) {
+                        await supabase.from('hearts_eliminated').upsert(newEliminated.map(pid => ({ game_id: 'hearts_main', player_id: pid })));
+                    }
 
-            // --- UNIVERSAL PROFILE SCORE PERSISTENCE (ABSOLUTE PASTE) ---
-            console.log(`[HEARTS STATS] Authoritatively syncing scores for ALL ${updatedPlayers.length} participants...`);
+                    // 2. Profile Score Persistence
+                    const playerIds = updatedPlayers.map(p => p.id);
+                    if (playerIds.length > 0) {
+                        const { data: usersData } = await supabase
+                            .from('profiles')
+                            .select('id, email')
+                            .in('id', playerIds);
 
-            try {
-                const playerIds = updatedPlayers.map(p => p.id);
-                if (playerIds.length > 0) {
-                    // 1. Fetch Users (ID -> Email) for ALL players to ensure fresh data
-                    const { data: usersData, error: usersError } = await supabase
-                        .from('users')
-                        .select('id, email')
-                        .in('id', playerIds);
+                        if (usersData) {
+                            const emailScoreMap: Record<string, number> = {};
+                            const internalEmailMap: Record<string, string> = {};
+                            usersData.forEach((user: { id: string, email: string }) => {
+                                if (user.email) internalEmailMap[user.id] = user.email;
+                                const player = updatedPlayers.find(p => p.id === user.id);
+                                if (player && user.email) {
+                                    emailScoreMap[user.email] = player.score;
+                                }
+                            });
 
-                    if (usersError || !usersData) {
-                        console.error('[HEARTS STATS] Failed to fetch user emails:', usersError);
-                    } else {
-                        // 2. Create Map: Email -> Score
-                        const emailScoreMap: Record<string, number> = {};
-                        const internalEmailMap: Record<string, string> = {}; // Local scope map for ID->Email
-                        usersData.forEach((user: { id: string, email: string }) => {
-                            if (user.email) internalEmailMap[user.id] = user.email;
-
-                            const player = updatedPlayers.find(p => p.id === user.id);
-                            if (player && user.email) {
-                                emailScoreMap[user.email] = player.score;
-                            }
-                        });
-
-                        // 3. Update profiles by email
-                        for (const [email, score] of Object.entries(emailScoreMap)) {
-                            // Validate if eliminated THIS ROUND
-                            // Reverse lookup to find player ID for this email
-                            const associatedPlayer = updatedPlayers.find(p =>
-                                (p.email === email) || (internalEmailMap[p.id] === email)
-                            );
-
-                            let updatePayload: any = { visa_points: score };
-
-                            // ID check for elimination
-                            if (associatedPlayer && newEliminated.includes(associatedPlayer.id)) {
-                                console.log(`[HEARTS STATS] Player ${associatedPlayer.id} eliminated this round. Incrementing losses...`);
-                                const { data: currentProfile } = await supabase.from('profiles').select('losses').ilike('email', email).single();
-                                const newLosses = (currentProfile?.losses || 0) + 1;
-                                updatePayload.losses = newLosses;
-                            }
-
-                            const { error: pError } = await supabase
-                                .from('profiles')
-                                .update(updatePayload)
-                                .ilike('email', email);
-
-                            if (pError) console.error(`[HEARTS STATS] Failed sync for ${email}:`, pError);
-                            else console.log(`[HEARTS STATS] Successfully synced ${email} to ${score} (Losses updated: ${!!updatePayload.losses})`);
+                            // Run updates in parallel to speed up even more!
+                            const profileUpdates = Object.entries(emailScoreMap).map(async ([email, score]) => {
+                                const associatedPlayer = updatedPlayers.find(p =>
+                                    (p.email === email) || (internalEmailMap[p.id] === email)
+                                );
+                                let updatePayload: any = { visa_points: score };
+                                if (associatedPlayer && newEliminated.includes(associatedPlayer.id)) {
+                                    const { data: currentProfile } = await supabase.from('profiles').select('losses').ilike('email', email).single();
+                                    updatePayload.losses = (currentProfile?.losses || 0) + 1;
+                                }
+                                return supabase.from('profiles').update(updatePayload).ilike('email', email);
+                            });
+                            await Promise.all(profileUpdates);
                         }
                     }
-                }
-            } catch (e) {
-                console.error(`[HEARTS STATS] Global Persistence error:`, e);
-            }
 
-            const allEliminatedIds = updatedPlayers.map(p => p.status === 'eliminated' ? p.id : null).filter(Boolean) as string[];
-            // --- PERSIST ROUND SCORES TO HISTORY (Clubs Style) ---
-            if (currentSessionId) {
-                console.log(`[HEARTS STATS] Archiving Round ${targetRound} scores to history for ${currentSessionId}...`);
-                for (const p of updatedPlayers) {
-                    if (p.email) {
-                        try {
+                    // 3. Persist Round Scores to History
+                    if (currentSessionId) {
+                        const historyUpdates = updatedPlayers.map(async (p) => {
+                            if (!p.email) return;
                             const roundCol = `round_${targetRound}`;
                             const { data: existingPoints } = await supabase
                                 .from('hearts_round_points')
@@ -637,48 +633,46 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                                 .eq('player_email', p.email)
                                 .maybeSingle();
 
-                            // Correct Delta: For R1, it should be p.score - p.start_score
                             const roundScoreDelta = targetRound === 1
                                 ? ((Number(p.score) || 0) - (Number(p.start_score) || Number(p.score) || 0))
                                 : ((Number(p.score) || 0) - (Number(p.last_total_score) || 0));
 
                             if (existingPoints) {
-                                await supabase.from('hearts_round_points').update({
+                                return supabase.from('hearts_round_points').update({
                                     [roundCol]: roundScoreDelta,
                                     total_points: p.score,
                                     updated_at: new Date().toISOString()
                                 }).eq('id', existingPoints.id);
                             } else {
-                                await supabase.from('hearts_round_points').insert({
+                                return supabase.from('hearts_round_points').insert({
                                     game_id: currentSessionId,
                                     player_email: p.email,
-                                    [roundCol]: p.score, // Round 1 is total bits
+                                    [roundCol]: p.score,
                                     total_points: p.score
                                 });
                             }
-                        } catch (err) {
-                            console.error(`[HEARTS STATS] History archive failed for ${p.email}:`, err);
-                        }
+                        });
+                        await Promise.all(historyUpdates);
+
+                        // Update session progress
+                        await supabase.from('hearts_game_sessions').update({
+                            current_round: targetRound,
+                            saved_at: new Date().toISOString()
+                        }).eq('id', currentSessionId);
                     }
+                } catch (err) {
+                    console.error('[HEARTS MASTER BG SYNC ERROR]:', err);
                 }
+            })();
 
-                // Update session progress
-                await supabase.from('hearts_game_sessions').update({
-                    current_round: targetRound,
-                    saved_at: new Date().toISOString()
-                }).eq('id', currentSessionId);
-            }
-
+            const allEliminatedIds = updatedPlayers.map(p => p.status === 'eliminated' ? p.id : null).filter(Boolean) as string[];
             updates.participants = updatedPlayers.map(p => ({ ...p, last_total_score: p.score }));
             updates.winners = winners;
             updates.eliminated = allEliminatedIds;
         }
         else if (nextPhase === 'end') {
-            // FIX: Fetch authoritative state to ensure we have the +300 from the recently correctly processed 'result' phase.
-            // This prevents overwriting the +300 if 'currentState' is slightly stale.
-            const { data: latestStateForEnd } = await supabase.from('hearts_game_state').select('participants').eq('id', 'hearts_main').single();
-            // Default to current state if fetch fails, but prefer DB state
-            const baseParticipants = latestStateForEnd?.participants || currentState.participants || [];
+            // Use latest local state to avoid database query overhead and potential hangs
+            const baseParticipants = gameStateRef.current?.participants || currentState.participants || [];
 
             let finalParticipants = [...baseParticipants];
 
@@ -720,9 +714,9 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                     const playerIds = finalParticipants.map(p => p.id);
                     if (playerIds.length === 0) return;
 
-                    // 1. Fetch Users (ID -> Email)
+                    // 1. Fetch Profiles (ID -> Email)
                     const { data: usersData } = await supabase
-                        .from('users')
+                        .from('profiles')
                         .select('id, email')
                         .in('id', playerIds);
 
@@ -731,12 +725,13 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                         usersData.forEach(u => { if (u.email) idEmailMap[u.id] = u.email; });
                     }
 
-                    for (const p of finalParticipants) {
+                    // Run final updates in parallel!
+                    const finalUpdates = finalParticipants.map(async (p) => {
                         try {
                             const userEmail = p.email || idEmailMap[p.id];
                             if (!userEmail) {
                                 console.warn(`[HEARTS MASTER] No email for ${p.id}. Final sync skipped.`);
-                                continue;
+                                return;
                             }
 
                             const isWin = p.status !== 'eliminated';
@@ -747,28 +742,6 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                                 .select('wins, losses')
                                 .ilike('email', userEmail)
                                 .single();
-
-                            // LOGIC CHANGE: Only increment loss if NOT ALEADY ELIMINATED
-                            // If they were eliminated in a previous round (or this round), their loss was ALREADY counted in 'result' phase logic?
-                            // Wait, 'result' phase logic covers eliminations during rounds.
-                            // 'end' phase covers:
-                            // 1. Master Defeat -> Survivors get +300 (WIN). Eliminated stay eliminated (LOSS already counted).
-                            // 2. Master Victory -> Everyone else gets penalty (-100) and is 'eliminated' (if not already).
-
-                            // So we need to distinct between:
-                            // - Players who were ALREADY eliminated before this 'end' phase transition. (Loss already counted)
-                            // - Players who are being elimination/penalized NOW (at game end). (Loss needs counting)
-
-                            // In 'end' phase block above (lines 666+), we updated `finalParticipants`.
-                            // But we didn't track *who* changed status to eliminated *just now*.
-
-                            // Let's rely on the `status` in `currentState.participants` (before update) vs `p.status` (after update)?
-                            // Or simpler: Only count loss/win calculated here.
-
-                            // If p.status === 'eliminated':
-                            // Was it eliminated *previously*? 
-                            // Check `eliminated` array in `currentState`.
-                            // If `currentState.eliminated.includes(p.id)`, they were already dead. DO NOT increment loss again.
 
                             const wasAlreadyEliminated = currentState.eliminated?.includes(p.id) || currentState.participants.find((cp: HeartsPlayer) => cp.id === p.id)?.status === 'eliminated';
 
@@ -787,7 +760,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                                 }
                             }
 
-                            const { error: updateError } = await supabase
+                            return supabase
                                 .from('profiles')
                                 .update({
                                     visa_points: p.score,
@@ -796,26 +769,33 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                                 })
                                 .ilike('email', userEmail);
 
-                            if (updateError) console.error(`[HEARTS MASTER] Final persistence error for ${userEmail}:`, updateError);
-                            else console.log(`[HEARTS MASTER] Final persistence successful for ${userEmail} (Total: ${p.score})`);
-
                         } catch (err) {
                             console.error(`[HEARTS MASTER] Error processing final player ${p.id}:`, err);
                         }
-                    }
+                    });
+
+                    await Promise.all(finalUpdates);
                 } catch (err) {
                     console.error('[HEARTS MASTER] Global Final Persistence Failed:', err);
                 }
             };
 
-            await persistFinalResults();
-            if (onComplete) onComplete();
+            // Run in background / concurrently
+            persistFinalResults()
+                .catch(err => console.error('[HEARTS MASTER FINAL PERSIST BG ERROR]', err))
+                .finally(() => {
+                    if (onComplete) onComplete();
+                });
         }
+
+        const now = new Date();
+        updates.phase_started_at = now.toISOString();
 
         console.log(`[HEARTS MASTER] FINAL UPDATE PAYLOAD for ${nextPhase}:`, JSON.stringify(updates));
         await updateState(updates);
 
         setPhase(nextPhase);
+        phaseRef.current = nextPhase;
         setRound(nextRound);
         phaseStartedAtRef.current = now.toISOString();
         phaseDurationRef.current = duration;
@@ -823,20 +803,21 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
     // --- Timer Loop ---
     useEffect(() => {
-        if (!gameState.system_start || phase === 'end') return;
+        if (disableEngine || !gameState.system_start || phase === 'end') return;
 
         const timer = setInterval(() => {
-            if (gameState.is_paused || isPaused) return; // Respect pause state
+            const currentGameState = gameStateRef.current || gameState;
+            if (currentGameState?.is_paused || isPaused) return; // Respect pause state
 
-            const startedAt = phaseStartedAtRef.current ? new Date(phaseStartedAtRef.current) : new Date();
-            const duration = phaseDurationRef.current;
+            const startedAt = currentGameState?.phase_started_at ? new Date(currentGameState.phase_started_at) : new Date();
+            const duration = currentGameState?.phase_duration_sec || 0;
             const now = new Date();
             const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
             const remaining = Math.max(0, duration - elapsed);
-
-            // setTimeLeft(remaining);
+            console.log('[HEARTS MASTER TIMER TICK] phase:', phaseRef.current, 'remaining:', remaining, 'isProcessing:', isProcessingRef.current, 'system_start:', gameState.system_start);
 
             if (remaining === 0 && !isProcessingRef.current && gameState.system_start) {
+                console.log('[HEARTS MASTER TIMER TRIGGERED] Transitioning from:', phaseRef.current);
                 isProcessingRef.current = true;
 
                 let next: HeartsPhase = 'idle';
@@ -939,7 +920,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [phase, gameState.system_start, gameState.is_paused]);
+    }, [phase, gameState.system_start, gameState.is_paused, isPaused]);
 
 
     // --- Handlers ---
@@ -975,9 +956,9 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 </button>
             </div>
 
-            <div className="flex-1 flex relative">
+            <div className="flex-1 flex overflow-hidden relative">
                 {/* Main Game View */}
-                <div className="flex-1 relative">
+                <div className="flex-1 overflow-hidden relative">
                     <HeartsGame user={user} />
                 </div>
             </div>

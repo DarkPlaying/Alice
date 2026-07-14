@@ -1,9 +1,6 @@
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, getDocs } from 'firebase/firestore';
-import { db, auth } from '../../firebase';
-import { supabase } from '../../supabaseClient';
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
 
 import { Timer, FileText } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -16,6 +13,7 @@ interface ClubsGameMasterProps {
     onFail: (score: number) => void;
     user?: any;
     onProfileClick?: () => void;
+    isEngine?: boolean;
 }
 
 interface Card {
@@ -35,7 +33,7 @@ const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q']; // 
 const generateRandomDeck = () => {
     // Set 1: Clubs A-Q
     const set1: Card[] = RANKS.map(rank => ({
-        id: `clubs - ${rank} -1`,
+        id: `clubs-${rank}-1`,
         suit: 'clubs',
         rank,
         playerRole: null,
@@ -46,7 +44,7 @@ const generateRandomDeck = () => {
 
     // Set 2: Clubs A-Q
     const set2: Card[] = RANKS.map(rank => ({
-        id: `clubs - ${rank} -2`,
+        id: `clubs-${rank}-2`,
         suit: 'clubs',
         rank,
         playerRole: null,
@@ -71,8 +69,10 @@ const generateRandomDeck = () => {
     return [...shuffledSet1, ...shuffledSet2];
 };
 
-export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
+export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGameMasterProps) => {
     const [gameState, setGameState] = useState<'idle' | 'briefing' | 'setup' | 'setup_phase1' | 'selection_reveal' | 'playing' | 'card_reveal' | 'round_reveal' | 'won' | 'lost'>('idle');
+    const gameStateRef = useRef(gameState);
+    useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
     const [round, setRound] = useState(1);
     const [timeLeft, setTimeLeft] = useState(0);
     const [playerScore, setPlayerScore] = useState(0);
@@ -83,6 +83,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     const [topPlayerScore, setTopPlayerScore] = useState(0);
     const [topPlayerId, setTopPlayerId] = useState<string | null>(null);
     const [topMasterScore, setTopMasterScore] = useState(0);
+    const [topMasterId, setTopMasterId] = useState<string | null>(null);
 
     // Points Table State
     const [showPointsTable, setShowPointsTable] = useState(false);
@@ -103,7 +104,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const { error } = await supabase.from('messages').insert({
                 game_id: 'clubs_king',
                 user_name: senderName,
-                user_id: user?.id,
+                user_id: user?.id as string,
                 content: tempContent,
                 is_system: false,
                 channel: 'master'
@@ -128,12 +129,43 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     const [phase1Selections, setPhase1Selections] = useState<Record<string, any>>({});
     const [showResetOverlay, setShowResetOverlay] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
+    const [roundResults, setRoundResults] = useState<any[]>([]);
+
+    // Phase Notification Banner
+    const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (gameState === 'setup_phase1') {
+            setPhaseBanner('ANGEL & DEMON SELECTION');
+            const t = setTimeout(() => setPhaseBanner(null), 3000);
+            return () => clearTimeout(t);
+        } else if (gameState === 'playing') {
+            setPhaseBanner('VOTING PHASE');
+            const t = setTimeout(() => setPhaseBanner(null), 3000);
+            return () => clearTimeout(t);
+        } else {
+            setPhaseBanner(null);
+        }
+    }, [gameState]);
+
+    useEffect(() => {
+        if (gameState === 'setup_phase1' || gameState === 'playing' || gameState === 'briefing') {
+            console.log(`[CLUBS MASTER] Clearing local votes for phase: ${gameState}`);
+            setPlayersVotes({});
+            setMasterVotes({});
+            playersVotesRef.current = {};
+            masterVotesRef.current = {};
+        }
+    }, [round, gameState]);
+
 
     const MAX_ROUNDS = 6; // 6 Rounds * 4 Cards/Round = 24 Cards
     const channelRef = useRef<RealtimeChannel | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     const isProcessing = useRef(false);
+    const gameEnded = useRef(false);
+    const lastProcessedPhase = useRef<{ gameState: string, round: number } | null>(null);
 
     // Score Refs (for Timer access)
     const playerScoreRef = useRef(playerScore);
@@ -146,21 +178,62 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     playersVotesRef.current = playersVotes;
     const masterVotesRef = useRef<Record<string, string[]>>({});
     masterVotesRef.current = masterVotes;
+    const phase1SelectionsRef = useRef<Record<string, any>>({});
+    phase1SelectionsRef.current = phase1Selections;
+
+    const [allowedPlayers, setAllowedPlayers] = useState<string[]>([]);
+    const [masterUids, setMasterUids] = useState<Set<string>>(new Set());
+    const masterUidsRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        masterUidsRef.current = masterUids;
+    }, [masterUids]);
 
     // Helper: Identify if a UID belongs to a Master
-    const isMasterUid = (uid: string) => {
+    const isMasterUid = (uid: string, allowedPlayersList?: string[]) => {
         if (!uid) return false;
+        if (masterUidsRef.current.has(uid)) return true;
         const upper = uid.toUpperCase();
-        return upper === 'MASTER' ||
+        if (
+            upper === 'MASTER' ||
             upper.includes('MASTER') ||
             upper === 'SYSTEM_ARCHITECT' ||
             uid === user?.id ||
-            uid === user?.uid ||
-            uid === auth.currentUser?.uid;
+            uid === user?.uid
+        ) {
+            return true;
+        }
+        const listToUse = allowedPlayersList || allowedPlayers;
+        if (listToUse && listToUse.length > 0) {
+            return !listToUse.includes(uid);
+        }
+        return false;
     };
 
     // Player ID Mapping (UID → #PLAYER_XXX)
     const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
+
+    // Fetch names for Top Player and Top Master dynamically
+    useEffect(() => {
+        const uidsToFetch: string[] = [];
+        if (topPlayerId && !playerIdMap[topPlayerId] && topPlayerId !== 'TBD' && topPlayerId !== 'MASTER') uidsToFetch.push(topPlayerId);
+        if (topMasterId && !playerIdMap[topMasterId] && topMasterId !== 'TBD' && topMasterId !== 'MASTER') uidsToFetch.push(topMasterId);
+        
+        if (uidsToFetch.length > 0) {
+            const fetchProfiles = async () => {
+                const { data } = await supabase.from('profiles').select('id, username').in('id', uidsToFetch);
+                if (data) {
+                    setPlayerIdMap(prev => {
+                        const next = { ...prev };
+                        data.forEach(p => {
+                            if (p.id && p.username) next[p.id] = p.username.toUpperCase();
+                        });
+                        return next;
+                    });
+                }
+            };
+            fetchProfiles();
+        }
+    }, [topPlayerId, topMasterId, playerIdMap]);
 
     // Hint Cards State
     const [hintCards, setHintCards] = useState<string[]>([]);
@@ -197,11 +270,9 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     useEffect(() => {
         const fetchPlayerIds = async () => {
             try {
-                const querySnapshot = await getDocs(collection(db, 'users'));
-                const users = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
+                const { data: users, error } = await supabase.from('profiles').select('*');
+                if (error) throw error;
+                if (!users) return;
 
                 // Sort users: Admins first, then by Join Date
                 users.sort((a: any, b: any) => {
@@ -217,11 +288,21 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 });
 
                 const mapping: Record<string, string> = {};
-                users.forEach((user: any, index) => {
+                const mUids = new Set<string>();
+                users.forEach((user: any, index: number) => {
+                    const isM = user.role === 'master' || user.role === 'admin' || user.username === 'admin' || user.username?.toLowerCase().includes('architect');
+                    if (isM) {
+                        if (user.id) mUids.add(String(user.id));
+                        if (user.uid) mUids.add(String(user.uid));
+                    }
                     const pid = `#PLAYER_${(index + 1).toString().padStart(3, '0')} `;
-                    if (user.id) mapping[user.id] = pid;
-                    if (user.username) mapping[user.username] = pid;
+                    const displayName = user.username || user.email?.split('@')[0] || pid;
+                    if (user.id) mapping[user.id] = displayName;
+                    if (user.uid) mapping[user.uid] = displayName;
+                    if (user.username) mapping[user.username] = displayName;
                 });
+                console.log('[CLUBS MASTER] First UID sync - Master UIDs:', Array.from(mUids));
+                setMasterUids(mUids);
 
                 console.log('[CLUBS MASTER] Player ID Mapping Synchronized:', mapping);
                 setPlayerIdMap(mapping);
@@ -239,8 +320,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     useEffect(() => {
         const checkIntegrity = async () => {
-            const user = auth.currentUser;
-            if (!user?.uid) return;
+            if (!user?.id) return;
 
             // Only run if we haven't corrected yet
             if (!hasCorrectedScoreRef.current) {
@@ -313,10 +393,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             // Update All Scores for Points Table
 
 
-            // const myUid = user?.id || ''; // Unused variable removed
+            // const myUid = (user?.id as string) || ''; // Unused variable removed
 
             // Update My Score (as Master)
-            const myUId = user?.uid || user?.id || auth.currentUser?.uid;
+            const myUId = user?.uid || user?.id || user?.id;
             if (myUId && currentScores[myUId] !== undefined) {
                 setMyScore(Number(currentScores[myUId]));
             } else {
@@ -327,9 +407,13 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             let maxPScore = -Infinity;
             let maxPId = '';
             let maxMScore = -Infinity;
+            let maxMId = '';
 
             // USE WHITELIST for Player Identification
             const playerIds = new Set(status.allowed_players?.map((id: any) => String(id)) || []);
+            if (status.allowed_players) {
+                setAllowedPlayers(status.allowed_players.map((p: any) => String(p)));
+            }
 
             console.log('[CLUBS MASTER updateDetailedScores] Debug Info:', {
                 allowed_players: status.allowed_players,
@@ -352,7 +436,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     }
                 } else {
                     // This is a MASTER or non-whitelisted user
-                    if (s > maxMScore) maxMScore = s;
+                    if (s > maxMScore) {
+                        maxMScore = s;
+                        maxMId = uid;
+                    }
                 }
             });
 
@@ -376,14 +463,17 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
             if (maxMScore !== -Infinity) {
                 setTopMasterScore(maxMScore);
+                setTopMasterId(maxMId);
             } else {
                 const dbHighM = status.scores?.high_master;
                 setTopMasterScore(dbHighM?.score ?? 0);
+                setTopMasterId(dbHighM?.uid ?? null);
             }
         } else {
             // Fallback
             setTopPlayerScore(status.player_score || 0);
             setTopMasterScore(status.master_score || 0);
+            setTopMasterId(status.scores?.high_master?.uid || null);
             setMyScore(status.master_score || 0);
         }
     }, [user]);
@@ -403,18 +493,28 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                 try {
                     // Fetch finalized totals from database
-                    const { data: gameStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
-                    const finalScores = gameStatus?.scores || {};
-                    const currentScores = finalScores.current || {};
-                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+                    const token = await getAccessToken();
+                    const gameStatusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                    });
+                    
+                    if (gameStatusRes.ok) {
+                        const gameStatusData = await gameStatusRes.json();
+                        const gameStatus = gameStatusData && gameStatusData.length > 0 ? gameStatusData[0] : null;
+                        if (gameStatus) {
+                            const finalScores = gameStatus?.scores || {};
+                            const currentScores = finalScores.current || {};
+                            const mUid = user?.uid || user?.id || user?.id;
 
-                    // Absolute Total reached in game (including bonuses)
-                    const myFinalTotal = Number(currentScores[mUid || '']) || myScore;
+                            // Absolute Total reached in game (including bonuses)
+                            const myFinalTotal = Number(currentScores[mUid || '']) || myScore;
 
-                    console.log(`[CLUBS MASTER] Pasting final score ${myFinalTotal} to profile ${user.email} `);
+                            console.log(`[CLUBS MASTER] Pasting final score ${myFinalTotal} to profile ${user.email} `);
 
-                    await supabase.from('profiles').update({ visa_points: myFinalTotal }).eq('email', user.email);
-                    console.log('[CLUBS MASTER] ✅ Self-sync complete.');
+                            await supabase.from('profiles').update({ visa_points: myFinalTotal }).eq('email', user.email);
+                            console.log('[CLUBS MASTER] ✅ Self-sync complete.');
+                        }
+                    }
                 } catch (err) {
                     console.error('[CLUBS MASTER] Self-sync failed:', err);
                 }
@@ -430,40 +530,51 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
         const syncMasterScore = async () => {
             if (myScore === 0 && !hasSyncedScoreRef.current &&
                 gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost' &&
-                auth.currentUser?.email) {
+                user?.email) {
                 console.log('[CLUBS MASTER] My score is 0, checking profile...');
                 hasSyncedScoreRef.current = true;
 
                 const { data: profile } = await supabase
                     .from('profiles')
                     .select('visa_points')
-                    .eq('email', auth.currentUser.email)
+                    .eq('email', user.email)
                     .single();
 
                 if (profile?.visa_points !== undefined && profile.visa_points !== 0) {
                     console.log(`[CLUBS MASTER] Syncing score from profile: ${profile.visa_points} `);
 
                     // Fetch latest status to get current scores object
-                    const { data: latestStatus } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
-                    const currentScores = latestStatus?.scores || { current: {}, history: {}, start: {} };
-                    const myUid = auth.currentUser?.uid || 'MASTER';
+                    const token = await getAccessToken();
+                    const latestStatusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                    });
+                    
+                    if (latestStatusRes.ok) {
+                        const latestStatusData = await latestStatusRes.json();
+                        const latestStatus = latestStatusData && latestStatusData.length > 0 ? latestStatusData[0] : null;
+                        if (latestStatus) {
+                            const currentScores = latestStatus?.scores || { current: {}, history: {}, start: {} };
+                            const myUid = user?.uid || user?.id || 'MASTER';
 
-                    const newScores = {
-                        ...currentScores,
-                        start: { ...currentScores.start, [myUid]: profile.visa_points },
-                        current: { ...currentScores.current, [myUid]: profile.visa_points }
-                    };
+                            const newScores = {
+                                ...currentScores,
+                                start: { ...currentScores.start, [myUid]: profile.visa_points },
+                                current: { ...currentScores.current, [myUid]: profile.visa_points }
+                            };
 
-                    // Update game's status in database
-                    await supabase
-                        .from('clubs_game_status')
-                        .update({
-                            master_score: profile.visa_points,
-                            scores: newScores
-                        })
-                        .eq('id', 'clubs_king');
+                            // Update game's status in database
+                            await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                body: JSON.stringify({
+                                    master_score: profile.visa_points,
+                                    scores: newScores
+                                })
+                            });
 
-                    setMyScore(profile.visa_points);
+                            setMyScore(profile.visa_points);
+                        }
+                    }
                 }
             }
         };
@@ -481,7 +592,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
         const suffix = _currentRound >= 4 ? '-2' : '-1';
 
         return RANKS.map(rank => ({
-            id: `clubs - ${rank}${suffix} `,
+            id: `clubs-${rank}${suffix}`,
             suit: 'clubs' as const,
             rank,
             playerRole: null,
@@ -495,11 +606,9 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
     useEffect(() => {
         const fetchPlayerIds = async () => {
             try {
-                const querySnapshot = await getDocs(collection(db, 'users'));
-                const users = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
+                const { data: users, error } = await supabase.from('profiles').select('*');
+                if (error) throw error;
+                if (!users) return;
 
                 // Sort users to match Admin Dashboard logic
                 users.sort((a: any, b: any) => {
@@ -518,12 +627,15 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 });
 
                 const mapping: Record<string, string> = {};
+                const mUids = new Set<string>();
                 let mCount = 1;
                 let pCount = 1;
 
                 users.forEach((u: any) => {
                     const isMaster = u.role === 'master' || u.role === 'admin' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
                     if (isMaster) {
+                        if (u.id) mUids.add(String(u.id));
+                        if (u.uid) mUids.add(String(u.uid));
                         const mid = `#MASTER_${mCount.toString().padStart(3, '0')} `;
                         if (u.id) mapping[u.id] = mid;
                         if (u.username) mapping[u.username] = mid;
@@ -535,6 +647,8 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         pCount++;
                     }
                 });
+                console.log('[CLUBS MASTER] Second UID sync - Master UIDs:', Array.from(mUids));
+                setMasterUids(mUids);
 
                 console.log('Role Standardisation (Master):', { mapping });
                 setPlayerIdMap(mapping);
@@ -553,84 +667,100 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 gameState !== 'idle' && gameState !== 'won' && gameState !== 'lost') {
 
                 // Check if we need to sync (if start scores are empty or missing for players)
-                const { data: statusData } = await supabase.from('clubs_game_status').select('scores, allowed_players').eq('id', 'clubs_king').single();
-                const currentStart = statusData?.scores?.start || {};
-                const playerIds: string[] = statusData?.allowed_players?.map((p: any) => String(p)) || [];
+                try {
+                    const token = await getAccessToken();
+                    const statusDataRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores,allowed_players`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                    });
+                    let statusData = null;
+                    if (statusDataRes.ok) {
+                        const dataArray = await statusDataRes.json();
+                        statusData = dataArray && dataArray.length > 0 ? dataArray[0] : null;
+                    }
+                    
+                    if (statusData) {
+                        const currentStart = statusData?.scores?.start || {};
+                        const playerIds: string[] = statusData?.allowed_players?.map((p: any) => String(p)) || [];
 
-                // Filter IDs that need syncing (not in start scores) -- OR force sync if it looks like 0
-                const idsToSync = playerIds.filter(id => currentStart[id] === undefined || currentStart[id] === 0);
+                        // Filter IDs that need syncing (not in start scores) -- OR force sync if it looks like 0
+                        const idsToSync = playerIds.filter(id => currentStart[id] === undefined || currentStart[id] === 0);
 
-                if (idsToSync.length > 0) {
-                    console.log(`[SCORE SYNC] Found ${idsToSync.length} players needing start score sync...`);
-                    hasSyncedPlayersRef.current = true;
+                        if (idsToSync.length > 0) {
+                            console.log(`[SCORE SYNC] Found ${idsToSync.length} players needing start score sync...`);
+                            hasSyncedPlayersRef.current = true;
 
-                    try {
-                        // 1. Get Emails from Users
-                        const { data: usersData } = await supabase
-                            .from('users')
-                            .select('id, email')
-                            .in('id', idsToSync);
-
-                        if (usersData && usersData.length > 0) {
-                            const emails = usersData.map(u => u.email);
-                            // 2. Get Visa Points from Profiles
-                            const { data: profilesData } = await supabase
+                            // 1. Get Emails from Users
+                            const { data: usersData } = await supabase
                                 .from('profiles')
-                                .select('email, visa_points')
-                                .in('email', emails);
+                                .select('id, email')
+                                .in('id', idsToSync);
 
-                            if (profilesData) {
-                                const newStart = { ...currentStart };
-                                const newCurrent = { ...(statusData?.scores?.current || {}) };
-                                let updated = false;
+                            if (usersData && usersData.length > 0) {
+                                const emails = usersData.map(u => u.email);
+                                // 2. Get Visa Points from Profiles
+                                const { data: profilesData } = await supabase
+                                    .from('profiles')
+                                    .select('email, visa_points')
+                                    .in('email', emails);
 
-                                usersData.forEach(user => {
-                                    const profile = profilesData.find(p => p.email === user.email);
-                                    if (profile) {
-                                        const points = profile.visa_points || 1000; // Default 1000 if null
-                                        // Only update if current game score is 0 (to avoid overwriting progress)
-                                        // OR if we are in early rounds/setup
-                                        if (newStart[user.id] !== points) {
-                                            newStart[user.id] = points;
+                                if (profilesData) {
+                                    const newStart = { ...currentStart };
+                                    const newCurrent = { ...(statusData?.scores?.current || {}) };
+                                    let updated = false;
 
-                                            // Initialize current if it's 0/undefined, otherwise keep the delta logic (current = start + delta)
-                                            // Ideally, if we change start, we should adjust current to maintain the same DELTA? 
-                                            // User Request implies: Game Score SHOULD MATCH Profile. 
-                                            // So we set Current = Points (assuming no gameplay happened yet, or we resync balance)
-                                            // If mid-game, this is risky. But for "Fix this", we assume the current game score is 'wrong' (0-based).
-                                            if (!newCurrent[user.id] || newCurrent[user.id] === 0) {
-                                                newCurrent[user.id] = points;
-                                            } else {
-                                                // If they have a score (e.g. 870), and start was 0.
-                                                // We want to shift the baseline.
-                                                // Old: Start 0, Current 870. Delta +870.
-                                                // New: Start 1000. Current ??
-                                                // If we want Final to be 870. Current must be 870.
-                                                // New Start 1000. New Current 870. Delta -130.
-                                                // This effectively "corrects" the Delta history too? No, history is just log.
-                                                // We just leave Current as is (870) and update Start (1000).
-                                                // Future Deltas will be calculated from 1000 -> 870.
+                                    usersData.forEach(user => {
+                                        const profile = profilesData.find(p => p.email === user.email);
+                                        if (profile) {
+                                            const points = profile.visa_points || 1000; // Default 1000 if null
+                                            // Only update if current game score is 0 (to avoid overwriting progress)
+                                            // OR if we are in early rounds/setup
+                                            if (newStart[user.id] !== points) {
+                                                newStart[user.id] = points;
+
+                                                // Initialize current if it's 0/undefined, otherwise keep the delta logic (current = start + delta)
+                                                // Ideally, if we change start, we should adjust current to maintain the same DELTA? 
+                                                // User Request implies: Game Score SHOULD MATCH Profile. 
+                                                // So we set Current = Points (assuming no gameplay happened yet, or we resync balance)
+                                                // If mid-game, this is risky. But for "Fix this", we assume the current game score is 'wrong' (0-based).
+                                                if (!newCurrent[user.id] || newCurrent[user.id] === 0) {
+                                                    newCurrent[user.id] = points;
+                                                } else {
+                                                    // If they have a score (e.g. 870), and start was 0.
+                                                    // We want to shift the baseline.
+                                                    // Old: Start 0, Current 870. Delta +870.
+                                                    // New: Start 1000. Current ??
+                                                    // If we want Final to be 870. Current must be 870.
+                                                    // New Start 1000. New Current 870. Delta -130.
+                                                    // This effectively "corrects" the Delta history too? No, history is just log.
+                                                    // We just leave Current as is (870) and update Start (1000).
+                                                    // Future Deltas will be calculated from 1000 -> 870.
+                                                }
+                                                updated = true;
+                                                console.log(`[SCORE SYNC] Synced ${user.email} -> Start: ${points} `);
                                             }
-                                            updated = true;
-                                            console.log(`[SCORE SYNC] Synced ${user.email} -> Start: ${points} `);
                                         }
-                                    }
-                                });
+                                    });
 
-                                if (updated) {
-                                    await supabase.from('clubs_game_status').update({
-                                        scores: {
-                                            ...(statusData?.scores || {}),
-                                            start: newStart,
-                                            current: newCurrent
-                                        }
-                                    }).eq('id', 'clubs_king');
+                                    if (updated) {
+                                        const updateToken = await getAccessToken();
+                                        await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${updateToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                            body: JSON.stringify({
+                                                scores: {
+                                                    ...(statusData?.scores || {}),
+                                                    start: newStart,
+                                                    current: newCurrent
+                                                }
+                                            })
+                                        });
+                                    }
                                 }
                             }
                         }
-                    } catch (err) {
-                        console.error('[SCORE SYNC ERROR]', err);
                     }
+                } catch (err) {
+                    console.error('[SCORE SYNC ERROR]', err);
                 }
             }
         };
@@ -642,39 +772,55 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     useEffect(() => {
         const fetchState = async () => {
-            const { data } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
-            if (data && data.system_start) {
-                const resolvedState = data.gameState || 'setup_phase1';
-                setGameState(resolvedState);
-                setRound(data.current_round);
-                setPlayerScore(data.player_score);
-                setMasterScore(data.master_score);
-                updateDetailedScores(data);
+            const accessToken = await getAccessToken();
+            const res = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=*`, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+            });
+            const data = await res.json();
+            if (data && !data.error) {
+                // CRITICAL: Check for system shutdown / reset
+                if ((!data.system_start || data.round_data?.force_reset) && gameStateRef.current !== 'idle') {
+                    console.log('!!! FORCE RESET DETECTED ON LOAD !!!');
+                    setGameState('idle');
+                    if (!isEngine) window.location.href = '/home/card';
+                    return;
+                }
+                
+                if (data.system_start) {
+                    const resolvedState = data.gameState || 'setup_phase1';
+                    setGameState(resolvedState);
+                    setRound(data.current_round);
+                    setPlayerScore(data.player_score);
+                    setMasterScore(data.master_score);
+                    updateDetailedScores(data);
 
-                // Check round_data first if column is missing (Sync Fix)
-                const phaseExpirySource = data.phase_expiry || data.round_data?.phase_expiry;
+                    // Check round_data first if column is missing (Sync Fix)
+                    const phaseExpirySource = data.phase_expiry || data.round_data?.phase_expiry;
 
-                if (phaseExpirySource) {
-                    const expiry = new Date(phaseExpirySource);
-                    setPhaseExpiry(expiry);
-                    const now = new Date();
-                    const diff = Math.floor((expiry.getTime() - now.getTime()) / 1000);
-                    setTimeLeft(Math.max(0, diff));
-                } else {
-                    // Fallback check using resolvedState
-                    let expiryDate = null;
-                    const now = new Date();
-                    if (resolvedState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
-                    else if (resolvedState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
-                    else if (resolvedState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
-                    else if (resolvedState === 'playing') expiryDate = new Date(now.getTime() + 60000);
-                    else if (resolvedState === 'card_reveal') expiryDate = new Date(now.getTime() + 30000);
-                    else if (resolvedState === 'round_reveal') expiryDate = new Date(now.getTime() + 10000);
+                    if (phaseExpirySource) {
+                        setPhaseExpiry(new Date(phaseExpirySource));
+                    } else {
+                        // Start Engine Default (Only Engine initiates default timers if missing)
+                        if (isEngine) {
+                            let expiryDate = null;
+                            const now = new Date();
+                            if (resolvedState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
+                            else if (resolvedState === 'setup_phase1') expiryDate = new Date(now.getTime() + 60000);
+                            else if (resolvedState === 'selection_reveal') expiryDate = new Date(now.getTime() + 10000);
+                            else if (resolvedState === 'playing') expiryDate = new Date(now.getTime() + 120000);
+                            else if (resolvedState === 'round_reveal') expiryDate = new Date(now.getTime() + 30000);
 
-                    if (expiryDate) {
-                        setPhaseExpiry(expiryDate);
-                        const diff = Math.floor((expiryDate.getTime() - now.getTime()) / 1000);
-                        setTimeLeft(Math.max(0, diff));
+                            if (expiryDate) {
+                                setPhaseExpiry(expiryDate);
+                                // Also persist this newly generated expiry so players get it
+                                const token = await getAccessToken();
+                                await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                    body: JSON.stringify({ phase_expiry: expiryDate.toISOString() })
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -696,6 +842,13 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         setPlayerSelection(data.round_data.player_selection);
                         setPlayerLocked(true);
                     }
+                    const hM = data.round_data.hint_cards_m || data.round_data.hint_cards;
+                    if (hM) setHintCards(hM);
+                    if (data.gameState !== 'playing') {
+                        if (data.round_data.player_votes) setPlayersVotes(data.round_data.player_votes);
+                        if (data.round_data.master_votes) setMasterVotes(data.round_data.master_votes);
+                    }
+                    if (data.round_data.evaluation_results) setRoundResults(data.round_data.evaluation_results);
                 }
 
                 // RECOVERY: If game is active but no deck exists in DB
@@ -709,14 +862,19 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     // Update DB
                     const nextRoundData = { ...(data.round_data || {}), decks: { active: activeDeck, reserve: reserveDeck } };
 
-                    await supabase.from('clubs_game_status').update({
-                        round_data: nextRoundData,
-                        gameState: data.gameState || 'setup_phase1'
-                    }).eq('id', 'clubs_king');
+                    const token = await getAccessToken();
+                    await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                        body: JSON.stringify({
+                            round_data: nextRoundData,
+                            gameState: data.gameState || 'setup_phase1'
+                        })
+                    });
                 }
 
                 // AUTO-START: If system_start is true but gameState is idle, start the game
-                if (data.system_start && (!data.gameState || data.gameState === 'idle') && (!data.round_data?.decks?.active)) {
+                if (isEngine && data.system_start && (!data.gameState || data.gameState === 'idle') && (!data.round_data?.decks?.active)) {
                     console.log('⚠️ Auto-starting game (system_start=true but gameState=idle)');
 
                     // Generate Random Deck
@@ -727,9 +885,13 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     const now = new Date();
                     const expiry = new Date(now.getTime() + 60000);  // 60s briefing
 
-                    await supabase
-                        .from('clubs_game_status')
-                        .update({
+                    await new Promise(r => setTimeout(r, 1000)); // Delay to ensure Realtime doesn't batch or drop the state change
+
+                    const token = await getAccessToken();
+                    await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                        body: JSON.stringify({
                             gameState: 'briefing',  // Start with briefing for Round 1
                             current_round: 1,
                             phase_expiry: expiry.toISOString(),
@@ -738,7 +900,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                 phase_expiry: expiry.toISOString() // Redundant but safe
                             }
                         })
-                        .eq('id', 'clubs_king');
+                    });
 
                     setGameState('briefing');
                     setRound(1);
@@ -747,8 +909,20 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             }
         };
         fetchState();
-    }, [initializeBoard]);
-
+        
+        let isFetchingSync = false;
+        const syncInterval = setInterval(async () => {
+            if (isEngine || isFetchingSync) return;
+            isFetchingSync = true;
+            try {
+                await fetchState();
+            } finally {
+                isFetchingSync = false;
+            }
+        }, 15000);
+        
+        return () => clearInterval(syncInterval);
+    }, [initializeBoard, isEngine]);
 
     // Timer & Auto-Advance Logic
     useEffect(() => {
@@ -763,30 +937,26 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 const diff = Math.floor((phaseExpiry.getTime() - now.getTime()) / 1000);
                 const secondsLeft = Math.max(0, diff);
 
-                // Debug log every 5 seconds or if near zero
-                if (secondsLeft % 5 === 0 || secondsLeft < 5) {
-                    console.log(`TIMER DEBUG: Expiry = ${phaseExpiry.toISOString()}, Now = ${now.toISOString()}, Diff = ${diff}, Display = ${secondsLeft} `);
-                }
-
-                // REMOVED: Forced timer sync was causing glitches
-                // Each client now calculates their own countdown from phaseExpiry
-                // This results in smooth timers without jumps
-
                 setTimeLeft(secondsLeft);
 
-                // AUTO-ADVANCE MECHANISM (Master-only) - Don't advance if paused
-                if (secondsLeft <= 0 && !isPaused) {
-                    console.log('⏰ TIME\'S UP! Advancing to next phase...');
-                    advancePhase();
+                // Admin Engine ONLY: Advance phase when time is up
+                if (isEngine && secondsLeft <= 0) {
+                    if (!isProcessing.current) {
+                        console.log("⏰ TIME'S UP! Advancing to next phase...", {
+                            gameState,
+                            round,
+                            phaseExpiry: phaseExpiry.toISOString(),
+                        }); 
+                        advancePhase();
+                    }
                 }
             } else {
-                // Fallback: Decrement if no phaseExpiry
-                setTimeLeft((prev) => Math.max(0, prev - 1));
+                setTimeLeft(0);
             }
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [gameState, phaseExpiry, isPaused]);
+    }, [phaseExpiry, isPaused, isEngine, gameState, round]); // CRITICAL: Added gameState and round to dependencies
 
     // Subscriptions
     useEffect(() => {
@@ -802,23 +972,64 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
         channelRef.current = channel;
 
         channel
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, (payload) => {
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, async (payload) => {
                 const status = payload.new;
                 updateDetailedScores(status);
 
-                // CRITICAL: Check for force reset
-                if (status.round_data?.force_reset) {
+                // CRITICAL: Check for force reset or system shutdown
+                if (status.round_data?.force_reset || (!status.system_start && gameStateRef.current !== 'idle')) {
                     console.log('!!! FORCE RESET DETECTED IN DATABASE !!!');
-                    // Show themed overlay instead of alert
-                    setShowResetOverlay(true);
+                    setGameState('idle');
+                    if (!isEngine) window.location.href = '/home/card';
                     return; // Exit early
                 }
 
+                // AUTO-START FROM REALTIME (If admin initiates while master is on page)
+                if (isEngine && status.system_start && gameStateRef.current === 'idle') {
+                    console.log('⚠️ Auto-starting game from realtime listener');
+                    const fullDeck = generateRandomDeck();
+                    const activeDeck = fullDeck.slice(0, 12);
+                    const reserveDeck = fullDeck.slice(12, 24);
+                    const now = new Date();
+
+                    // Let briefing play out for 60 seconds
+                    const expiry = new Date(now.getTime() + 60000);
+
+                    // CRITICAL FIX: Save to local state so advancePhase doesn't see an empty deck!
+                    setCards(activeDeck);
+
+                    await new Promise(r => setTimeout(r, 1000)); // Delay to ensure Realtime doesn't batch or drop the state change
+
+                    const token = await getAccessToken();
+                    fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                        body: JSON.stringify({
+                            gameState: 'briefing',
+                            current_round: 1,
+                            phase_expiry: expiry.toISOString(),
+                            round_data: {
+                                decks: { active: activeDeck, reserve: reserveDeck },
+                                phase_expiry: expiry.toISOString()
+                            }
+                        })
+                    });
+
+                    setGameState('briefing');
+                    setRound(1);
+                    setPhaseExpiry(expiry);
+                    return;
+                }
+
+                const phaseExpirySource = status.phase_expiry !== undefined ? status.phase_expiry : status.round_data?.phase_expiry;
                 let expiryDate: Date | null = null;
-                const phaseExpirySource = status.phase_expiry || status.round_data?.phase_expiry;
 
                 if (phaseExpirySource) {
                     expiryDate = new Date(phaseExpirySource);
+                } else if (status.phase_expiry === null) {
+                    expiryDate = null;
+                    setPhaseExpiry(null);
+                    setTimeLeft(0);
                 } else if (!phaseExpiry && status.gameState) {
                     const now = new Date();
                     if (status.gameState === 'briefing') expiryDate = new Date(now.getTime() + 20000);
@@ -854,19 +1065,35 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     setCards(prev => prev.map(c => ({ ...c, isRemoved: status.removed_cards_m.includes(c.id) })));
                 }
 
-                if (status.round_data?.player_selection) {
-                    setPlayerSelection(status.round_data.player_selection);
-                    if (!playerLocked) setPlayerLocked(true);
-                }
-
-                if (status.round_data?.phase1_selections) {
-                    setPhase1Selections(status.round_data.phase1_selections);
+                if (status.round_data) {
+                    if (status.round_data.decks?.active) {
+                        setCards(prev => {
+                            const newDeck = status.round_data.decks.active;
+                            const removed = status.removed_cards_m || [];
+                            return newDeck.map((c: any) => ({ ...c, isRemoved: removed.includes(c.id) }));
+                        });
+                    }
+                    if (status.round_data.phase1_selections) setPhase1Selections(status.round_data.phase1_selections);
+                    if (status.round_data.player_selection) {
+                        setPlayerSelection(status.round_data.player_selection);
+                        setPlayerLocked(true);
+                    }
+                    if (status.round_data.master_selection) {
+                        setMySelection(status.round_data.master_selection);
+                    }
+                    const hM = status.round_data.hint_cards_m || status.round_data.hint_cards;
+                    if (hM) setHintCards(hM);
+                    if (status.gameState !== 'playing') {
+                        if (status.round_data.player_votes) setPlayersVotes(status.round_data.player_votes);
+                        if (status.round_data.master_votes) setMasterVotes(status.round_data.master_votes);
+                    }
+                    if (status.round_data.evaluation_results) setRoundResults(status.round_data.evaluation_results);
                 }
 
                 // --- SYNC DETAILED SCORES (HUD) ---
                 if (status.scores) {
                     const currentScores = status.scores.current || {};
-                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+                    const mUid = user?.uid || user?.id || user?.id;
 
                     // Update local Master score
                     if (mUid && currentScores[mUid] !== undefined) {
@@ -878,8 +1105,9 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         setTopPlayerScore(status.scores.high_player.score || 0);
                         setTopPlayerId(status.scores.high_player.uid || null);
                     }
-                    if (status.scores.high_master) {
+                    if (status.scores?.high_master) {
                         setTopMasterScore(status.scores.high_master.score || 0);
+                        setTopMasterId(status.scores.high_master.uid || null);
                     }
                 }
             })
@@ -887,74 +1115,47 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 if (payload.new.channel === 'master') setMessages(prev => [...prev, payload.new]);
             })
             .on('broadcast', { event: 'force_exit' }, () => {
-                setShowResetOverlay(true);
+                console.log("FORCE EXIT RECEIVED");
+                if (!isEngine) {
+                    window.location.href = '/home/card';
+                }
             })
-            .on('broadcast', { event: 'vote_cast' }, async (p: any) => {
+            .on('broadcast', { event: 'vote_cast' }, (p: any) => {
                 const { userId, votes, team } = p.payload;
                 console.log('=== MASTER RECEIVED VOTE ===', { userId, votes, team });
                 if (team === 'player' || team === 'participants') {
-                    setPlayersVotes(prev => ({ ...prev, [userId]: votes }));
-                    console.log('Player votes updated:', userId, votes);
-
-                    // PERSIST VOTES for Late Joiners
-                    try {
-                        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
-                        const currentData = data?.round_data || {};
-                        const currentVotes = currentData.player_votes || {};
-
-                        await supabase.from('clubs_game_status').update({
-                            round_data: {
-                                ...currentData,
-                                player_votes: {
-                                    ...currentVotes,
-                                    [userId]: votes
-                                }
-                            }
-                        }).eq('id', 'clubs_king');
-                    } catch (err) {
-                        console.error("Master failed to persist player vote:", err);
-                    }
+                    setPlayersVotes(prev => {
+                        const newVotes = { ...prev, [userId]: votes };
+                        playersVotesRef.current = newVotes; // Keep ref in sync
+                        console.log('Player votes updated:', userId, votes);
+                        return newVotes;
+                    });
                 }
             })
             .on('broadcast', { event: 'phase1_vote' }, async (p: any) => {
                 const { userId, selection } = p.payload;
                 console.log('=== MASTER RECEIVED PHASE 1 SELECTION ===', { userId, selection });
 
-                // Master acts as the central authority to persist these to avoid race conditions
-                // We fetch current, merge, and write back.
-                // Since only Master does this (and we assume 1 master or they race less frequently), it's safer.
-                try {
-                    // Update local state immediately for UI responsiveness
-                    setPhase1Selections(prev => ({ ...prev, [userId]: selection }));
-
-                    const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
-                    const currentData = data?.round_data || {};
-                    const currentSelections = currentData.phase1_selections || {};
-
-                    // Only update if changed to save writes? No, safety first.
-                    await supabase.from('clubs_game_status').update({
-                        round_data: {
-                            ...currentData,
-                            phase1_selections: {
-                                ...currentSelections,
-                                [userId]: selection
-                            }
-                        }
-                    }).eq('id', 'clubs_king');
-                } catch (err) {
-                    console.error("Master failed to persist phase1 vote:", err);
-                }
+                // Update local state and ref immediately
+                setPhase1Selections(prev => {
+                    const newSelections = { ...prev, [userId]: selection };
+                    phase1SelectionsRef.current = newSelections;
+                    return newSelections;
+                });
             })
-
             .on('broadcast', { event: 'master_vote' }, (p: any) => {
                 const { votes } = p.payload;
-                // Sync other masters
+                console.log('=== ENGINE RECEIVED MASTER VOTE ===', votes);
                 setMasterVotes(votes);
+                masterVotesRef.current = votes; // Keep ref in sync
+            })
+            .on('broadcast', { event: 'eval_debug' }, (p: any) => {
+                console.log('%c[CLUBS EVAL DEBUG]', 'color: #00ff00; font-weight: bold; font-size: 14px;', p.payload);
             })
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
-    }, [playerLocked]);
+    }, [playerLocked, isEngine]);
 
     // Chat Auto-Scroll
     useEffect(() => {
@@ -990,7 +1191,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             if (!card || card.isRemoved) return;
 
             // INDIVIDUAL VOTING LOGIC
-            const myId = user?.id || 'MASTER'; // Use Auth ID or Fallback
+            const myId = user?.uid || user?.id || 'MASTER'; // Use Auth ID or Fallback
             const currentVotes = masterVotes[myId] || [];
             let newVotes = [...currentVotes];
 
@@ -1010,434 +1211,611 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 event: 'master_vote',
                 payload: { votes: updatedMap } // Send FULL map? Or just delta? Let's send full map for sync simplicity
             });
+
+            // If running on Master player (not engine), save directly to DB as well for 100% reliability
+            if (!isEngine) {
+                updateMasterVotesInDb(updatedMap);
+            }
         }
     };
 
     const updateMasterSelection = async (sel: any) => {
-        const { data } = await supabase.from('clubs_game_status').select('round_data').eq('id', 'clubs_king').single();
-        const currentData = data?.round_data || {};
-        await supabase.from('clubs_game_status').update({
-            round_data: { ...currentData, master_selection: sel }
-        }).eq('id', 'clubs_king');
+        const accessToken = await getAccessToken();
+        const res = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=round_data`, {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+        });
+        const currentDataRes = await res.json();
+        const currentData = currentDataRes?.round_data || {};
+
+        // CRITICAL FIX: Prevent overwriting round_data with stale deck state!
+        if (currentData.decks?.active && cards.length > 0) {
+            const dbDeckId = currentData.decks.active[0]?.id;
+            const localDeckId = cards[0]?.id;
+            if (dbDeckId !== localDeckId) {
+                console.warn('⚠️ DB round_data is stale! Retrying master_selection update in 500ms...');
+                setTimeout(() => updateMasterSelection(sel), 500);
+                return;
+            }
+        }
+
+        const patchRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'apikey': supabaseKey,
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ round_data: { ...currentData, master_selection: sel } })
+        });
+        if (patchRes.ok) {
+            console.log('[CLUBS MASTER] Successfully saved master selection to DB:', sel);
+        } else {
+            console.error('[CLUBS MASTER] Failed to save master selection to DB:', patchRes.status, await patchRes.text());
+        }
     };
 
-    const advancePhase = async () => {
+    const updateMasterVotesInDb = async (updatedVotesMap: Record<string, string[]>) => {
+        try {
+            const accessToken = await getAccessToken();
+            const res = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=round_data`, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+            });
+            const currentDataRes = await res.json();
+            const currentData = currentDataRes?.round_data || {};
+
+            // Merge updatedVotesMap into round_data.master_votes
+            const existingMasterVotes = currentData.master_votes || {};
+            const newMasterVotes = { ...existingMasterVotes, ...updatedVotesMap };
+
+            const patchRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`,
+                    'apikey': supabaseKey,
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ round_data: { ...currentData, master_votes: newMasterVotes } })
+            });
+            if (patchRes.ok) {
+                console.log('[CLUBS MASTER] Successfully saved master votes to DB:', newMasterVotes);
+            } else {
+                console.error('[CLUBS MASTER] Failed to save master votes to DB:', patchRes.status, await patchRes.text());
+            }
+        } catch (err) {
+            console.error('Error updating master votes in DB:', err);
+        }
+    };
+
+    async function advancePhase() {
+        if (gameEnded.current) return;
         if (isProcessing.current) return;
+        if (lastProcessedPhase.current?.gameState === gameState && lastProcessedPhase.current?.round === round) return;
+
         isProcessing.current = true;
         console.log("ADVANCE PHASE TRIGGERED", gameState, round);
 
         try {
-            const now = new Date();
+            const executePhase = async () => {
+                const now = new Date();
 
-            if (gameState === 'briefing') {
-                const duration = 60;
-                const expiry = new Date(now.getTime() + duration * 1000);
-                await supabase.from('clubs_game_status').update({
-                    gameState: 'setup_phase1',
-                    current_round: 1,
-                    phase_expiry: expiry.toISOString()
-                }).eq('id', 'clubs_king');
-                setGameState('setup_phase1');
-                setPhaseExpiry(expiry);
-            }
-            else if (gameState === 'setup_phase1' || gameState === 'setup') {
-                console.log('🎬 PHASE 1 TRANSITION TRIGGERED');
-                console.log('Current time:', new Date().toISOString());
-                console.log('Phase expiry:', phaseExpiry?.toISOString());
-
-                // FETCH & AUTO-FILL SELECTIONS
-                const { data: currentStatus } = await supabase.from('clubs_game_status').select('round_data, removed_cards_m, removed_cards_p').eq('id', 'clubs_king').single();
-                let rData = currentStatus?.round_data || {};
-                const dbRemoved = currentStatus?.removed_cards_m || [];
-                let pSel = rData.player_selection || { angel: null, demon: null };
-                const mSel = rData.master_selection || mySelection || { angel: null, demon: null };
-
-                console.log('Player selection before auto-pick:', pSel);
-                console.log('Master selection before auto-pick:', mSel);
-                console.log('DB Removed Cards:', dbRemoved);
-
-                // Helper to get random unpicked card - STRICT VALIDATION
-                const getAvailableCard = (excludeIds: (string | null)[]) => {
-                    // 1. Get truly removed cards from DB state (Combine ALL removal sources)
-                    const effectivelyRemoved = new Set([
-                        ...(dbRemoved || []),
-                        ...(currentStatus?.removed_cards_p || []),
-                        ...(currentStatus?.removed_cards_m || []),
-                        ...cards.filter(c => c.isRemoved).map(c => c.id)
-                    ]);
-
-                    // 2. Filter available cards
-                    const validCards = cards.filter(c =>
-                        !c.isRemoved &&
-                        !effectivelyRemoved.has(c.id) &&
-                        !excludeIds.includes(c.id)
-                    );
-
-                    if (validCards.length === 0) {
-                        console.warn("[AUTO-PICK] No valid cards left! Returning null.");
-                        return null;
-                    }
-
-                    const picked = validCards[Math.floor(Math.random() * validCards.length)].id;
-                    console.log(`[AUTO - PICK] Selected ${picked} from ${validCards.length} candidates.`);
-                    return picked;
+                const doUpdate = async (payload: any) => {
+                    const accessToken = await getAccessToken();
+                    const res = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`,
+                            'apikey': supabaseKey,
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) throw new Error("Supabase update failed: " + await res.text());
                 };
 
-                // NEW: Calculate Top Votes from Individual Selections
-                const pSelections = rData.phase1_selections || {};
-                const angelVotes: Record<string, number> = {};
-                const demonVotes: Record<string, number> = {};
+                if (gameState === 'briefing') {
+                    const duration = 60;
+                    const expiry = new Date(now.getTime() + duration * 1000);
+                    const accessToken = await getAccessToken();
+                    const currentDataRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=round_data`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                    });
+                    const currentData = await currentDataRes.json();
+                    const preservedRoundData = currentData?.round_data || {};
 
-                Object.values(pSelections).forEach((sel: any) => {
-                    if (sel.angel) angelVotes[sel.angel] = (angelVotes[sel.angel] || 0) + 1;
-                    if (sel.demon) demonVotes[sel.demon] = (demonVotes[sel.demon] || 0) + 1;
-                });
-
-                // Helper to get top card id (with tie-breaking)
-                const getTopCard = (votesMap: Record<string, number>, excludeIds: (string | null)[]) => {
-                    let maxVotes = -1;
-                    let candidates: string[] = [];
-
-                    Object.entries(votesMap).forEach(([cardId, count]) => {
-                        if (excludeIds.includes(cardId)) return;
-                        if (count > maxVotes) {
-                            maxVotes = count;
-                            candidates = [cardId];
-                        } else if (count === maxVotes) {
-                            candidates.push(cardId);
-                        }
+                    await doUpdate({
+                        gameState: 'setup_phase1',
+                        current_round: 1,
+                        phase_expiry: expiry.toISOString(),
+                        round_data: {
+                            ...preservedRoundData,
+                            player_selection: { angel: null, demon: null },
+                            master_selection: { angel: null, demon: null }
+                        },
+                        removed_cards_p: [],
+                        removed_cards_m: []
                     });
 
-                    if (candidates.length > 0) {
-                        // Tie-Breaker: Randomly pick one of the top voted cards
-                        return candidates[Math.floor(Math.random() * candidates.length)];
-                    }
-                    return null;
-                };
+                    setGameState('setup_phase1');
+                    setPhaseExpiry(expiry);
+                }
+                else if (gameState === 'setup_phase1' || gameState === 'setup') {
+                    console.log('🎬 PHASE 1 TRANSITION TRIGGERED');
+                    console.log('Current time:', new Date().toISOString());
+                    console.log('Phase expiry:', phaseExpiry?.toISOString());
 
-                // Determine Locked Selections
-                // First lock Angel, then Demon (excluding Angel)
-                let lockedAngel = getTopCard(angelVotes, []);
-                let lockedDemon = getTopCard(demonVotes, [lockedAngel]);
-
-                // Fallback: If no votes or invalid, pick random available
-                if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
-                // If still null (e.g. no available cards?? unlikely), just keep null or try again
-                if (!lockedDemon) lockedDemon = getAvailableCard([lockedAngel, mSel.angel, mSel.demon]);
-
-                // Final Check to ensure we have selections
-                if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
-
-                pSel = { angel: lockedAngel, demon: lockedDemon };
-
-                // Auto-Pick for Master (unchanged)
-                if (!mSel.angel) mSel.angel = getAvailableCard([mSel.demon]);
-                if (!mSel.demon) mSel.demon = getAvailableCard([mSel.angel]);
-
-                console.log('Final Locked Player Selection (Vote Based):', pSel);
-                console.log('Master selection after auto-pick:', mSel);
-
-                // NEW: Assign Marks (Roles) to the card objects
-                const updatedActiveDeck = cards.map(c => {
-                    let playerRole = null;
-                    let masterRole = null;
-                    if (c.id === pSel.angel) playerRole = 'angel';
-                    else if (c.id === pSel.demon) playerRole = 'demon';
-
-                    if (c.id === mSel.angel) masterRole = 'angel';
-                    else if (c.id === mSel.demon) masterRole = 'demon';
-
-                    return { ...c, playerRole, masterRole };
-                });
-
-                // Update Round Data with Calculated Locks AND Updated Deck
-                rData = {
-                    ...rData,
-                    player_selection: pSel,
-                    master_selection: mSel,
-                    decks: {
-                        ...rData.decks,
-                        active: updatedActiveDeck
-                    }
-                };
-
-                // NEW: Go to Selection Reveal (Interim Phase)
-                const duration = 10;
-                const expiry = new Date(now.getTime() + duration * 1000);
-                console.log('⏭️ Transitioning to selection_reveal');
-                await supabase.from('clubs_game_status').update({
-                    gameState: 'selection_reveal',
-                    phase_expiry: expiry.toISOString(),
-                    round_data: rData
-                }).eq('id', 'clubs_king');
-
-                setGameState('selection_reveal');
-                setPhaseExpiry(expiry);
-            }
-            else if (gameState === 'selection_reveal') {
-                // NEW: Go to Hunter Play
-                const duration = 60;
-                const expiry = new Date(now.getTime() + duration * 1000);
-                await supabase.from('clubs_game_status').update({
-                    gameState: 'playing',
-                    phase_expiry: expiry.toISOString()
-                }).eq('id', 'clubs_king');
-
-                setGameState('playing');
-                setPhaseExpiry(expiry);
-                setMasterVotes({});
-            }
-            else if (gameState === 'playing') {
-                const duration = 12; // 12s Card Reveal Animation
-                const expiry = new Date(now.getTime() + duration * 1000);
-                await supabase.from('clubs_game_status').update({
-                    gameState: 'card_reveal',
-                    phase_expiry: expiry.toISOString()
-                }).eq('id', 'clubs_king');
-
-                setGameState('card_reveal');
-                setPhaseExpiry(expiry);
-            }
-            else if (gameState === 'card_reveal') {
-                await performEvaluation();
-            }
-            else if (gameState === 'round_reveal') {
-                const nextRound = round + 1;
-                if (nextRound > MAX_ROUNDS) {
-                    // GAME COMPLETE - Apply final bonus based on top player vs top master
-                    const { data: finalData } = await supabase.from('clubs_game_status').select('scores').eq('id', 'clubs_king').single();
-                    const finalScores = finalData?.scores || { current: {}, history: {} };
-                    const finalCurrent = finalScores.current || {};
-
-                    // NEW: Identify Players using allowed_players array from DB status
-                    const { data: statusData } = await supabase.from('clubs_game_status').select('allowed_players').eq('id', 'clubs_king').single();
-                    const playerIds = new Set(statusData?.allowed_players?.map((id: any) => String(id)) || []);
-
-                    // Find highest player and master scores
-                    let maxPlayerScore = -Infinity;
-                    let maxMasterScore = -Infinity;
-
-                    Object.entries(finalCurrent).forEach(([uid, score]) => {
-                        const numScore = typeof score === 'number' ? score : 0;
-                        const isPlayer = playerIds.has(uid);
-                        const isMasterId = uid === 'MASTER' || uid.includes('MASTER') || uid.startsWith('master_');
-
-                        // Standardized Role Check
-                        if (!isPlayer || isMasterId || uid === user?.id || uid === auth.currentUser?.uid) {
-                            if (numScore > maxMasterScore) maxMasterScore = numScore;
-                        } else {
-                            if (numScore > maxPlayerScore) maxPlayerScore = numScore;
+                    // FETCH & AUTO-FILL SELECTIONS using REST API to prevent supabase-js lockups
+                    const accessToken = await getAccessToken();
+                    const statusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=round_data,removed_cards_m,removed_cards_p`, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'apikey': supabaseKey,
+                            'Accept': 'application/vnd.pgrst.object+json'
                         }
                     });
+                    const currentStatus = await statusRes.json();
+                    let rData = currentStatus?.round_data || {};
+                    const dbRemoved = currentStatus?.removed_cards_m || [];
+                    let pSel = rData.player_selection || { angel: null, demon: null };
+                    const mSel = rData.master_selection || mySelection || { angel: null, demon: null };
 
-                    // Handle edge cases
-                    if (maxPlayerScore === -Infinity) maxPlayerScore = 0;
-                    if (maxMasterScore === -Infinity) maxMasterScore = 0;
+                    console.log('Player selection before auto-pick:', pSel);
+                    console.log('Master selection before auto-pick:', mSel);
+                    console.log('DB Removed Cards:', dbRemoved);
 
-                    // Determine final bonus - MATCHING PLAYER VIEW (500 pts)
-                    const playersWon = maxPlayerScore > maxMasterScore;
-                    const mastersWon = maxMasterScore > maxPlayerScore;
+                    // Helper to get random unpicked card - STRICT VALIDATION
+                    const getAvailableCard = (excludeIds: (string | null)[]) => {
+                        // 1. Get truly removed cards from DB state (Combine ALL removal sources)
+                        const effectivelyRemoved = new Set([
+                            ...(dbRemoved || []),
+                            ...(currentStatus?.removed_cards_p || []),
+                            ...(currentStatus?.removed_cards_m || []),
+                            ...cards.filter(c => c.isRemoved).map(c => c.id)
+                        ]);
 
-                    const adjustedCurrent: Record<string, number> = {};
-                    Object.entries(finalCurrent).forEach(([uid, score]) => {
-                        const numScore = typeof score === 'number' ? score : 0;
-                        const isMaster = isMasterUid(uid);
+                        // 2. Filter available cards
+                        const validCards = cards.filter(c =>
+                            !c.isRemoved &&
+                            !effectivelyRemoved.has(c.id) &&
+                            !excludeIds.includes(c.id)
+                        );
 
-                        // Apply win/loss bonus (+500/-500)
-                        if (playersWon) {
-                            adjustedCurrent[uid] = numScore + (isMaster ? -500 : 500);
-                        } else if (mastersWon) {
-                            adjustedCurrent[uid] = numScore + (isMaster ? 500 : -500);
-                        } else {
-                            adjustedCurrent[uid] = numScore; // Tie
+                        if (validCards.length === 0) {
+                            console.warn("[AUTO-PICK] No valid cards left! Returning null.");
+                            return null;
                         }
+
+                        const picked = validCards[Math.floor(Math.random() * validCards.length)].id;
+                        console.log(`[AUTO - PICK] Selected ${picked} from ${validCards.length} candidates.`);
+                        return picked;
+                    };
+
+                    // NEW: Calculate Top Votes from Individual Selections
+                    // Read from local ref instead of database to avoid connection exhaustion during setup_phase1
+                    const pSelections = phase1SelectionsRef.current || {};
+                    const angelVotes: Record<string, number> = {};
+                    const demonVotes: Record<string, number> = {};
+
+                    Object.values(pSelections).forEach((sel: any) => {
+                        if (sel.angel) angelVotes[sel.angel] = (angelVotes[sel.angel] || 0) + 1;
+                        if (sel.demon) demonVotes[sel.demon] = (demonVotes[sel.demon] || 0) + 1;
                     });
 
-                    const playerScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => !isMasterUid(k)).map(([, v]) => v);
-                    const masterScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => isMasterUid(k)).map(([, v]) => v);
+                    // Helper to get top card id (with tie-breaking)
+                    const getTopCard = (votesMap: Record<string, number>, excludeIds: (string | null)[]) => {
+                        let maxVotes = -1;
+                        let candidates: string[] = [];
 
-                    const newLegacyPScore = playerScoresEnd.length > 0 ? Math.max(...playerScoresEnd) : 0;
-                    const newLegacyMScore = masterScoresEnd.length > 0 ? Math.max(...masterScoresEnd) : 0;
-
-                    // UPDATED: Identify the TOP IDs again from the adjusted total list for final HUD sync
-                    let topPlayerIdEnd = 'TBD';
-                    let topMasterIdEnd = 'MASTER';
-
-                    Object.entries(adjustedCurrent).forEach(([uid, s]) => {
-                        const score = Number(s) || 0;
-                        if (isMasterUid(uid)) {
-                            if (score === newLegacyMScore) topMasterIdEnd = uid;
-                        } else {
-                            if (score === newLegacyPScore) topPlayerIdEnd = uid;
-                        }
-                    });
-
-                    // Sync local HUD immediately
-                    const mUid = user?.uid || user?.id || auth.currentUser?.uid;
-                    if (mUid && adjustedCurrent[mUid] !== undefined) {
-                        setMyScore(adjustedCurrent[mUid]);
-                    }
-                    setTopPlayerScore(newLegacyPScore);
-                    setTopMasterScore(newLegacyMScore);
-                    setTopPlayerId(topPlayerIdEnd);
-
-                    console.log('[CLUBS MASTER] Persisting stats...');
-                    const persistClubsStats = async () => {
-                        try {
-                            const playersWon = maxPlayerScore > maxMasterScore;
-                            const masterWon = maxMasterScore > maxPlayerScore;
-                            // AUTHORITATIVE LOOP: Update ALL participants who have game entries (Master included)
-                            const participantIds = Object.keys(adjustedCurrent);
-
-                            console.log('[CLUBS MASTER] Starting authoritative profile sync for all:', participantIds);
-
-                            for (const uid of participantIds) {
-                                try {
-                                    const { data: userData, error: userError } = await supabase
-                                        .from('users')
-                                        .select('email, role')
-                                        .eq('id', uid)
-                                        .single();
-
-                                    if (userError || !userData?.email) continue;
-                                    const userEmail = userData.email;
-
-                                    const finalTotalScore = adjustedCurrent[uid] || 0;
-
-                                    const { data: profile, error: profileError } = await supabase
-                                        .from('profiles')
-                                        .select('wins, losses, role, email')
-                                        .ilike('email', userEmail)
-                                        .single();
-
-                                    if (profileError) continue;
-
-                                    const targetEmail = profile.email || userEmail;
-                                    const isTie = maxPlayerScore === maxMasterScore;
-                                    const isMaster = (userData.role === 'master' || userData.role === 'admin' || profile.role === 'master');
-                                    let isWin = false;
-                                    if (!isTie) {
-                                        if (isMaster) isWin = masterWon;
-                                        else isWin = playersWon;
-                                    }
-
-                                    const currentWins = profile.wins || 0;
-                                    const currentLosses = profile.losses || 0;
-
-                                    const { error: updateError } = await supabase
-                                        .from('profiles')
-                                        .update({
-                                            visa_points: finalTotalScore, // PASTE logic: Overwrite with the absolute HUD total
-                                            wins: isWin ? currentWins + 1 : currentWins,
-                                            losses: (!isWin && !isTie) ? currentLosses + 1 : currentLosses
-                                        })
-                                        .eq('email', targetEmail);
-
-                                    if (updateError) {
-                                        console.error(`[CLUBS MASTER] Failed to update stats for ${targetEmail}: `, updateError);
-                                    }
-                                } catch (innerErr) {
-                                    console.error(`[CLUBS MASTER] Error processing user ${uid}: `, innerErr);
-                                }
+                        Object.entries(votesMap).forEach(([cardId, count]) => {
+                            if (excludeIds.includes(cardId)) return;
+                            if (count > maxVotes) {
+                                maxVotes = count;
+                                candidates = [cardId];
+                            } else if (count === maxVotes) {
+                                candidates.push(cardId);
                             }
-                        } catch (err) {
-                            console.error('[CLUBS MASTER] Stats persistence global error:', err);
+                        });
+
+                        if (candidates.length > 0) {
+                            // Tie-Breaker: Randomly pick one of the top voted cards
+                            return candidates[Math.floor(Math.random() * candidates.length)];
+                        }
+                        return null;
+                    };
+
+                    // Determine Locked Selections
+                    // First lock Angel, then Demon (excluding Angel)
+                    let lockedAngel = getTopCard(angelVotes, []);
+                    let lockedDemon = getTopCard(demonVotes, [lockedAngel]);
+
+                    // Fallback: If no votes or invalid, pick random available
+                    if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
+                    // If still null (e.g. no available cards?? unlikely), just keep null or try again
+                    if (!lockedDemon) lockedDemon = getAvailableCard([lockedAngel, mSel.angel, mSel.demon]);
+
+                    // Final Check to ensure we have selections
+                    if (!lockedAngel) lockedAngel = getAvailableCard([lockedDemon, mSel.angel, mSel.demon]);
+
+                    pSel = { angel: lockedAngel, demon: lockedDemon };
+
+                    // Auto-Pick for Master (unchanged)
+                    if (!mSel.angel) mSel.angel = getAvailableCard([mSel.demon]);
+                    if (!mSel.demon) mSel.demon = getAvailableCard([mSel.angel]);
+
+                    console.log('Final Locked Player Selection (Vote Based):', pSel);
+                    console.log('Master selection after auto-pick:', mSel);
+
+                    // NEW: Assign Marks (Roles) to the card objects
+                    const updatedActiveDeck = cards.map(c => {
+                        let playerRole = null;
+                        let masterRole = null;
+                        if (c.id === pSel.angel) playerRole = 'angel';
+                        else if (c.id === pSel.demon) playerRole = 'demon';
+
+                        if (c.id === mSel.angel) masterRole = 'angel';
+                        else if (c.id === mSel.demon) masterRole = 'demon';
+
+                        return { ...c, playerRole, masterRole };
+                    });
+
+                    // Generate Hint Cards centrally for Round 1 & 4
+                    let hintCardsM: string[] = [];
+                    let hintCardsP: string[] = [];
+                    if (round === 1 || round === 4) {
+                        if (mSel.angel && mSel.demon) {
+                            const targets = mSel;
+                            const otherCards = cards.filter(c => c.id !== targets.angel && c.id !== targets.demon && !c.isRemoved && !dbRemoved.includes(c.id));
+                            const shuffledOthers = [...otherCards].sort(() => Math.random() - 0.5);
+                            const randoms = shuffledOthers.slice(0, 2);
+                            hintCardsP = [targets.angel, targets.demon, ...randoms.map(c => c.id)].sort(() => Math.random() - 0.5);
+                        }
+                        if (pSel.angel && pSel.demon) {
+                            const targets = pSel;
+                            const otherCards = cards.filter(c => c.id !== targets.angel && c.id !== targets.demon && !c.isRemoved && !dbRemoved.includes(c.id));
+                            const shuffledOthers = [...otherCards].sort(() => Math.random() - 0.5);
+                            const randoms = shuffledOthers.slice(0, 2);
+                            hintCardsM = [targets.angel, targets.demon, ...randoms.map(c => c.id)].sort(() => Math.random() - 0.5);
+                        }
+                    }
+
+                    // Update Round Data with Calculated Locks AND Updated Deck
+                    rData = {
+                        ...rData,
+                        player_selection: pSel,
+                        master_selection: mSel,
+                        hint_cards: hintCardsP, // Fallback for players
+                        hint_cards_p: hintCardsP,
+                        hint_cards_m: hintCardsM,
+                        decks: {
+                            ...rData.decks,
+                            active: updatedActiveDeck
                         }
                     };
 
-                    persistClubsStats();
+                    // NEW: Go to Selection Reveal (Interim Phase)
+                    const duration = 10;
+                    const expiry = new Date(now.getTime() + duration * 1000);
+                    console.log('⏭️ Transitioning to selection_reveal');
 
-                    await supabase.from('clubs_game_status').update({
-                        gameState: 'won',
-                        player_score: newLegacyPScore,
-                        master_score: newLegacyMScore,
-                        scores: {
-                            ...finalScores,
-                            current: adjustedCurrent,
-                            high_player: { score: newLegacyPScore, uid: topPlayerIdEnd },
-                            high_master: { score: newLegacyMScore, uid: topMasterIdEnd }
-                        },
-                        phase_expiry: null
-                    }).eq('id', 'clubs_king');
+                    await doUpdate({
+                        gameState: 'selection_reveal',
+                        phase_expiry: expiry.toISOString(),
+                        round_data: rData
+                    });
 
-                    onComplete(newLegacyPScore);
-                } else {
+                    setGameState('selection_reveal');
+                    setPhaseExpiry(expiry);
+                }
+                else if (gameState === 'selection_reveal') {
+                    // NEW: Go to Hunter Play
                     const duration = 60;
                     const expiry = new Date(now.getTime() + duration * 1000);
-                    const { data: currentStatus } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
-                    let nextRoundData = currentStatus?.round_data || {};
 
-                    const pSel = nextRoundData.player_selection || { angel: null, demon: null };
-                    const mSel = nextRoundData.master_selection || { angel: null, demon: null };
-                    const cardsToRemove = [mSel.angel, mSel.demon, pSel.angel, pSel.demon].filter(Boolean);
-                    const prevRemovedP = currentStatus.removed_cards_p || [];
-                    const prevRemovedM = currentStatus.removed_cards_m || [];
+                    await doUpdate({
+                        gameState: 'playing',
+                        phase_expiry: expiry.toISOString()
+                    });
 
-                    // FIXED: Accumulate removed cards properly
-                    const finalRemovedP = Array.from(new Set([...prevRemovedP, ...cardsToRemove]));
-                    const finalRemovedM = Array.from(new Set([...prevRemovedM, ...cardsToRemove]));
-
-                    if (nextRoundData.player_selection) nextRoundData.player_selection = null;
-                    if (nextRoundData.master_selection) nextRoundData.master_selection = null;
-
-                    if (nextRound === 4) {
-                        console.log('=== DECK SCENARIO: SWAPPING TO SET 2 ===');
-                        if (nextRoundData.decks?.reserve && nextRoundData.decks.reserve.length > 0) {
-                            nextRoundData.decks.active = nextRoundData.decks.reserve;
-                            nextRoundData.decks.reserve = [];
-                            setCards(nextRoundData.decks.active);
-                        }
-                    }
-
-                    setRound(nextRound);
-                    setGameState('setup_phase1');
+                    setGameState('playing');
                     setPhaseExpiry(expiry);
-                    setMySelection({ angel: null, demon: null });
-                    setPlayerLocked(false);
                     setMasterVotes({});
-                    setPlayersVotes({});
-                    setPhase1Selections({}); // Clear for next round
-
-                    await supabase.from('clubs_game_status').update({
-                        gameState: 'setup_phase1',
-                        current_round: nextRound,
-                        round_data: nextRoundData,
-                        phase_expiry: expiry.toISOString(),
-                        removed_cards_p: finalRemovedP,
-                        removed_cards_m: finalRemovedM
-                    }).eq('id', 'clubs_king');
                 }
-            }
+                else if (gameState === 'playing') {
+                    const duration = 12; // 12s Card Reveal Animation
+                    const expiry = new Date(now.getTime() + duration * 1000);
+
+                    // FETCH latest round_data to avoid overwriting selections/decks
+                    const accessToken = await getAccessToken();
+                    const statusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=round_data`, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'apikey': supabaseKey,
+                            'Accept': 'application/vnd.pgrst.object+json'
+                        }
+                    });
+                    const currentStatus = await statusRes.json();
+                    const rData = currentStatus?.round_data || {};
+
+                    console.log('Saving all collected votes to DB at playing -> card_reveal transition:', {
+                        player_votes: playersVotesRef.current,
+                        master_votes: masterVotesRef.current
+                    });
+
+                    // Merge DB votes with engine's broadcast refs key-by-key
+                    const mergeVotes = (dbVotes: any, refVotes: any) => {
+                        const merged = { ...(dbVotes || {}) };
+                        if (refVotes) {
+                            Object.entries(refVotes).forEach(([uid, votes]) => {
+                                if (Array.isArray(votes) && votes.length > 0) {
+                                    merged[uid] = votes;
+                                }
+                            });
+                        }
+                        return merged;
+                    };
+
+                    await doUpdate({
+                        gameState: 'card_reveal',
+                        phase_expiry: expiry.toISOString(),
+                        round_data: {
+                            ...rData,
+                            player_votes: mergeVotes(rData.player_votes, playersVotesRef.current),
+                            master_votes: mergeVotes(rData.master_votes, masterVotesRef.current)
+                        }
+                    });
+
+                    setGameState('card_reveal');
+                    setPhaseExpiry(expiry);
+                }
+                else if (gameState === 'card_reveal') {
+                    await performEvaluation();
+                }
+                else if (gameState === 'round_reveal') {
+                    const nextRound = round + 1;
+
+                    const transitionPromise = (async () => {
+                        if (nextRound > 6) { // MAX_ROUNDS
+                            // GAME COMPLETE
+                            gameEnded.current = true;
+                            const accessToken = await getAccessToken();
+                            const combinedRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores,allowed_players`, {
+                                headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                            });
+                            const combinedData = await combinedRes.json();
+                            const finalScores = combinedData?.scores || { current: {}, history: {}, start: {} };
+                            const finalCurrent = finalScores.current || {};
+                            const playerIds = new Set<string>((combinedData?.allowed_players || []).map((id: any) => String(id)));
+                            const playerIdsArr = Array.from(playerIds);
+
+                            let maxPlayerScore = -Infinity;
+                            let maxMasterScore = -Infinity;
+
+                            Object.entries(finalCurrent).forEach(([uid, score]) => {
+                                const numScore = typeof score === 'number' ? score : 0;
+                                const isPlayer = playerIds.has(uid);
+                                const isMasterId = uid === 'MASTER' || uid.includes('MASTER') || uid.startsWith('master_');
+
+                                if (!isPlayer || isMasterId || uid === user?.uid || uid === user?.id) {
+                                    if (numScore > maxMasterScore) maxMasterScore = numScore;
+                                } else {
+                                    if (numScore > maxPlayerScore) maxPlayerScore = numScore;
+                                }
+                            });
+
+                            if (maxPlayerScore === -Infinity) maxPlayerScore = 0;
+                            if (maxMasterScore === -Infinity) maxMasterScore = 0;
+
+                            const playersWon = maxPlayerScore > maxMasterScore;
+                            const mastersWon = maxMasterScore > maxPlayerScore;
+
+                            const adjustedCurrent: Record<string, number> = {};
+                            Object.entries(finalCurrent).forEach(([uid, score]) => {
+                                const numScore = typeof score === 'number' ? score : 0;
+                                const isMaster = isMasterUid(uid, playerIdsArr);
+                                if (playersWon) {
+                                    adjustedCurrent[uid] = numScore + (isMaster ? -500 : 500);
+                                } else if (mastersWon) {
+                                    adjustedCurrent[uid] = numScore + (isMaster ? 500 : -500);
+                                } else {
+                                    adjustedCurrent[uid] = numScore; // Tie
+                                }
+                            });
+
+                            const playerScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => !isMasterUid(k, playerIdsArr)).map(([, v]) => v);
+                            const masterScoresEnd = Object.entries(adjustedCurrent).filter(([k]) => isMasterUid(k, playerIdsArr)).map(([, v]) => v);
+
+                            const newLegacyPScore = playerScoresEnd.length > 0 ? Math.max(...playerScoresEnd) : 0;
+                            const newLegacyMScore = masterScoresEnd.length > 0 ? Math.max(...masterScoresEnd) : 0;
+
+                            let topPlayerIdEnd = 'TBD';
+                            let topMasterIdEnd = 'MASTER';
+                            Object.entries(adjustedCurrent).forEach(([uid, s]) => {
+                                const score = Number(s) || 0;
+                                if (isMasterUid(uid, playerIdsArr)) {
+                                    if (score === newLegacyMScore) topMasterIdEnd = uid;
+                                } else {
+                                    if (score === newLegacyPScore) topPlayerIdEnd = uid;
+                                }
+                            });
+
+                            const mUid = user?.uid || user?.id || user?.id;
+                            if (mUid && adjustedCurrent[mUid] !== undefined) {
+                                setMyScore(adjustedCurrent[mUid]);
+                            }
+                            setTopPlayerScore(newLegacyPScore);
+                            setTopMasterScore(newLegacyMScore);
+                            setTopPlayerId(topPlayerIdEnd);
+                            setTopMasterId(topMasterIdEnd);
+
+                            console.log('[CLUBS MASTER] Persisting stats...');
+                            // Run persistClubsStats in background, do not await it here so it doesn't block phase transition
+                            const persistClubsStats = async () => {
+                                try {
+                                    const participantIds = Object.keys(adjustedCurrent);
+                                    if (participantIds.length > 0) {
+                                        const token = await getAccessToken();
+                                        const res = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${participantIds.join(',')})&select=id,email,wins,losses,visa_points`, {
+                                            headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Accept': 'application/json' }
+                                        });
+                                        if (res.ok) {
+                                            const profilesData = await res.json();
+                                            for (const profile of profilesData) {
+                                                const uid = profile.id;
+                                                if (!profile.email) continue;
+                                                const initialScore = finalScores?.start?.[uid] || 0;
+                                                const finalScore = adjustedCurrent[uid] || 0;
+                                                const isWin = finalScore >= initialScore;
+                                                
+                                                await fetch(`${supabaseUrl}/rest/v1/profiles?email=eq.${encodeURIComponent(profile.email)}`, {
+                                                    method: 'PATCH',
+                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                    body: JSON.stringify({ 
+                                                        visa_points: finalScore, 
+                                                        wins: (profile.wins || 0) + (isWin ? 1 : 0), 
+                                                        losses: (profile.losses || 0) + (isWin ? 0 : 1) 
+                                                    })
+                                                });
+                                            }
+                                        }
+                                    }
+                                } catch (e) { console.error(e); }
+                            };
+                            persistClubsStats();
+
+                            try {
+                                await doUpdate({
+                                    gameState: 'won',
+                                    player_score: newLegacyPScore,
+                                    master_score: newLegacyMScore,
+                                    scores: {
+                                        ...finalScores,
+                                        current: adjustedCurrent,
+                                        high_player: { score: newLegacyPScore, uid: topPlayerIdEnd },
+                                        high_master: { score: newLegacyMScore, uid: topMasterIdEnd }
+                                    },
+                                    phase_expiry: null
+                                });
+                            } catch (endError) {
+                                console.error("[CRITICAL] Failed to update game state to 'won':", endError);
+                            }
+
+                            onComplete(newLegacyPScore);
+                        } else {
+                            const duration = 60;
+                            const expiry = new Date(now.getTime() + duration * 1000);
+                            const accessToken = await getAccessToken();
+                            const statusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=*`, {
+                                headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                            });
+                            const currentStatus = await statusRes.json();
+                            let nextRoundData = currentStatus?.round_data || {};
+
+                            const pSel = nextRoundData.player_selection || { angel: null, demon: null };
+                            const mSel = nextRoundData.master_selection || { angel: null, demon: null };
+                            const cardsToRemove = [mSel.angel, mSel.demon, pSel.angel, pSel.demon].filter(Boolean);
+                            const prevRemovedP = currentStatus?.removed_cards_p || [];
+                            const prevRemovedM = currentStatus?.removed_cards_m || [];
+
+                            const finalRemovedP = Array.from(new Set([...prevRemovedP, ...cardsToRemove]));
+                            const finalRemovedM = Array.from(new Set([...prevRemovedM, ...cardsToRemove]));
+
+                            // CLEAR SELECTIONS FOR NEW ROUND
+                            nextRoundData.player_selection = { angel: null, demon: null };
+                            nextRoundData.master_selection = { angel: null, demon: null };
+
+                            if (nextRoundData.decks && Array.isArray(nextRoundData.decks.reserve)) {
+                                if (nextRound === 4) {
+                                    console.log('=== DECK SCENARIO: SWAPPING TO SET 2 ===');
+                                    if (nextRoundData.decks.reserve.length > 0) {
+                                        nextRoundData.decks.active = nextRoundData.decks.reserve;
+                                        nextRoundData.decks.reserve = [];
+                                        setCards(nextRoundData.decks.active);
+                                    }
+                                }
+                            }
+
+                            await doUpdate({
+                                gameState: 'setup_phase1',
+                                current_round: nextRound,
+                                round_data: nextRoundData,
+                                phase_expiry: expiry.toISOString(),
+                                removed_cards_p: finalRemovedP,
+                                removed_cards_m: finalRemovedM
+                            });
+
+                            setRound(nextRound);
+                            setGameState('setup_phase1');
+                            setPhaseExpiry(expiry);
+                            setMySelection({ angel: null, demon: null });
+                            setPlayerLocked(false);
+                            setMasterVotes({});
+                            setPlayersVotes({});
+                            setPhase1Selections({}); // Clear for next round
+                        }
+                    })();
+
+                    await transitionPromise;
+                }
+            }; // End executePhase
+
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Global Phase Transition Timeout')), 60000));
+            await Promise.race([executePhase(), timeoutPromise]);
+
+            lastProcessedPhase.current = { gameState, round };
         } catch (err) {
             console.error("ADVANCE PHASE ERROR:", err);
-            alert("SYSTEM ERROR: PHASE TRANSITION FAILED");
+            const isTimeoutError = err instanceof Error && (
+                err.message.includes('Global Phase Transition Timeout') ||
+                err.message.includes('Global Fetch Timeout') ||
+                err.message.toLowerCase().includes('timeout') ||
+                err.name === 'AbortError' ||
+                err.message.toLowerCase().includes('aborted')
+            );
+            
+            if (isTimeoutError) {
+                console.warn("[ADVANCE PHASE] Engine transition timed out globally. Will automatically retry on next tick.");
+                lastProcessedPhase.current = null; // Clear so it can retry
+                return;
+            }
+            if (!isEngine) {
+                alert("SYSTEM ERROR: PHASE TRANSITION FAILED");
+            } else {
+                console.error("SYSTEM ERROR: PHASE TRANSITION FAILED");
+            }
             setShowResetOverlay(true);
         } finally {
-            setTimeout(() => { isProcessing.current = false; }, 1000);
+            isProcessing.current = false;
         }
     };
 
-    const performEvaluation = async () => {
+    async function performEvaluation() {
+        console.log("[EVAL TRACE] 1. Starting performEvaluation...");
         try {
             const now = new Date();
             const duration = 10; // 10s Eval
             const expiry = new Date(now.getTime() + duration * 1000);
 
-            const { data } = await supabase.from('clubs_game_status').select('*').eq('id', 'clubs_king').single();
-            const rData = data.round_data || {};
+            console.log("[EVAL TRACE] 2. Fetching clubs_game_status (using fetch)...");
+            const accessToken = await getAccessToken();
+            const statusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=*`, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+            });
+            const data = await statusRes.json();
+            const rData = data?.round_data || {};
 
             let activeGameId = data.active_game_id;
             if (!activeGameId) {
                 console.error("[CRITICAL] No active_game_id found! Attempting recovery...");
 
+                console.log("[EVAL TRACE] 3. Fetching clubs_game_sessions...");
                 // 1. Try to find an existing active session
-                const { data: latestSession } = await supabase
-                    .from('clubs_game_sessions')
-                    .select('id')
-                    .eq('status', 'active')
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .single();
+                const latestSessionRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_sessions?status=eq.active&select=id&order=created_at.desc.nullslast&limit=1`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey }
+                });
+                const latestSessionData = await latestSessionRes.json();
+                const latestSession = latestSessionData && latestSessionData.length > 0 ? latestSessionData[0] : null;
 
                 if (latestSession) {
                     activeGameId = latestSession.id;
@@ -1445,28 +1823,36 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 } else {
                     // 2. If no session exists, CREATE ONE
                     console.warn("[RECOVERY] No active session found. Creating new session...");
-                    const { data: newSession, error: createError } = await supabase
-                        .from('clubs_game_sessions')
-                        .insert([{
+                    const newSessionRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_sessions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=representation' },
+                        body: JSON.stringify([{
                             status: 'active',
                             total_rounds: 6,
                             current_round: round,
                             metadata: { created_via: 'auto_recovery' }
                         }])
-                        .select()
-                        .single();
-
-                    if (newSession) {
-                        activeGameId = newSession.id;
-                        console.log(`[RECOVERY] Created new session: ${activeGameId} `);
+                    });
+                    
+                    if (newSessionRes.ok) {
+                        const newSessionData = await newSessionRes.json();
+                        const newSession = newSessionData && newSessionData.length > 0 ? newSessionData[0] : null;
+                        if (newSession) {
+                            activeGameId = newSession.id;
+                            console.log(`[RECOVERY] Created new session: ${activeGameId} `);
+                        }
                     } else {
-                        console.error("[RECOVERY FAILED] Could not create session:", createError);
+                        console.error("[RECOVERY FAILED] Could not create session:", await newSessionRes.text());
                     }
                 }
 
                 // Update the game status with whatever we found/created
                 if (activeGameId) {
-                    await supabase.from('clubs_game_status').update({ active_game_id: activeGameId }).eq('id', 'clubs_king');
+                    await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                        body: JSON.stringify({ active_game_id: activeGameId })
+                    });
                 }
             }
 
@@ -1474,11 +1860,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const mSel = rData.master_selection || { angel: null, demon: null };
             const currentScores = data.scores || { current: {}, history: {} };
 
-            // Use Refs for latest values
-            const currentPVotesMap = playersVotesRef.current;
-            const currentMVotesMap = masterVotesRef.current;
+            const currentPVotesMap = (rData.player_votes || {}) as Record<string, string[]>;
+            const currentMVotesMap = (rData.master_votes || {}) as Record<string, string[]>;
 
-            const mUid = user?.uid || user?.id || auth.currentUser?.uid;
+            const mUid = user?.uid || user?.id || user?.id;
 
             const allParticipants = new Set<string>();
             if (data?.allowed_players && Array.isArray(data.allowed_players)) {
@@ -1494,6 +1879,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const resList: any[] = [];
             const masterIds = new Set(Object.keys(currentMVotesMap));
             if (mUid) masterIds.add(mUid);
+            if (user?.uid) masterIds.add(user.uid);
             if (user?.id) masterIds.add(user.id);
             masterIds.add('MASTER');
             masterIds.add('SYSTEM_ARCHITECT');
@@ -1518,28 +1904,43 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 }
             }
 
+            const playerIdsArr = data?.allowed_players ? data.allowed_players.map((id: any) => String(id)) : [];
+
             participantIds.forEach(uid => {
                 let score = 0;
                 const reasons: string[] = [];
-                const isMaster = isMasterUid(uid);
+                const isMaster = isMasterUid(uid, playerIdsArr);
                 const votes = isMaster ? currentMVotesMap[uid] : currentPVotesMap[uid];
 
                 if (!votes || votes.length === 0) {
                     score = -30;
                     reasons.push('DID NOT VOTE');
                 } else {
-                    topVotedCards.forEach((consensusCard) => {
-                        if (votes.includes(consensusCard)) {
-                            const targetRole = isMaster ? pSel : mSel;
-                            if (consensusCard === targetRole.angel) {
+                    if (isMaster) {
+                        // Master votes directly guess the Players' hidden cards (pSel)
+                        votes.forEach((votedCardId) => {
+                            if (votedCardId === pSel.angel) {
                                 score += angelReward;
-                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''} ANGEL`);
-                            } else if (consensusCard === targetRole.demon) {
+                                reasons.push('FOUND PLAYER ANGEL');
+                            } else if (votedCardId === pSel.demon) {
                                 score -= 50;
-                                reasons.push(`CONSENSUS: FOUND ${isMaster ? 'PLAYER ' : ''} DEMON`);
+                                reasons.push('FOUND PLAYER DEMON');
                             }
-                        }
-                    });
+                        });
+                    } else {
+                        // Players' votes (guesses of Master cards) are evaluated via consensus
+                        topVotedCards.forEach((consensusCard) => {
+                            if (votes.includes(consensusCard)) {
+                                if (consensusCard === mSel.angel) {
+                                    score += angelReward;
+                                    reasons.push('CONSENSUS: FOUND ANGEL');
+                                } else if (consensusCard === mSel.demon) {
+                                    score -= 50;
+                                    reasons.push('CONSENSUS: FOUND DEMON');
+                                }
+                            }
+                        });
+                    }
                     if (score === 0) reasons.push('NO TARGET ACQUIRED');
                 }
 
@@ -1572,15 +1973,15 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             let topPId = '';
 
             Object.entries(newCurrent).forEach(([uid, s]) => {
-                const isMaster = isMasterUid(uid);
+                const isMaster = isMasterUid(uid, playerIdsArr);
                 const score = Number(s) || 0;
                 if (isMaster) {
-                    if (score > maxMScore) maxMScore = score;
+                     if (score > maxMScore) maxMScore = score;
                 } else {
-                    if (score > maxPScore) {
-                        maxPScore = score;
-                        topPId = uid;
-                    }
+                     if (score > maxPScore) {
+                         maxPScore = score;
+                         topPId = uid;
+                     }
                 }
             });
 
@@ -1590,92 +1991,61 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
             const highPlayer = { score: maxPScore, uid: topPId || 'TBD' };
             const highMaster = { score: maxMScore, uid: mUid || 'MASTER' };
 
-            const playerScoresList = Object.entries(newCurrent).filter(([k]) => !isMasterUid(k)).map(([, v]) => v as number);
-            const masterScoresList = Object.entries(newCurrent).filter(([k]) => isMasterUid(k)).map(([, v]) => v as number);
+            const playerScoresList = Object.entries(newCurrent).filter(([k]) => !isMasterUid(k, playerIdsArr)).map(([, v]) => v as number);
+            const masterScoresList = Object.entries(newCurrent).filter(([k]) => isMasterUid(k, playerIdsArr)).map(([, v]) => v as number);
 
             const newLegacyPScore = playerScoresList.length > 0 ? Math.max(...playerScoresList) : 0;
             const newLegacyMScore = masterScoresList.length > 0 ? Math.max(...masterScoresList) : 0;
 
-            await supabase.from('clubs_game_status').update({
-                gameState: 'round_reveal',
-                phase_expiry: expiry.toISOString(),
-                scores: {
-                    start: currentScores.start,
-                    current: newCurrent,
-                    history: newHistory,
-                    high_player: highPlayer,
-                    high_master: highMaster
-                },
-                player_score: newLegacyPScore,
-                master_score: newLegacyMScore,
-                round_data: {
-                    ...rData,
-                    evaluation_results: resList,
-                    top_votes: topVotedCards
-                }
-            }).eq('id', 'clubs_king');
-
+            console.log("[EVAL TRACE] 4. Updating game status to round_reveal...");
+            await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                body: JSON.stringify({
+                    gameState: 'round_reveal',
+                    phase_expiry: expiry.toISOString(),
+                    scores: {
+                        start: currentScores.start,
+                        current: newCurrent,
+                        history: newHistory,
+                        high_player: highPlayer,
+                        high_master: highMaster
+                    },
+                    player_score: newLegacyPScore,
+                    master_score: newLegacyMScore,
+                    round_data: {
+                        ...rData,
+                        evaluation_results: resList,
+                        top_votes: topVotedCards
+                    }
+                })
+            });
             // --- PERSIST ROUND SCORES ---
-            try {
-                if (activeGameId) {
-                    // Fetch IDs specifically to map to emails
-                    // Master might not be in the participants list if they are just observing, but if they are playing (have a score), they should be in participantIds
-                    const { data: profiles, error: pErr } = await supabase
-                        .from('profiles')
-                        .select('id, email')
-                        .in('id', participantIds);
-
-                    if (!pErr && profiles) {
-                        console.log(`[ROUND PERSIST] Storing results for Game ${activeGameId}, Participants: ${profiles.length} `);
-
-                        for (const profile of profiles) {
-                            const roundDelta = roundScores[profile.id] || 0;
-                            const totalPoints = newCurrent[profile.id] || 0;
-
-                            // Use the Secure RPC to upsert points (Handles variable column names safely)
-                            const { error: rpcError } = await supabase.rpc('upsert_round_points', {
-                                p_game_id: activeGameId,
-                                p_email: profile.email,
-                                p_round_num: round,
-                                p_points: roundDelta,
-                                p_total: totalPoints
-                            });
-
-                            if (rpcError) {
-                                console.error(`[PERSIST ERROR] Failed to save for ${profile.email}: `, rpcError);
-                            } else {
-                                // console.log(`[PERSIST SUCCESS] Saved R${ round } for ${ profile.email }`);
-                            }
-                        }
-                    } else {
-                        console.error('[ROUND PERSIST] Could not fetch profiles for persistence:', pErr);
-                    }
-
-                    // Explicitly Handle MASTER Persistence if not in profiles (Backup)
-                    if (user?.email && (masterIds.has(user.id) || roundScores[user.id] !== undefined)) {
-                        const mDelta = roundScores[user.id] || 0;
-                        const mTotal = newCurrent[user.id] || 0;
-                        // Try to persist for Master directly
-                        await supabase.rpc('upsert_round_points', {
-                            p_game_id: activeGameId,
-                            p_email: user.email,
-                            p_round_num: round,
-                            p_points: mDelta,
-                            p_total: mTotal
-                        });
-                    }
-
-                } else {
-                    console.warn('[ROUND PERSIST] Skipped - No Active Game ID');
-                }
-            } catch (persistErr) {
-                console.error("[CLUBS PERSISTENCE ERROR]:", persistErr);
-            }
+            // NOTE: The legacy RPC upsert_round_points was removed because it conflicts
+            // with the generated column "total_points" in the database. 
+            // We now rely exclusively on the clubs_round_scores history table below.
 
             // --- SAVE ROUND SCORES TO HISTORY TABLE ---
             console.log(`[ROUND SCORES] Saving round ${round} scores to history table...`);
             try {
                 const roundScoreRecords = [];
+
+                // Batch fetch all player profiles
+                const nonMasterUids = participantIds.filter(uid => !uid.includes('MASTER') && uid !== user?.uid && uid !== user?.id && uid !== 'SYSTEM_ARCHITECT');
+                const profilesMap: Record<string, string> = {};
+
+                if (nonMasterUids.length > 0) {
+                    console.log("[EVAL TRACE] 5. Fetching player profiles...");
+                    const profilesRes = await fetch(`${supabaseUrl}/rest/v1/profiles?select=id,email&id=in.(${nonMasterUids.join(',')})`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey }
+                    });
+                    if (profilesRes.ok) {
+                        const profilesData = await profilesRes.json();
+                        profilesData.forEach((p: any) => {
+                            if (p.id && p.email) profilesMap[p.id] = p.email;
+                        });
+                    }
+                }
 
                 for (const uid of participantIds) {
                     try {
@@ -1687,15 +2057,11 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                         // Fetch email for this user
                         let userEmail = null;
-                        if (uid.includes('MASTER') || uid === user?.id) {
+                        if (uid.includes('MASTER') || uid === user?.uid || uid === user?.id) {
                             userEmail = user?.email;
                         } else {
-                            const { data: userData } = await supabase
-                                .from('users')
-                                .select('email')
-                                .eq('id', uid)
-                                .single();
-                            userEmail = userData?.email;
+                            // Find email in batch map
+                            userEmail = profilesMap[uid] || null;
                         }
 
                         if (userEmail) {
@@ -1715,14 +2081,20 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                 // Batch insert all round scores
                 if (roundScoreRecords.length > 0) {
-                    const { error: insertError } = await supabase
-                        .from('clubs_round_scores')
-                        .upsert(roundScoreRecords, {
-                            onConflict: 'game_id,player_email,round_number'
-                        });
+                    console.log("[EVAL TRACE] 6. Upserting round scores...");
+                    const upsertRes = await fetch(`${supabaseUrl}/rest/v1/clubs_round_scores?on_conflict=game_id,player_email,round_number`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json', 
+                            'Authorization': `Bearer ${accessToken}`, 
+                            'apikey': supabaseKey, 
+                            'Prefer': 'resolution=merge-duplicates' 
+                        },
+                        body: JSON.stringify(roundScoreRecords)
+                    });
 
-                    if (insertError) {
-                        console.error('[ROUND SCORES] Error saving round scores:', insertError);
+                    if (!upsertRes.ok) {
+                        console.error('[ROUND SCORES] Error saving round scores:', await upsertRes.text());
                     } else {
                         console.log(`[ROUND SCORES] Successfully saved ${roundScoreRecords.length} round score records`);
                     }
@@ -1731,8 +2103,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                 console.error('[ROUND SCORES] Critical error:', roundScoreErr);
             }
 
+            console.log("[EVAL TRACE] 7. Broadcasting results...");
             // BROADCAST RESULTS (Critical for Player View)
-            await channelRef.current?.send({
+            // NON-BLOCKING: We do not await this, so a broken WebSocket doesn't stall the entire Game Engine.
+            Promise.resolve(channelRef.current?.send({
                 type: 'broadcast',
                 // Use 'round_reveal' to match the gameState - ensure ClubsGame.tsx listens for this!
                 event: 'round_results',
@@ -1742,51 +2116,44 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     // Fix for HUD not updating: Send the RAW points for the specific player to handle locally if needed
                     currentScores: newCurrent
                 }
-            });
-
-            /* 
-            // --- 6. REMOVED REAL-TIME PROFILE VISA POINTS SYNC (To avoid double-counting) ---
-            // Profile points are now updated authoritatively at the end of the game in advancePhase -> persistClubsStats.
-            console.log(`[PERSISTENCE] Starting Profile Visa Point Sync...`);
-            for (const uid of participantIds) {
-                try {
-                    // Skip Master/System IDs for profile updates
-                    if (uid.includes('MASTER') || uid === 'SYSTEM_ARCHITECT') continue;
-    
-                    // Fetch email if we don't have it (we should from earlier step, but re-fetch to be safe or use map)
-                    const { data: userData } = await supabase.from('users').select('email').eq('id', uid).single();
-                    if (userData?.email) {
-                        const roundDelta = roundScores[uid] || 0;
-                        if (roundDelta !== 0) {
-                            const { error: rpcError } = await supabase.rpc('adjust_visa_points', {
-                                p_email: userData.email,
-                                p_adjustment: roundDelta
-                            });
-    
-                            if (rpcError) console.error(`[PROFILE SYNC ERROR] ${ userData.email }: `, rpcError);
-                            else console.log(`[PROFILE SYNC] Adjusted ${ userData.email } by ${ roundDelta } `);
-                        }
-                    }
-                } catch (err) {
-                    console.error(`[PROFILE SYNC FAIL] UID ${ uid } `, err);
-                }
-            }
-            */
+            })).catch(e => console.warn("Broadcast failed, likely due to disconnected socket:", e));
 
             // Local Updates
+            console.log("[EVAL TRACE] 8. Local updates...");
             setGameState('round_reveal');
             setPhaseExpiry(expiry);
             setPlayerScore(newLegacyPScore);
             setMasterScore(newLegacyMScore);
-            if (user?.id) setMyScore(newCurrent[user.id] || 0);
+            const currentMyUid = user?.uid || user?.id;
+            if (currentMyUid) setMyScore(newCurrent[currentMyUid] || 0);
             setTopPlayerScore(newLegacyPScore);
             setTopPlayerId(topPId);
             setTopMasterScore(newLegacyMScore);
+            setTopMasterId(mUid || 'MASTER');
+
+            // Debug broadcast for the Master Player console
+            Promise.resolve(channelRef.current?.send({
+                type: 'broadcast',
+                event: 'eval_debug',
+                payload: {
+                    round,
+                    currentPVotesMap,
+                    currentMVotesMap,
+                    playerIdsArr,
+                    participantIds,
+                    topVotedCards,
+                    resList
+                }
+            })).catch(e => console.warn("Debug broadcast failed:", e));
 
             console.log("=== EVALUATION COMPLETE ===");
         } catch (evalErr) {
             console.error("CRITICAL EVALUATION ERROR:", evalErr);
-            alert("SYSTEM ERROR DURING EVALUATION. CHECK CONSOLE.");
+            if (!isEngine) {
+                alert("SYSTEM ERROR DURING EVALUATION. CHECK CONSOLE.");
+            } else {
+                console.error("SYSTEM ERROR DURING EVALUATION.");
+            }
         }
     };
 
@@ -1794,8 +2161,29 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
     if ((!cards || cards.length === 0) && gameState !== 'idle') return <Loader />;
 
+    if (isEngine) return null;
+
     return (
         <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+            {/* PHASE NOTIFICATION BANNER */}
+            <AnimatePresence>
+                {phaseBanner && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 50 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
+                        className="absolute inset-0 z-[200] flex items-center justify-center pointer-events-none"
+                    >
+                        <div className="bg-black/80 border border-white/20 p-8 sm:p-12 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(255,255,255,0.1)] text-center">
+                            <p className="text-white/50 text-sm tracking-[0.3em] uppercase mb-2">PHASE INITIATED</p>
+                            <h2 className="text-3xl sm:text-5xl font-mono text-white tracking-widest font-bold drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+                                {phaseBanner}
+                            </h2>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* HEADER HUB - Consolidated with Main Header */}
             <div className={`px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0 relative`}>
 
@@ -1832,7 +2220,10 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                         {/* TOP MASTER */}
                         <div className="text-center min-w-[40px]">
                             <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
-                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{topMasterScore}</p>
+                            <div className="flex flex-col items-center leading-none">
+                                <p className="text-[7px] sm:text-[9px] font-bold text-red-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topMasterId && playerIdMap[topMasterId] ? playerIdMap[topMasterId] : (topMasterId || '--')}</p>
+                                <p className="text-xs sm:text-lg font-mono font-bold text-white">{topMasterScore}</p>
+                            </div>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
@@ -1945,6 +2336,23 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             </div>
                         )}
 
+                        {/* BRIEFING STATE */}
+                        {gameState === 'briefing' && (
+                            <div className="absolute inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center">
+                                <div className="max-w-4xl mx-auto text-center space-y-8 p-8">
+                                    <h1 className="text-4xl font-cinzel font-black text-white uppercase tracking-[0.2em]">
+                                        Protocol Briefing
+                                    </h1>
+                                    <div className="h-1 w-64 mx-auto bg-gradient-to-r from-transparent via-green-500 to-transparent" />
+                                    <div className="space-y-4 text-white/80 font-mono text-center">
+                                        <p className="text-xl">Initializing Game Engine...</p>
+                                        <p className="text-sm">Players are receiving mission parameters.</p>
+                                        <p className="text-sm text-green-500 font-bold animate-pulse mt-4">AWAITING PHASE SHIFT...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* START GAME BUTTON - Only show when idle */}
                         {gameState === 'idle' && (
                             <button
@@ -1969,7 +2377,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                                         if (allowedIds.length > 0) {
                                             // 1. Fetch Emails
-                                            const { data: userData } = await supabase.from('users').select('id, email').in('id', allowedIds);
+                                            const { data: userData } = await supabase.from('profiles').select('id, email').in('id', allowedIds);
                                             const idEmailMap: Record<string, string> = {};
                                             const emails: string[] = [];
 
@@ -2069,7 +2477,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             const isMyDemon = mySelection.demon === card.id;
                             const isPlayerAngel = playerSelection.angel === card.id;
                             const isPlayerDemon = playerSelection.demon === card.id;
-                            const myId = user?.id || 'MASTER';
+                            const myId = user?.uid || user?.id || 'MASTER';
                             const myVotes = masterVotes[myId] || [];
                             const isVoted = gameState === 'playing' && myVotes.includes(card.id);
 
@@ -2149,86 +2557,84 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                     </div>
                 </div>
 
-                {/* BIG 4 REVEAL ANIMATION OVERLAY */}
-                <AnimatePresence>
-                    {gameState === 'card_reveal' && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="absolute inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-8 backdrop-blur-xl"
-                        >
-                            <h1 className="text-4xl font-black text-white font-cinzel tracking-[0.5em] mb-12 animate-pulse">IDENTITY REVEAL</h1>
-
-                            <div className="flex items-center gap-12">
-                                {/* MASTER SIDE */}
-                                <div className="flex flex-col items-center gap-6">
-                                    <h3 className="text-xl font-bold text-yellow-500/50 uppercase tracking-widest border-b border-yellow-500/20 pb-2">MASTER</h3>
-                                    <div className="flex gap-6">
-                                        {/* MASTER ANGEL */}
-                                        {(() => {
-                                            const card = cards.find(c => c.id === mySelection.angel);
-                                            if (!card) return null;
-                                            return (
-                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.5)]">
-                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">MY ANGEL</div>
-                                                </div>
-                                            );
-                                        })()}
-                                        {/* MASTER DEMON */}
-                                        {(() => {
-                                            const card = cards.find(c => c.id === mySelection.demon);
-                                            if (!card) return null;
-                                            return (
-                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.5)]">
-                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">MY DEMON</div>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
-                                </div>
-
-                                {/* VS SEPARATOR */}
-                                <div className="h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
-
-                                {/* PLAYER SIDE */}
-                                <div className="flex flex-col items-center gap-6">
-                                    <h3 className="text-xl font-bold text-blue-500/50 uppercase tracking-widest border-b border-blue-500/20 pb-2">PLAYERS</h3>
-                                    <div className="flex gap-6">
-                                        {/* PLAYER ANGEL */}
-                                        {(() => {
-                                            const card = cards.find(c => c.id === playerSelection.angel);
-                                            if (!card) return null;
-                                            return (
-                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-blue-500 shadow-[0_0_50px_rgba(59,130,246,0.5)]">
-                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER ANGEL</div>
-                                                </div>
-                                            );
-                                        })()}
-                                        {/* PLAYER DEMON */}
-                                        {(() => {
-                                            const card = cards.find(c => c.id === playerSelection.demon);
-                                            if (!card) return null;
-                                            return (
-                                                <div className="relative w-48 aspect-[2/3] rounded-xl border-4 border-purple-600 shadow-[0_0_50px_rgba(147,51,234,0.5)]">
-                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-4 py-1 font-black text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER DEMON</div>
-                                                </div>
-                                            );
-                                        })()}
-                                    </div>
+            {/* CARD REVEAL: SHOW ANGEL & DEMON */}
+            <AnimatePresence>
+                {gameState === 'card_reveal' && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-32 sm:pt-12 lg:pt-0">
+                        {/* Card Display Section */}
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 lg:gap-20 max-w-full scale-[0.65] sm:scale-85 lg:scale-90 origin-top sm:origin-center lg:origin-center pb-24 lg:pb-0 mt-8 sm:mt-0">
+                            {/* Master's Selected Cards */}
+                            <div className="space-y-8 sm:space-y-6 flex flex-col items-center">
+                                <h3 className="text-xl sm:text-xl font-mono font-bold uppercase tracking-[0.5em] text-center text-yellow-500/90 drop-shadow-[0_0_10px_rgba(234,179,8,0.3)]">MASTER</h3>
+                                <div className="flex gap-4 sm:gap-4 justify-center">
+                                    {/* MASTER ANGEL */}
+                                    {(() => {
+                                        const card = cards.find(c => c.id === mySelection.angel);
+                                        if (!card) return null;
+                                        return (
+                                            <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-yellow-500 shadow-[0_0_40px_rgba(234,179,8,0.4)]">
+                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY ANGEL</div>
+                                            </div>
+                                        );
+                                    })()}
+                                    {/* MASTER DEMON */}
+                                    {(() => {
+                                        const card = cards.find(c => c.id === mySelection.demon);
+                                        if (!card) return null;
+                                        return (
+                                            <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-red-600 shadow-[0_0_40px_rgba(220,38,38,0.4)]">
+                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY DEMON</div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
-                            <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
-                                CALCULATING ROUND OUTCOME...
+                            {/* VS SEPARATOR */}
+                            <div className="hidden sm:block h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
+                            <div className="sm:hidden w-64 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent my-12" />
+
+                            {/* PLAYER SIDE */}
+                            <div className="flex flex-col items-center gap-8 sm:gap-6">
+                                <h3 className="text-xl sm:text-xl font-bold font-mono tracking-[0.5em] border-b border-blue-500/20 pb-3 text-blue-500/70 uppercase">PLAYERS</h3>
+                                <div className="flex gap-2 sm:gap-6 justify-center">
+                                    {/* PLAYER ANGEL */}
+                                    {(() => {
+                                        const card = cards.find(c => c.id === playerSelection.angel);
+                                        if (!card) return null;
+                                        return (
+                                            <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.4)]">
+                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER ANGEL</div>
+                                            </div>
+                                        );
+                                    })()}
+                                    {/* PLAYER DEMON */}
+                                    {(() => {
+                                        const card = cards.find(c => c.id === playerSelection.demon);
+                                        if (!card) return null;
+                                        return (
+                                            <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-purple-600 shadow-[0_0_30px_rgba(147,51,234,0.4)]">
+                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER DEMON</div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
                             </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                        </div>
+
+                        <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
+                            CALCULATING ROUND OUTCOME...
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
                 {/* SIDEBAR (Bottom on mobile, Right on desktop) */}
                 <div className="w-full sm:w-80 h-[30vh] sm:h-full border-t sm:border-t-0 sm:border-l border-white/10 flex flex-col bg-[#0A0A0E]">
@@ -2248,7 +2654,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                                     <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-white/20 group-hover:bg-cyan-500/50 transition-colors" />
                                     <div className="pl-3 py-1">
                                         <p className="text-[10px] font-black text-white/40 mb-1">
-                                            {msg.user_id === user?.id ? '#MASTER' : (playerIdMap[msg.user_id] || (msg.user_id || 'SYS').slice(0, 8).toUpperCase())}
+                                            {msg.user_id === user?.id ? '#MASTER' : (msg.user_name || playerIdMap[msg.user_id] || (msg.user_id || 'SYS').slice(0, 8)).toUpperCase()}
                                         </p>
                                         <p className="text-xs text-white/80 font-mono leading-relaxed">{msg.content || msg.text}</p>
                                     </div>
@@ -2373,7 +2779,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
 
                                         {/* Return Button */}
                                         <button
-                                            onClick={() => window.location.href = '/home'}
+                                            onClick={() => { if (!isEngine) window.location.href = '/home/card'; }}
                                             className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
                                         >
                                             RETURN TO LOBBY
@@ -2426,7 +2832,7 @@ export const ClubsGameMaster = ({ onComplete, user }: ClubsGameMasterProps) => {
                             {/* Button */}
                             <div className="pt-4">
                                 <button
-                                    onClick={() => window.location.href = '/home'}
+                                    onClick={() => { if (!isEngine) window.location.href = '/home/card'; }}
                                     className="px-8 py-3 bg-red-500/10 border border-red-500 hover:bg-red-500 hover:text-black text-red-500 font-bold font-mono tracking-widest transition-all uppercase"
                                 >
                                     RETURN TO LOBBY

@@ -11,9 +11,8 @@ import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { DiamondsGame } from './games/DiamondsGame';
 // import { GlowCard } from './ui/spotlight-card';
 import { PlayerCardModal } from './PlayerCardModal';
-import { supabase } from '../supabaseClient';
-import { auth, db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
+
 
 interface GameContainerProps {
     type: string;
@@ -33,6 +32,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const [showPlayerCard, setShowPlayerCard] = useState(false);
     const isMasterRole = userInfo?.role === 'master' || userInfo?.role === 'admin' || userInfo?.username === 'admin' || userInfo?.username === 'SANJAY';
     const [kickedUser, setKickedUser] = useState(false);
+    const [spadesMasterError, setSpadesMasterError] = useState(false); // Track if a Master tries to join Spades
 
     useEffect(() => {
         console.log("GAMECONTAINER MOUNTED. UserInfo:", userInfo);
@@ -80,31 +80,38 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
         const fetchInitialState = async () => {
             try {
-                const { data, error } = await supabase
-                    .from(tableName)
-                    .select('*')
-                    .eq('id', targetId)
-                    .maybeSingle();
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/${tableName}?id=eq.${targetId}&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store'
+                });
 
-                if (data) {
-                    console.log(`[GAME_MONITOR] Initial state for ${type}:`, data);
-                    setLocalSystemStart(!!data.system_start);
+                if (response.ok) {
+                    const data = await response.json();
+                    const row = Array.isArray(data) ? data[0] : data;
+                    
+                    if (row) {
+                        console.log(`[GAME_MONITOR] Initial state for ${type}:`, row);
+                        setLocalSystemStart(!!row.system_start);
 
-                    if (data.is_paused !== undefined) {
-                        setIsPaused(!!data.is_paused);
+                        if (row.is_paused !== undefined) {
+                            setIsPaused(!!row.is_paused);
+                        }
+
+                        // Hearts uses participants (array of objects), extract IDs
+                        if (row.participants && Array.isArray(row.participants)) {
+                            const participantIds = row.participants.map((p: any) => p.id || p).filter(Boolean);
+                            setLocalAllowedPlayers(participantIds);
+                        } else {
+                            setLocalAllowedPlayers(row.allowed_players || []);
+                        }
                     }
-
-                    // Hearts uses participants (array of objects), extract IDs
-                    if (data.participants && Array.isArray(data.participants)) {
-                        const participantIds = data.participants.map((p: any) => p.id || p).filter(Boolean);
-                        setLocalAllowedPlayers(participantIds);
-                    } else {
-                        setLocalAllowedPlayers(data.allowed_players || []);
-                    }
-                } else if (error) {
-                    console.warn(`[GAME_MONITOR] Initial fetch failed for ${type}, retrying minimal...`);
-                    const { data: minData } = await supabase.from(tableName).select('system_start').eq('id', targetId).maybeSingle();
-                    if (minData) setLocalSystemStart(!!minData.system_start);
+                } else {
+                    console.warn(`[GAME_MONITOR] Initial fetch failed for ${type}. Status: ${response.status}`);
                 }
             } catch (err) {
                 console.error(`[GAME_MONITOR] Fetch error for ${type}:`, err);
@@ -112,6 +119,13 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         };
 
         fetchInitialState();
+        
+        // Add robust polling fallback in case Realtime channel is stuck due to gotrue-js lock
+        const pollInterval = setInterval(() => {
+            if (!document.hidden) {
+                fetchInitialState();
+            }
+        }, 15000);
 
         const channel = supabase
             .channel(`game_start_monitor_${type}`)
@@ -130,22 +144,23 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                 if (newData.is_paused !== undefined) {
                     setIsPaused(!!newData.is_paused);
                 }
-                if (newData.allowed_players !== undefined) {
+                if (newData.allowed_players) {
                     setLocalAllowedPlayers(newData.allowed_players || []);
-                } else if (newData.participants !== undefined) {
-                    // Hearts uses participants array of objects, extract IDs
-                    const participantIds = Array.isArray(newData.participants)
-                        ? newData.participants.map((p: any) => p.id || p).filter(Boolean)
-                        : [];
+                } else if (newData.participants) {
+                    const participantIds = newData.participants.map((p: any) => p.id || p).filter(Boolean);
                     setLocalAllowedPlayers(participantIds);
                 }
             })
             .subscribe((status) => {
-                console.log(`[GAME_MONITOR] Subscribed to ${tableName} (${status})`);
+                console.log(`[GAME_MONITOR] Subscription status:`, status);
                 // Force a fetch on connect to ensure Freshness
                 if (status === 'SUBSCRIBED') fetchInitialState();
             });
 
+        return () => {
+            clearInterval(pollInterval);
+            supabase.removeChannel(channel);
+        };
         const broadcastChannels: Record<string, string> = {
             'Clubs': 'clubs_king_game',
             'Diamonds': 'diamonds_king_game',
@@ -196,11 +211,23 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
             if (type === 'Hearts') tableName = 'hearts_game_state';
             if (type === 'Diamonds') tableName = 'diamonds_game_state';
 
-            const { data } = await supabase
-                .from(tableName)
-                .select('*')
-                .eq('id', targetId)
-                .maybeSingle();
+            let data: any = null;
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/${tableName}?id=eq.${targetId}&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    data = await response.json();
+                }
+            } catch (err) {
+                console.warn("[GAME_POLLING] Fetch error:", err);
+            }
 
             if (data) {
                 let parsedAllowed: string[] = [];
@@ -220,9 +247,10 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
                 // Update state
                 if (data.system_start !== undefined) setLocalSystemStart(!!data.system_start);
+                if (data.is_paused !== undefined) setIsPaused(!!data.is_paused);
                 setLocalAllowedPlayers(parsedAllowed);
             }
-        }, 2000);
+        }, 15000);
 
         return () => clearInterval(interval);
     }, [waitingForGM, type]);
@@ -231,17 +259,26 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const resetTimerRef = useRef<any>(null);
 
     useEffect(() => {
-        const currentUserId = userInfo?.id || auth.currentUser?.uid;
+        const currentUserId = userInfo?.id;
         const whitelistActive = localAllowedPlayers.length > 0;
         const isAllowed = currentUserId && localAllowedPlayers.includes(currentUserId);
-        const accessGranted = isMasterRole || !whitelistActive || isAllowed;
+        const isSpades = type === 'Spades';
+        
+        // Masters are explicitly forbidden from joining Spades
+        const isForbiddenMaster = isSpades && isMasterRole;
+        const accessGranted = (!isForbiddenMaster && isMasterRole) || !whitelistActive || isAllowed;
 
-        if (localSystemStart && accessGranted) {
+        if (isForbiddenMaster) {
+            setSpadesMasterError(true);
+            setWaitingForGM(false);
+            setShowRules(false);
+        } else if (localSystemStart && accessGranted) {
             console.log(`[GAME_ENTRY] Access confirmed for ${type}. Entry active.`);
             if (resetTimerRef.current) {
                 clearTimeout(resetTimerRef.current);
                 resetTimerRef.current = null;
             }
+            setSpadesMasterError(false);
             setWaitingForGM(false);
             setShowRules(false);
         } else if (!localSystemStart) {
@@ -259,13 +296,29 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         }
     }, [localSystemStart, localAllowedPlayers, userInfo, isMasterRole, type, waitingForGM]);
 
+    const hasNegativeVisa = userInfo?.visa_points !== undefined && userInfo?.visa_points < 0;
+
+    useEffect(() => {
+        if (hasNegativeVisa && userInfo?.id && userInfo?.visa_status !== 'inactive') {
+            supabase.from('profiles').update({ visa_status: 'inactive', status: 'dead' }).eq('id', userInfo.id).then(() => {
+                console.log("Player marked as inactive/dead due to negative points");
+            });
+        }
+    }, [hasNegativeVisa, userInfo]);
+
     // LOBBY PRESENCE: Track user in lobby (Hybrid)
     useEffect(() => {
-        if (!waitingForGM) return;
+        if (!waitingForGM || kickedUser || hasNegativeVisa) return;
 
         const safeUser = userInfo || { id: 'anon-' + Math.random(), username: 'Anonymous' };
 
-        const channel = supabase.channel('clubs_lobby');
+        const channel = supabase.channel('clubs_lobby', {
+            config: {
+                presence: {
+                    key: safeUser.id
+                }
+            }
+        });
         channel
             .on('broadcast', { event: 'player_kick' }, (payload) => {
                 const targetId = payload.payload.userId;
@@ -285,6 +338,11 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                     }
                 }
             })
+            .on('broadcast', { event: 'force_exit' }, () => {
+                // If the admin purges the queue, everyone is kicked
+                setWaitingForGM(false);
+                setKickedUser(true);
+            })
             .subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
                     console.log(`[PRESENCE] Tracking for ${type.toLowerCase()} in clubs_lobby...`);
@@ -300,17 +358,14 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
         return () => {
             supabase.removeChannel(channel);
-            // Removed automatic clean-up to prevent race conditions during refreshes
-            // if (userInfo?.id) {
-            //     updateDoc(doc(db, 'users', userInfo.id), {
-            //         waiting_for_game: null
-            //     }).catch(() => { });
-            // }
         };
-    }, [waitingForGM, userInfo, type, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [waitingForGM, userInfo?.id, type, kickedUser]);
 
-    const addToFirestore = async () => {
-        console.log("[PRESENCE_DEBUG] Attempting to add to Firestore...", { userInfo, type });
+    // LOBBY PRESENCE: Fallback Waitlist DB Addition
+    const addToWaitlistDB = async () => {
+        if (hasNegativeVisa) return;
+        console.log("[PRESENCE_DEBUG] Attempting to add to Supabase Waitlist...", { userInfo, type });
         if (!userInfo?.id) {
             console.error("[PRESENCE_DEBUG] ABORT: No User Info/ID found!");
             return;
@@ -325,20 +380,16 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         console.log(`[PRESENCE_DEBUG] Target Game ID: ${targetGameId}`);
 
         try {
-            await setDoc(doc(db, 'users', userInfo.id), {
-                waiting_for_game: targetGameId,
-                last_active: Date.now(),
-                role: userInfo.role || 'player'
-            }, { merge: true });
-            console.log("[PRESENCE_DEBUG] Firestore write successful.");
+            // Handled by Supabase realtime lobby
+            console.log("[PRESENCE_DEBUG] Supabase write successful.");
         } catch (e) {
-            console.error("[PRESENCE_DEBUG] Firestore Waitlist Add Error:", e);
+            console.error("[PRESENCE_DEBUG] Supabase Waitlist Add Error:", e);
         }
     };
 
     // Auto-trigger on mount/change
     useEffect(() => {
-        if (waitingForGM) addToFirestore();
+        if (waitingForGM) addToWaitlistDB();
     }, [waitingForGM, userInfo, type]);
 
     const getRules = () => {
@@ -490,11 +541,10 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                         }
 
                                         try {
-                                            // Sign out from Firebase
-                                            const { signOut } = await import('firebase/auth');
-                                            await signOut(auth);
-
-                                            // Call parent logout handler
+                                            // The custom lock function causes ANY Supabase Auth method (like signOut) to permanently hang the in-memory mutex.
+                                            // We bypass it by clearing localStorage and forcing a hard reload to destroy the stuck mutex in memory!
+                                            localStorage.removeItem('borderland-fresh-token-v2');
+                                            window.location.href = '/login';
                                             if (onLogoutClick) onLogoutClick();
 
                                             // Close game container
@@ -527,7 +577,56 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
             {/* Main Content Area */}
             <div className="flex-1 relative z-[60] flex items-center justify-center p-4 min-h-0 overflow-hidden">
                 <AnimatePresence mode="wait">
-                    {showRules ? (
+                    {spadesMasterError ? (
+                        <motion.div
+                            key="spades-master-error"
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-black/90 backdrop-blur-xl border border-red-500/30 rounded-2xl p-8 max-w-lg w-full text-center space-y-6"
+                        >
+                            <div className="mx-auto w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-6">
+                                <AlertTriangle className="w-8 h-8 text-red-500" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-white uppercase tracking-widest font-mono">Access Denied</h2>
+                            <p className="text-red-400 font-mono text-sm">
+                                This game can be played only by a PLAYER, not a MASTER.
+                            </p>
+                            <button
+                                onClick={onClose}
+                                className="px-8 py-3 bg-white/5 hover:bg-white/10 text-white border border-white/10 font-bold font-mono uppercase tracking-widest rounded transition-colors"
+                            >
+                                Return to Lobby
+                            </button>
+                        </motion.div>
+                    ) : hasNegativeVisa ? (
+                        <motion.div
+                            key="negative-visa-screen"
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="flex flex-col items-center justify-center p-8 text-center space-y-8"
+                        >
+                            <div className="w-24 h-24 rounded-full bg-red-900/50 border border-red-500/50 flex items-center justify-center relative overflow-hidden shadow-[0_0_30px_rgba(239,68,68,0.3)]">
+                                <AlertTriangle size={40} className="text-red-500 relative z-10" />
+                            </div>
+                            <div className="space-y-4 relative z-10">
+                                <div className="space-y-2">
+                                    <h2 className="text-3xl font-display font-bold text-white tracking-[0.3em] uppercase drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]">VISA EXPIRED</h2>
+                                    <p className="text-red-500 font-mono text-xs uppercase tracking-widest bg-black/50 inline-block px-4 py-1 border border-red-500/20">STATUS: DEAD</p>
+                                </div>
+                                <p className="text-gray-400 font-mono text-sm max-w-md mx-auto">
+                                    Insufficient visa points. You cannot participate in any games. Contact the Game Master.
+                                </p>
+                            </div>
+                            <button
+                                onClick={onClose}
+                                className="px-8 py-3 bg-red-950/80 border border-red-500/50 hover:bg-red-900 text-red-500 font-bold font-mono uppercase tracking-widest rounded transition-colors relative overflow-hidden group"
+                            >
+                                <span className="relative z-10">Acknowledge</span>
+                                <div className="absolute inset-0 bg-red-500/20 translate-y-[100%] group-hover:translate-y-0 transition-transform"></div>
+                            </button>
+                        </motion.div>
+                    ) : showRules ? (
                         <motion.div
                             key="rules-screen"
                             initial={{ opacity: 0 }}
@@ -748,7 +847,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                     <button
                                         onClick={async () => {
                                             // Force re-submit presence signal before reload
-                                            await addToFirestore();
+                                            await addToWaitlistDB();
                                             setTimeout(() => window.location.reload(), 500);
                                         }}
                                         className={`px-6 py-3 border rounded font-mono text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${type?.toLowerCase() === 'hearts'
@@ -776,7 +875,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                         return <SpadesGame onComplete={handleComplete} onFail={handleFail} user={userInfo} onClose={onClose} />;
                                     case 'Hearts':
                                         return isMasterRole ?
-                                            <HeartsGameMaster onComplete={() => handleComplete(0)} user={userInfo} /> :
+                                            <HeartsGameMaster onComplete={() => handleComplete(0)} user={userInfo} disableEngine={true} /> :
                                             <HeartsGame user={userInfo} />;
                                     case 'Clubs':
                                         return isMasterRole ?
@@ -808,24 +907,6 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                     </motion.div>
                 </div>
             )}
-
-            {/* 
-              Running Headless Master Logic for Admins/Masters playing the game.
-              This ensures the game keeps running (timers, transitions) even if they leave the Admin Dashboard.
-            */}
-            {
-
-            }
-            {
-                isMasterRole && type === 'Hearts' && (
-                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
-                        <HeartsGameMaster
-                            onComplete={() => console.log("Hearts Headless Master Complete")}
-                            user={userInfo || { id: 'admin-fallback', username: 'ADMIN', role: 'admin' }}
-                        />
-                    </div>
-                )
-            }
         </div >
     );
 };
