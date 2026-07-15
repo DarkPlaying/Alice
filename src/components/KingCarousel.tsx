@@ -124,7 +124,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                 >
 
                     {/* Glitch Layers (Red/Cyan Split) */}
-                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 mix-blend-screen pointer-events-none hidden group-hover:block">
+                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 mix-blend-screen pointer-events-none hidden group-hover:block overflow-hidden">
                         <img
                             src={currentKing.imageUrl}
                             className="absolute inset-0 w-full h-full object-cover text-[#ff0050] opacity-50 translate-x-[2px] animate-glitch"
@@ -137,6 +137,10 @@ export function KingCarousel({ className }: KingCarouselProps) {
                             style={{ filter: 'sepia(100%) saturate(300%) hue-rotate(180deg)', animationDelay: '0.1s' }}
                             alt=""
                         />
+                        
+                        {/* Glitch Scanlines */}
+                        <div className="w-full h-10 bg-white/20 blur-[2px] animate-scanline mix-blend-overlay"></div>
+                        <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.35)_50%)] bg-[length:100%_4px] mix-blend-overlay"></div>
                     </div>
 
                     <div className="absolute inset-0 bg-black/20 z-10"></div>

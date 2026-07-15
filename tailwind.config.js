@@ -25,6 +25,7 @@ export default {
             animation: {
                 "meteor-effect": "meteor 5s linear infinite",
                 "glitch": "glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite",
+                "scanline": "scanline 6s linear infinite",
             },
             keyframes: {
                 meteor: {
@@ -42,6 +43,10 @@ export default {
                     '60%': { transform: 'translate(2px, 2px)' },
                     '80%': { transform: 'translate(2px, -2px)' },
                     '100%': { transform: 'translate(0)' },
+                },
+                scanline: {
+                    '0%': { transform: 'translateY(-100%)' },
+                    '100%': { transform: 'translateY(1000%)' }
                 },
             },
         },
