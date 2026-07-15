@@ -123,22 +123,6 @@ export function KingCarousel({ className }: KingCarouselProps) {
                     style={{ transition: 'transform 0.1s ease-out' }}
                 >
 
-                    {/* Glitch Layers (Red/Cyan Split) */}
-                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 mix-blend-screen pointer-events-none hidden group-hover:block">
-                        <img
-                            src={currentKing.imageUrl}
-                            className="absolute inset-0 w-full h-full object-cover text-[#ff0050] opacity-50 translate-x-[2px] animate-glitch"
-                            style={{ filter: 'sepia(100%) saturate(300%) hue-rotate(-50deg)' }}
-                            alt=""
-                        />
-                        <img
-                            src={currentKing.imageUrl}
-                            className="absolute inset-0 w-full h-full object-cover text-cyan-400 opacity-50 -translate-x-[2px] animate-glitch"
-                            style={{ filter: 'sepia(100%) saturate(300%) hue-rotate(180deg)', animationDelay: '0.1s' }}
-                            alt=""
-                        />
-                    </div>
-
                     <div className="absolute inset-0 bg-black/20 z-10"></div>
                     <AnimatePresence mode='wait'>
                         <motion.div
