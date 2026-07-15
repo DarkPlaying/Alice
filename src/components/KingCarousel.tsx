@@ -142,10 +142,9 @@ export function KingCarousel({ className }: KingCarouselProps) {
                         </motion.div>
                     </AnimatePresence>
                     
-                    {/* Red Scanning Lines Overlay */}
-                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 overflow-hidden">
-                        <div className="w-full h-6 bg-[#ff0050]/40 blur-[2px] animate-scanline mix-blend-overlay"></div>
-                        <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(255,0,80,0.2)_50%)] bg-[length:100%_4px] mix-blend-overlay"></div>
+                    {/* Red Scanning Laser Overlay */}
+                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 overflow-hidden rounded-2xl">
+                        <div className="absolute w-full h-0.5 bg-[#ff0050] shadow-[0_0_15px_rgba(255,0,80,0.8),0_0_5px_rgba(255,0,80,1)] animate-scanline"></div>
                     </div>
                 </motion.div>
 
