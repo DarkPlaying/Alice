@@ -89,15 +89,15 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     {isElevated ? (isSystemArchitect ? "システムアーキテクト" : "ゲームマスター") : "今際の国のアリス"}
                 </motion.p>
 
-                {/* Master Badge */}
-                {isElevated && (
+                {/* Auth Badge */}
+                {userInfo && (
                     <motion.div
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mb-4 px-6 py-1 border-y border-yellow-500/50 bg-yellow-500/10"
+                        className={`mb-4 px-6 py-1 border-y ${isElevated ? 'border-yellow-500/50 bg-yellow-500/10' : 'border-[#ff0050]/50 bg-[#ff0050]/10'}`}
                     >
-                        <span className="text-yellow-500 font-mono text-xs tracking-[0.5em] font-bold uppercase">
-                            {isSystemArchitect ? "System Architect Authenticated" : "Game Master Authorization Active"}
+                        <span className={`font-mono text-xs tracking-[0.5em] font-bold uppercase ${isElevated ? 'text-yellow-500' : 'text-[#ff0050]'}`}>
+                            {isSystemArchitect ? "System Architect Authenticated" : isGameMaster ? "Game Master Authorization Active" : "Borderland Resident Authenticated"}
                         </span>
                     </motion.div>
                 )}

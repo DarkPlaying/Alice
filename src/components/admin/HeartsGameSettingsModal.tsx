@@ -41,7 +41,12 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
     const [page, setPage] = useState(0);
     const [_toast, setToast] = useState<Toast | null>(null);
     const [gameToDelete, setGameToDelete] = useState<string | null>(null);
+    const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
     const itemsPerPage = 10;
+
+    const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
+        setConfirmDialog({ title, message, onConfirm });
+    };
 
     const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
         setToast({ message, type });
@@ -81,11 +86,10 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
         setLoading(false);
     };
 
-    const handleReset = async (gameId: string) => {
-        if (!confirm('⚠️ RESET GAME\n\nRevert all Visa points for this game?')) return;
-
-        setLoading(true);
-        try {
+    const handleReset = (gameId: string) => {
+        showConfirmDialog('RESET GAME', 'This will revert all Visa points for this Hearts game session. This cannot be undone.', async () => {
+            setLoading(true);
+            try {
             const { data: pointsData } = await supabase
                 .from('hearts_round_points')
                 .select('player_email, total_points')
@@ -114,7 +118,8 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
         } catch (error) {
             showToast('Reset failed', 'error');
         }
-        setLoading(false);
+            setLoading(false);
+        });
     };
 
     const handleDelete = async (gameId: string) => {
@@ -152,53 +157,53 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
         setGameToDelete(null);
     };
 
-    const handleSave = async (gameId: string) => {
-        if (!confirm('💾 SAVE & NEW GAME\n\nFinalize this session and start fresh?')) return;
+    const handleSave = (gameId: string) => {
+        showConfirmDialog('SAVE & NEW GAME', 'Finalize this session and start a fresh Hearts game?', async () => {
+            setLoading(true);
+            try {
+                await supabase.from('hearts_game_sessions').update({
+                    status: 'saved',
+                    saved_at: new Date().toISOString()
+                }).eq('id', gameId);
 
-        setLoading(true);
-        try {
-            await supabase.from('hearts_game_sessions').update({
-                status: 'saved',
-                saved_at: new Date().toISOString()
-            }).eq('id', gameId);
+                const generate18DigitId = () => {
+                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                    let result = 'HRTS-';
+                    for (let i = 0; i < 13; i++) {
+                        result += chars.charAt(Math.floor(Math.random() * chars.length));
+                    }
+                    return result;
+                };
 
-            const generate18DigitId = () => {
-                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-                let result = 'HRTS-';
-                for (let i = 0; i < 13; i++) {
-                    result += chars.charAt(Math.floor(Math.random() * chars.length));
-                }
-                return result;
-            };
+                const newGameId = generate18DigitId();
+                await supabase.from('hearts_game_sessions').insert({
+                    id: newGameId,
+                    status: 'active',
+                    current_round: 0,
+                    total_rounds: 5
+                });
 
-            const newGameId = generate18DigitId();
-            await supabase.from('hearts_game_sessions').insert({
-                id: newGameId,
-                status: 'active',
-                current_round: 0,
-                total_rounds: 5
-            });
+                await supabase.from('hearts_game_state').update({
+                    active_game_id: newGameId,
+                    current_round: 0,
+                    system_start: false,
+                    phase: 'idle',
+                    participants: [],
+                    groups: {},
+                    cards: {},
+                    guesses: {},
+                    eliminated: [],
+                    winners: [],
+                    chat_counts: {}
+                }).eq('id', 'hearts_main');
 
-            await supabase.from('hearts_game_state').update({
-                active_game_id: newGameId,
-                current_round: 0,
-                system_start: false,
-                phase: 'idle',
-                participants: [],
-                groups: {},
-                cards: {},
-                guesses: {},
-                eliminated: [],
-                winners: [],
-                chat_counts: {}
-            }).eq('id', 'hearts_main');
-
-            showToast(`Game saved! New: ${newGameId}`, 'success');
-            fetchGames();
-        } catch (error) {
-            showToast('Save failed', 'error');
-        }
-        setLoading(false);
+                showToast(`Game saved! New: ${newGameId}`, 'success');
+                fetchGames();
+            } catch (error) {
+                showToast('Save failed', 'error');
+            }
+            setLoading(false);
+        });
     };
 
     const paginatedGames = games.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
@@ -360,6 +365,43 @@ export const HeartsGameSettingsModal = ({ onClose }: GameSettingsModalProps) => 
                                 </div>
                             </div>
                         </div>
+                    )}
+                </AnimatePresence>
+
+                {/* Inline Confirm Dialog */}
+                <AnimatePresence>
+                    {confirmDialog && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm rounded-2xl p-4"
+                        >
+                            <motion.div
+                                initial={{ scale: 0.9, y: 10 }}
+                                animate={{ scale: 1, y: 0 }}
+                                exit={{ scale: 0.9, y: 10 }}
+                                className="bg-[#0d0d0d] border border-white/20 rounded-xl p-6 max-w-sm w-full shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <h3 className="text-white font-mono font-bold text-base tracking-widest uppercase mb-2">{confirmDialog.title}</h3>
+                                <p className="text-gray-400 text-sm leading-relaxed mb-6">{confirmDialog.message}</p>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setConfirmDialog(null)}
+                                        className="flex-1 px-4 py-2.5 border border-white/20 text-gray-400 hover:text-white hover:border-white/40 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+                                        className="flex-1 px-4 py-2.5 bg-red-500/20 border border-red-500 text-red-400 hover:bg-red-500 hover:text-white rounded-lg text-xs font-bold uppercase tracking-widest transition-all"
+                                    >
+                                        Confirm
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </motion.div>
                     )}
                 </AnimatePresence>
             </motion.div>

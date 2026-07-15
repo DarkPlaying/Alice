@@ -31,7 +31,7 @@ const kings: KingProfile[] = [
         name: "King of Spades",
         title: "The Physical Challenge",
         description:
-            "The King of Spades governs the arena of raw survival. His games are a test of endurance, strength, and combat prowess. In his domain, words are meaningless; only physical superiority guarantees another day of life.",
+            "A competitive trick-taking bidding game where players must carefully bid on the number of tricks they expect to win. Play your cards tactically, secure your tricks, and survive the scoreboard.",
         imageUrl: "/borderland_cards/Spades_K.png",
         stats: [
             { icon: Skull, label: "Difficulty", value: "Extreme" },
@@ -44,7 +44,7 @@ const kings: KingProfile[] = [
         name: "King of Diamonds",
         title: "The Supreme Intellect",
         description:
-            "The King of Diamonds represents the pinnacle of logic and strategy. His games require precise calculation and unwavering focus. One slip in reasoning, one moment of doubt, and the game is lost.",
+            "A tactical card deployment slot game. Players deploy asset cards using a strict rock-paper-scissors dynamic: Zombie beats numbers, Injection cures Zombie, and Shotgun eliminates both Zombie and Injection.",
         imageUrl: "/borderland_cards/Diamonds_K.png",
         stats: [
             { icon: Skull, label: "Difficulty", value: "Hard" },
@@ -57,7 +57,7 @@ const kings: KingProfile[] = [
         name: "King of Clubs",
         title: "The Teamwork Tactician",
         description:
-            "The King of Clubs demands cooperation and balance. His games cannot be won alone. You must build trust with strangers, but remember: in the Borderland, every alliance is fragile.",
+            "A cooperative voting game. Players are assigned secret roles of Angels and Demons and must vote to balance their points. Communication, alignment, and strategic trust are the only path to victory.",
         imageUrl: "/borderland_cards/Clubs_K.png",
         stats: [
             { icon: Skull, label: "Difficulty", value: "Very Hard" },
@@ -70,7 +70,7 @@ const kings: KingProfile[] = [
         name: "King of Hearts",
         title: "The Master of Betrayal",
         description:
-            "The King of Hearts dominates the psychological realm. His games play with your emotions, turning friends into enemies. To survive here, you must be willing to sacrifice what you hold most dear.",
+            "A psychological coordinate-deduction game. Group members must coordinate to identify correct secret player assets under strict chat limitations and the truth-revealing Eye of Truth query.",
         imageUrl: "/borderland_cards/Hearts_K.png",
         stats: [
             { icon: Skull, label: "Difficulty", value: "Hope-less" },

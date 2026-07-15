@@ -13,10 +13,20 @@ interface PlayerData {
     status: string;
 }
 
+const getPlayerGrade = (score: number) => {
+    if (score >= 2000) return { label: 'S', color: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/5 shadow-[0_0_8px_rgba(234,179,8,0.2)]' };
+    if (score >= 1500) return { label: 'A', color: 'text-[#ff0050] border-[#ff0050]/30 bg-[#ff0050]/5 shadow-[0_0_8px_rgba(255,0,80,0.2)]' };
+    if (score >= 1000) return { label: 'B', color: 'text-purple-400 border-purple-500/30 bg-purple-500/5 shadow-[0_0_8px_rgba(192,132,252,0.2)]' };
+    if (score >= 500) return { label: 'C', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_8px_rgba(34,211,238,0.2)]' };
+    return { label: 'D', color: 'text-gray-400 border-white/10 bg-white/5' };
+};
+
 export const Leaderboard = () => {
     const [filter, setFilter] = useState('ALL');
     const [players, setPlayers] = useState<PlayerData[]>([]);
     const [loading, setLoading] = useState(true);
+    const [currentPage, setCurrentPage] = useState(1);
+    const playersPerPage = 10;
 
     useEffect(() => {
         const fetchLeaderboardData = async () => {
@@ -86,6 +96,11 @@ export const Leaderboard = () => {
         if (rank % 2 === 0) return ['♠'];
         return ['♣'];
     };
+    const indexOfLastPlayer = currentPage * playersPerPage;
+    const indexOfFirstPlayer = indexOfLastPlayer - playersPerPage;
+    const currentPlayers = players.slice(indexOfFirstPlayer, indexOfLastPlayer);
+    const totalPages = Math.max(1, Math.ceil(players.length / playersPerPage));
+
     return (
         <section id="leaderboard" className="py-24 relative z-20">
             <div className="max-w-6xl mx-auto px-6">
@@ -136,10 +151,11 @@ export const Leaderboard = () => {
                     {/* Header */}
                     <div className="grid grid-cols-12 bg-black/40 p-5 text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-white/5">
                         <div className="col-span-1 md:col-span-1">Rank</div>
-                        <div className="col-span-4 md:col-span-4">Player ID</div>
-                        <div className="col-span-2 text-center">Clears</div>
-                        <div className="col-span-3 text-center hidden md:block">Suits Cleared</div>
-                        <div className="col-span-3 md:col-span-2 text-right">Visa / Score</div>
+                        <div className="col-span-3 md:col-span-3">Player</div>
+                        <div className="col-span-2 md:col-span-1 text-center">Grade</div>
+                        <div className="col-span-2 md:col-span-2 text-center">Clears</div>
+                        <div className="col-span-2 md:col-span-3 text-center hidden md:block">Suits Cleared</div>
+                        <div className="col-span-2 md:col-span-2 text-right">Visa / Score</div>
                     </div>
 
                     <div className="divide-y divide-white/5 font-mono text-sm">
@@ -153,34 +169,65 @@ export const Leaderboard = () => {
                                 NO DEPLOYMENT DATA FOUND
                             </div>
                         ) : (
-                            players.map((row, index) => (
-                                <div key={row.nickname + row.id + index} className="grid grid-cols-12 p-5 hover:bg-white/[0.02] transition-colors items-center group">
-                                    <div className="col-span-1 md:col-span-1 text-gray-500 group-hover:text-white">
-                                        {row.rank === 1 && <Crown size={14} className="inline text-yellow-500 mr-1" />}
-                                        #{row.rank}
+                            currentPlayers.map((row, index) => {
+                                const grade = getPlayerGrade(row.score);
+                                return (
+                                    <div key={row.nickname + row.id + index} className="grid grid-cols-12 p-5 hover:bg-white/[0.02] transition-colors items-center group">
+                                        <div className="col-span-1 md:col-span-1 text-gray-500 group-hover:text-white">
+                                            {row.rank === 1 && <Crown size={14} className="inline text-yellow-500 mr-1" />}
+                                            #{row.rank}
+                                        </div>
+                                        <div className="col-span-3 md:col-span-3 text-gray-300 font-bold group-hover:text-white flex items-center gap-2">
+                                            {row.nickname || row.id}
+                                            {row.rank === 1 && <span className="text-[9px] bg-yellow-500/10 text-yellow-500 px-1 py-0.5 rounded border border-yellow-500/20 whitespace-nowrap hidden lg:inline">TOP SURVIVOR</span>}
+                                        </div>
+                                        <div className="col-span-2 md:col-span-1 text-center flex justify-center">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${grade.color}`}>
+                                                {grade.label}
+                                            </span>
+                                        </div>
+                                        <div className="col-span-2 md:col-span-2 text-center text-gray-400">{row.clears}</div>
+                                        <div className="col-span-2 md:col-span-3 text-center hidden md:flex items-center justify-center gap-2 text-gray-500">
+                                            {getSuitsForRank(row.rank).map((s, i) => (
+                                                <span key={i} className={`
+                                                    ${s === '♥' ? 'text-red-500' : ''}
+                                                    ${s === '♦' ? 'text-cyan-400' : ''}
+                                                    ${s === '♣' ? 'text-green-400' : ''}
+                                                    ${s === '♠' ? 'text-purple-400' : ''}
+                                                `}>{s}</span>
+                                            ))}
+                                        </div>
+                                        <div className="col-span-2 md:col-span-2 text-right text-[#ff0050] font-bold">
+                                            {row.score}
+                                        </div>
                                     </div>
-                                    <div className="col-span-4 md:col-span-4 text-gray-300 font-bold group-hover:text-white flex items-center gap-2">
-                                        {row.id}
-                                        {row.rank === 1 && <span className="text-[9px] bg-yellow-500/10 text-yellow-500 px-1 py-0.5 rounded border border-yellow-500/20 whitespace-nowrap hidden lg:inline">TOP SURVIVOR</span>}
-                                    </div>
-                                    <div className="col-span-2 text-center text-gray-400">{row.clears}</div>
-                                    <div className="col-span-3 text-center hidden md:flex items-center justify-center gap-2 text-gray-500">
-                                        {getSuitsForRank(row.rank).map((s, i) => (
-                                            <span key={i} className={`
-                                                ${s === '♥' ? 'text-red-500' : ''}
-                                                ${s === '♦' ? 'text-cyan-400' : ''}
-                                                ${s === '♣' ? 'text-green-400' : ''}
-                                                ${s === '♠' ? 'text-purple-400' : ''}
-                                            `}>{s}</span>
-                                        ))}
-                                    </div>
-                                    <div className="col-span-3 md:col-span-2 text-right text-[#ff0050] font-bold">
-                                        {row.score}
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
+
+                    {/* Pagination Controls */}
+                    {players.length > playersPerPage && (
+                        <div className="flex items-center justify-between p-5 bg-black/40 border-t border-white/5 font-mono text-xs">
+                            <button
+                                disabled={currentPage === 1}
+                                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                                className="px-4 py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer"
+                            >
+                                PREVIOUS
+                            </button>
+                            <span className="text-gray-500 tracking-wider">
+                                PAGE {currentPage} OF {totalPages}
+                            </span>
+                            <button
+                                disabled={currentPage === totalPages}
+                                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                                className="px-4 py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer"
+                            >
+                                NEXT
+                            </button>
+                        </div>
+                    )}
                 </motion.div>
             </div>
         </section >

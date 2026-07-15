@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Shield, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, X, ChevronUp, ChevronDown, Crown, Radio, Activity } from 'lucide-react';
+import { Users, Shield, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, X, ChevronUp, ChevronDown, Crown, Radio, Activity, Pencil } from 'lucide-react';
 import Papa from 'papaparse';
 import { createClient } from '@supabase/supabase-js';
 import { supabase, supabaseUrl, supabaseKey } from '../../supabaseClient';
@@ -41,6 +41,20 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
     // Edit Visa Points state
     const [editingPointsId, setEditingPointsId] = useState<string | null>(null);
     const [tempPoints, setTempPoints] = useState<number>(0);
+    const [hoveredPointsId, setHoveredPointsId] = useState<string | null>(null);
+    const saveEditRef = useRef<(() => void) | null>(null);
+
+    // Auto-cancel edit when player data changes (real-time Supabase update) or view changes
+    useEffect(() => {
+        setEditingPointsId(null);
+    }, [activeView]);
+
+    useEffect(() => {
+        // Reset if the player being edited no longer exists in the list
+        if (editingPointsId && !players.find(p => p.id === editingPointsId)) {
+            setEditingPointsId(null);
+        }
+    }, [players, editingPointsId]);
     
     // Create / Batch State
     const [newUsername, setNewUsername] = useState('');
@@ -98,7 +112,8 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
         });
 
         if (safeIds.length === 0) {
-            alert("SYSTEM ALERT: CANNOT DELETE SYSTEM ARCHITECT OR NO TARGETS SELECTED.");
+            setCreateError("SYSTEM ALERT: CANNOT DELETE SYSTEM ARCHITECT OR NO TARGETS SELECTED.");
+            setTimeout(() => setCreateError(''), 4000);
             return;
         }
 
@@ -131,7 +146,8 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
             onRefreshRequest();
         } catch (error: any) {
             console.error("Deletion failed:", error);
-            alert("DELETION FAILED: " + error.message);
+            setCreateError("DELETION FAILED: " + error.message);
+            setTimeout(() => setCreateError(''), 4000);
         }
     };
 
@@ -460,7 +476,8 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
     const purgePlayers = () => {
         setIsPurging(true);
         setTimeout(() => {
-            alert("EMERGENCY PURGE EXECUTED. (Simulation only - functionality requires backend flag)");
+            setCreateError("EMERGENCY PURGE EXECUTED.");
+            setTimeout(() => setCreateError(''), 4000);
             setIsPurging(false);
         }, 2000);
     };
@@ -779,13 +796,15 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                                     const isSelected = selectedPlayers.includes(player.id);
                                     
                                     const mainIndex = players.findIndex(p => p.id === player.id);
+                                    const rowKey = player.id || player.email || `${player.username}-${mainIndex}`;
                                     const sequentialId = `#PLAYER_${(mainIndex + 1).toString().padStart(3, '0')}`;
 
                                     return (
-                                        <tr key={player.id} className={`transition-colors group ${isSelected ? 'bg-white/10' : 'hover:bg-white/5'}`}>
+                                        <tr key={rowKey} className={`transition-colors group ${isSelected ? 'bg-white/10' : 'hover:bg-white/5'}`}>
                                             <td className="p-4">
                                                 {!isSystem && (
                                                     <button
+                                                        type="button"
                                                         onClick={() => handleSelect(player.id)}
                                                         className={`transition-colors ${isSelected ? 'text-[#ff0050]' : 'text-gray-600 hover:text-gray-400'}`}
                                                     >
@@ -818,50 +837,97 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                                                 </span>
                                             </td>
                                             <td className="p-4 font-mono">
-                                                {editingPointsId === player.id ? (
+                                                {editingPointsId && editingPointsId === player.id ? (
                                                     <div className="flex items-center gap-2">
                                                         <input 
                                                             type="number" 
                                                             value={tempPoints}
                                                             onChange={(e) => setTempPoints(Number(e.target.value))}
-                                                            className="w-16 bg-black border border-[#ff0033] px-2 py-1 text-white text-xs rounded"
-                                                        />
-                                                        <button 
-                                                            onClick={async () => {
-                                                                try {
-                                                                    const { error } = await supabase.from('profiles').update({ visa_points: tempPoints }).eq('id', player.id);
-                                                                    if (error) throw error;
-                                                                    
-                                                                    setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, visa_points: tempPoints } : p));
+                                                            autoFocus
+                                                            onKeyDown={async (e) => {
+                                                                if (e.key === 'Escape') {
                                                                     setEditingPointsId(null);
-                                                                } catch (err) {
-                                                                    console.error('Failed to update points:', err);
-                                                                    alert('Failed to update points. See console.');
+                                                                    setHoveredPointsId(null);
+                                                                }
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    if (!player.id) {
+                                                                        setEditingPointsId(null);
+                                                                        setHoveredPointsId(null);
+                                                                        return;
+                                                                    }
+                                                                    try {
+                                                                        await supabase.from('profiles').update({ visa_points: tempPoints }).eq('id', player.id);
+                                                                        setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, visa_points: tempPoints } : p));
+                                                                    } catch (err) {
+                                                                        console.error(err);
+                                                                    }
+                                                                    setEditingPointsId(null);
+                                                                    setHoveredPointsId(null);
                                                                 }
                                                             }}
-                                                            className="text-green-500 hover:text-green-400"
+                                                            className="w-20 bg-black border border-[#ff0033] px-2 py-1 text-white text-xs rounded focus:outline-none"
+                                                        />
+                                                        <button 
+                                                            type="button"
+                                                            onClick={async () => {
+                                                                if (!player.id) {
+                                                                    setEditingPointsId(null);
+                                                                    setHoveredPointsId(null);
+                                                                    return;
+                                                                }
+                                                                try {
+                                                                    await supabase.from('profiles').update({ visa_points: tempPoints }).eq('id', player.id);
+                                                                    setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, visa_points: tempPoints } : p));
+                                                                } catch (err) {
+                                                                    console.error(err);
+                                                                }
+                                                                setEditingPointsId(null);
+                                                                setHoveredPointsId(null);
+                                                            }}
+                                                            className="text-green-500 hover:text-green-400 p-1"
                                                         >
                                                             <CheckSquare size={14} />
                                                         </button>
-                                                        <button onClick={() => setEditingPointsId(null)} className="text-red-500 hover:text-red-400">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setEditingPointsId(null);
+                                                                setHoveredPointsId(null);
+                                                            }}
+                                                            className="text-red-500 hover:text-red-400 p-1"
+                                                        >
                                                             <X size={14} />
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <span 
-                                                        className="cursor-pointer hover:text-[#ff0033] transition-colors"
-                                                        onClick={() => {
-                                                            setEditingPointsId(player.id);
-                                                            setTempPoints(player.visa_points || 0);
-                                                        }}
+                                                    <div
+                                                        className="flex items-center gap-2"
+                                                        onMouseEnter={() => setHoveredPointsId(player.id)}
+                                                        onMouseLeave={() => setHoveredPointsId(null)}
                                                     >
-                                                        {player.visa_points || 0}
-                                                    </span>
+                                                        <span className="tabular-nums">{player.visa_points ?? 0}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setEditingPointsId(player.id);
+                                                                setTempPoints(player.visa_points ?? 0);
+
+                                                            }}
+                                                            className={`transition-opacity text-gray-500 hover:text-[#ff0033] p-0.5 rounded ${
+                                                                hoveredPointsId === player.id ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                                                            }`}
+                                                            title="Edit points"
+                                                        >
+                                                            <Pencil size={11} />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="p-4">
                                                 <div className="flex items-center gap-2">
                                                     <button
+                                                        type="button"
                                                         onClick={() => {
                                                             const mainIndex = players.findIndex(p => p.id === player.id);
                                                             const sequentialId = `#PLAYER_${(mainIndex + 1).toString().padStart(3, '0')}`;
@@ -881,6 +947,7 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                                                     </button>
                                                     {!isSystem && (
                                                         <button
+                                                            type="button"
                                                             onClick={() => setPlayerToDelete(player)}
                                                             className="text-gray-500 hover:text-red-500 p-1.5 rounded transition-colors"
                                                             title="Terminate Visa"

@@ -3,16 +3,19 @@ import { motion, useAnimation } from 'framer-motion';
 import { User, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { supabase, supabaseUrl, supabaseKey } from '../supabaseClient';
+import { useNavigate } from 'react-router-dom';
+
 interface LoginPageProps {
     onLogin: (user?: any) => void;
     onAdminLogin: (user?: any) => void;
 }
 
 export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
+    const navigate = useNavigate();
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [isRegistering, setIsRegistering] = useState(false);
+    const isRegistering = false;
     const [error, setError] = useState<string | false>(false);
     const [isFocused, setIsFocused] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -193,6 +196,17 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             {/* Overlay to darken bg slightly */}
             <div className="absolute inset-0 bg-black/60 pointer-events-none" />
 
+            {/* Top Left Navigation Section */}
+            <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50 flex items-center gap-4">
+                <button
+                    onClick={() => navigate('/home')}
+                    className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
+                >
+                    <span className="group-hover:-translate-x-1 transition-transform">←</span>
+                    Go Back
+                </button>
+            </div>
+
             {/* Floating Watcher Cards - Kings */}
             {cards.map((card, i) => {
                 // Use precise measured center if available, otherwise fallback to approximation
@@ -300,10 +314,10 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             >
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-wider">
-                        {isRegistering ? 'REGISTER' : 'LOGIN'}
+                        LOGIN
                     </h1>
                     <p className="text-gray-400 font-mono text-xs tracking-widest uppercase">
-                        {isRegistering ? 'Establish Identity, Player' : 'Identify Yourself, Player'}
+                        Identify Yourself, Player
                     </p>
                 </div>
 
@@ -368,20 +382,16 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                         className="w-full relative overflow-hidden group bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-display font-bold py-3 px-6 rounded-lg uppercase tracking-widest shadow-lg transition-all duration-300"
                     >
                         <span className="relative z-10 flex items-center justify-center gap-2">
-                            {isRegistering ? 'Create Identity' : 'Enter The Borderland'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                            Enter The Borderland <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         {/* Shine effect */}
                         <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 skew-x-12" />
                     </motion.button>
 
                     <div className="text-center mt-4">
-                        <button
-                            type="button"
-                            onClick={() => { setIsRegistering(!isRegistering); setError(false); }}
-                            className="text-cyan-400 hover:text-pink-400 font-mono text-xs transition-colors"
-                        >
-                            {isRegistering ? 'ALREADY HAVE AN IDENTITY? LOGIN' : 'NO IDENTITY? REGISTER'}
-                        </button>
+                        <p className="text-gray-500 font-mono text-[10px] tracking-wider uppercase select-none">
+                            Identity registration locked. Contact a System Architect for credentials.
+                        </p>
                     </div>
                 </form>
             </motion.div>

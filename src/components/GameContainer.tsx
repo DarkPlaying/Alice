@@ -299,10 +299,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const hasNegativeVisa = userInfo?.visa_points !== undefined && userInfo?.visa_points < 0;
 
     useEffect(() => {
-        if (hasNegativeVisa && userInfo?.id && userInfo?.visa_status !== 'inactive') {
-            supabase.from('profiles').update({ visa_status: 'inactive', status: 'dead' }).eq('id', userInfo.id).then(() => {
-                console.log("Player marked as inactive/dead due to negative points");
-            });
+        if (hasNegativeVisa && userInfo?.id) {
+            console.log("Player is dead due to negative points (points < 0)");
         }
     }, [hasNegativeVisa, userInfo]);
 

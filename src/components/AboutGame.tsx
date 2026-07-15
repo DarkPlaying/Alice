@@ -84,10 +84,10 @@ export const AboutGame = () => {
                         PROJECT ALICE
                     </h3>
 
-                    <h2 className="text-6xl md:text-8xl font-display text-[#ff0050] mb-6 tracking-tighter leading-none relative group w-fit">
+                    <h2 className="text-4xl md:text-6xl font-display text-[#ff0050] mb-6 tracking-tighter leading-none relative group w-fit">
                         <span className="relative z-10">BEYOND</span>
                         <br />
-                        <span className="text-white text-4xl md:text-6xl tracking-normal relative z-10">THE BORDERLINE</span>
+                        <span className="text-white text-3xl md:text-5xl tracking-normal relative z-10">THE BORDERLINE</span>
 
                         {/* Glitch Shadow for Title */}
                         <span className="absolute top-0 left-0 text-[#00ffff] opacity-0 group-hover:opacity-60 animate-glitch blur-[1px] mix-blend-screen -z-10 translate-x-1">BEYOND</span>
@@ -105,14 +105,13 @@ export const AboutGame = () => {
                         </p>
                     </div>
 
-                    <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => document.getElementById('games-section')?.scrollIntoView({ behavior: 'smooth' })}
-                        className="group relative mt-10 px-10 py-3 bg-[#ff0050] text-white font-display text-sm tracking-[0.2em] hover:bg-[#ff0050]/80 transition-all uppercase rounded-full shadow-[0_0_20px_rgba(255,0,80,0.5)] overflow-hidden"
-                    >
-                        <span className="relative z-10">SELECT YOUR SUIT</span>
-                    </motion.button>
+                    <div className="mt-10 p-4 border border-cyan-500/20 bg-cyan-950/10 rounded-lg flex items-center gap-3 w-fit text-[11px] font-mono tracking-widest text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                        </span>
+                        <span>REAL-TIME SYSTEM MONITOR // SYNCHRONIZATION ACTIVE</span>
+                    </div>
                 </motion.div>
             </div>
         </section>

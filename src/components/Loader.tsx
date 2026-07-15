@@ -21,7 +21,7 @@ export function Loader() {
     const CurrentIcon = suits[currentSuit].Icon;
 
     return (
-        <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center overflow-hidden">
+        <div className="fixed inset-0 bg-black z-[999] flex flex-col items-center justify-center overflow-hidden">
             {/* Background Grid */}
             <div
                 className="absolute inset-0 opacity-20 pointer-events-none"

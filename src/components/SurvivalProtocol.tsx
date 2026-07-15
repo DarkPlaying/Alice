@@ -1,25 +1,39 @@
-import { User, Layers, HeartCrack } from 'lucide-react';
+import { User, Layers, HeartCrack, Clock, Play, Shield } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const protocols = [
     {
-        title: 'INITIALIZE',
+        title: 'INITIALIZE (Register)',
         icon: User,
-        desc: 'Connect to the Borderland. You receive a random player ID and a starting visa. Your real name is erased from the arena.',
+        desc: 'Authenticate player credentials and initialize your starting visa tracker.',
         color: 'text-blue-500',
         border: 'group-hover:border-blue-500/50'
     },
     {
-        title: 'DRAW',
+        title: 'SYNC (Lobby)',
+        icon: Clock,
+        desc: 'Join the active game waitlist under the real-time supervision of a Game Master.',
+        color: 'text-purple-500',
+        border: 'group-hover:border-purple-500/50'
+    },
+    {
+        title: 'DRAW (Suit Select)',
         icon: Layers,
-        desc: 'The system draws a suit and number. That card decides your next game: Hearts for betrayal, Diamonds for logic, Clubs for teamwork, Spades for survival.',
+        desc: 'Choose your arena: Spades (Trick-Taking), Clubs (Angel & Demon), Diamonds (Zombies-Injections), or Hearts (Trust & Identity).',
         color: 'text-yellow-500',
         border: 'group-hover:border-yellow-500/50'
     },
     {
-        title: 'SURVIVE',
-        icon: HeartCrack,
-        desc: 'Enter the arena, follow the rules, and outplay the others. Clear the game to extend your visa. Fail, and your run in the Borderland ends.',
+        title: 'TRIAL (Game Arena)',
+        icon: Play,
+        desc: 'Participate in the game. Secure card tricks, vote on secret roles, deploy asset slots, or deduce player coordinates.',
+        color: 'text-cyan-400',
+        border: 'group-hover:border-cyan-400/50'
+    },
+    {
+        title: 'EXTEND (Visa Clear)',
+        icon: Shield,
+        desc: 'Clear the arena to renew your Visa days. Failing to clear results in instant laser termination.',
         color: 'text-[#ff0050]',
         border: 'group-hover:border-[#ff0050]/50'
     }

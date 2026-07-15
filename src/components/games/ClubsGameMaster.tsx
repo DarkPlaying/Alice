@@ -2159,12 +2159,13 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
 
 
 
-    if ((!cards || cards.length === 0) && gameState !== 'idle') return <Loader />;
+    const isGameLoading = (!cards || cards.length === 0) && gameState !== 'idle';
 
     if (isEngine) return null;
 
     return (
         <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+            {isGameLoading && <Loader />}
             {/* PHASE NOTIFICATION BANNER */}
             <AnimatePresence>
                 {phaseBanner && (

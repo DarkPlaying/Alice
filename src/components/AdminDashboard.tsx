@@ -1,11 +1,13 @@
 // CACHE BUSTER V2: FORCING VITE TO RECOMPILE
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
+import { PlayerCardModal } from './PlayerCardModal';
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
@@ -45,37 +47,274 @@ import { PlayerCache } from '../lib/playerCache';
 import { VisaManagement } from './admin/VisaManagement';
 
 import { HeartsGameMaster } from './games/HeartsGameMaster';
-import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { SpadesGameMaster } from './games/SpadesGameMaster';
+import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { GameSettingsModal } from './admin/GameSettingsModal';
 import { HeartsGameSettingsModal } from './admin/HeartsGameSettingsModal';
 import { generateGameId } from '../utils/gameId';
+import { TravelCard } from './ui/card-7';
 
 interface AdminDashboardProps {
     onLogout: () => void;
 }
 
 export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
-    // CURRENT USER STATE (For Headless Check)
-
-
-    // ... stats state ...
-    const [stats, setStats] = useState([
-        { label: 'Active Players', value: '456', icon: Users, color: 'text-cyan-400' },
-        { label: 'Casualties', value: '1,293', icon: Activity, color: 'text-red-500' },
-        { label: 'Sys. Integrity', value: '98.2%', icon: Shield, color: 'text-green-400' },
-        { label: 'Time Remaining', value: '00:45:12', icon: Clock, color: 'text-yellow-400' },
+    const navigate = useNavigate();
+    const [secondsLeft, setSecondsLeft] = useState(2712); // 45:12
+    const [jitter, setJitter] = useState(0);
+    const [networkPing, setNetworkPing] = useState<number | null>(null);
+    const [currentTime, setCurrentTime] = useState(new Date());
+    const [adminSettings, setAdminSettings] = useState<any>(null);
+    const [showAdminCard, setShowAdminCard] = useState(false);
+    const [systemLogs, setSystemLogs] = useState<string[]>([
+        `[${new Date(Date.now() - 60000).toLocaleTimeString()}] CRITICAL: Arena Hearts security handshake established`,
+        `[${new Date(Date.now() - 50000).toLocaleTimeString()}] Laser grid calibration sequence: OK`,
+        `[${new Date(Date.now() - 40000).toLocaleTimeString()}] VISA validation engine active`,
+        `[${new Date(Date.now() - 30000).toLocaleTimeString()}] WARNING: Player 492 pulse elevated`,
+        `[${new Date(Date.now() - 20000).toLocaleTimeString()}] System check complete. Grid stable.`,
+        `[${new Date(Date.now() - 10000).toLocaleTimeString()}] Arena Spades participant count synced`
     ]);
     const [activeView, setActiveView] = useState<'dashboard' | 'players' | 'masters' | 'spades' | 'clubs' | 'diamonds' | 'hearts'>('dashboard');
+    const [roundMonitorPage, setRoundMonitorPage] = useState<Record<string, number>>({});
     const [players, setPlayers] = useState<any[]>([]);
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [customDialog, setCustomDialog] = useState<{
+        title: string;
+        message: string;
+        type: 'alert' | 'confirm' | 'confirm_three_options' | 'prompt';
+        resolve: (val: any) => void;
+        defaultValue?: string;
+    } | null>(null);
+
+    const [promptValue, setPromptValue] = useState('');
+
+    const showAlert = (title: string, message: string): Promise<void> => {
+        return new Promise((resolve) => {
+            setCustomDialog({ title, message, type: 'alert', resolve });
+        });
+    };
+
+    const showConfirm = (title: string, message: string): Promise<boolean> => {
+        return new Promise((resolve) => {
+            setCustomDialog({ title, message, type: 'confirm', resolve });
+        });
+    };
+
+    const showConfirmThreeOptions = (title: string, message: string): Promise<'ok' | 'cancel' | 'alt'> => {
+        return new Promise((resolve) => {
+            setCustomDialog({ title, message, type: 'confirm_three_options', resolve });
+        });
+    };
+
+    const showPrompt = (title: string, message: string, defaultValue = ''): Promise<string | null> => {
+        setPromptValue(defaultValue);
+        return new Promise((resolve) => {
+            setCustomDialog({ title, message, type: 'prompt', resolve, defaultValue });
+        });
+    };
+
+    // Keep seconds left counting down
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setSecondsLeft(prev => (prev > 0 ? prev - 1 : 0));
+        }, 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    // Real-time clock
+    useEffect(() => {
+        const clock = setInterval(() => setCurrentTime(new Date()), 1000);
+        return () => clearInterval(clock);
+    }, []);
+
+    // Network ping (measure round-trip to Supabase)
+    useEffect(() => {
+        const measurePing = async () => {
+            const start = performance.now();
+            try {
+                await supabase.from('profiles').select('id').limit(1).maybeSingle();
+                setNetworkPing(Math.round(performance.now() - start));
+            } catch {
+                setNetworkPing(null);
+            }
+        };
+        measurePing();
+        const pingInterval = setInterval(measurePing, 10000);
+        return () => clearInterval(pingInterval);
+    }, []);
+
+    // Jitter for system metrics
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setJitter((Math.random() * 0.2 - 0.1));
+        }, 4000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Load admin settings and subscribe in real-time
+    useEffect(() => {
+        const fetchSettings = async () => {
+            const { data } = await supabase.from('profiles').select('*').eq('id', '00000000-0000-0000-0000-000000000000').maybeSingle();
+            if (data) {
+                setAdminSettings(data);
+            } else {
+                const { data: newRow } = await supabase.from('profiles').insert({
+                    id: '00000000-0000-0000-0000-000000000000',
+                    username: 'admin_settings',
+                    email: 'admin_settings@borderland.app',
+                    role: 'admin',
+                    visa_points: 0
+                }).select().maybeSingle();
+                if (newRow) setAdminSettings(newRow);
+            }
+        };
+        fetchSettings();
+
+        const channel = supabase.channel('settings_realtime')
+            .on('postgres_changes', { event: '*', filter: "id=eq.00000000-0000-0000-0000-000000000000", schema: 'public', table: 'profiles' }, (payload) => {
+                setAdminSettings(payload.new);
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, []);
+
+    // Generate live logins logs by others in real-time
+
+
+
+    // Generate live logins logs by others in real-time
+    useEffect(() => {
+        if (!players || players.length === 0) return;
+        const interval = setInterval(() => {
+            const playerCandidates = players.filter(p => p.role === 'player' && p.visa_points !== null && p.visa_points !== undefined && p.visa_points >= 0);
+            if (playerCandidates.length === 0) return;
+            const randomPlayer = playerCandidates[Math.floor(Math.random() * playerCandidates.length)];
+            const timeStr = new Date().toLocaleTimeString();
+            const arenas = ['SPADES', 'CLUBS', 'DIAMONDS', 'HEARTS', 'LOBBY'];
+            const randomArena = arenas[Math.floor(Math.random() * arenas.length)];
+            const newLog = `[${timeStr}] Player "${randomPlayer.username}" logged in to Arena ${randomArena}`;
+            setSystemLogs(prev => [newLog, ...prev.slice(0, 49)]);
+        }, 6000);
+        return () => clearInterval(interval);
+    }, [players]);
+
+    const handleEmergencyPurgeToggle = async () => {
+        try {
+            const isPurged = adminSettings?.role === 'maintenance';
+            // Show confirmation FIRST before any async work (prevents perceived delay)
+            if (!isPurged) {
+                const confirmed = await showConfirm('EMERGENCY PURGE', 'Activate maintenance lockdown? All players will be frozen immediately. Use RESUME to restore access.');
+                if (!confirmed) return;
+            }
+
+            const nextStatus = isPurged ? 'admin' : 'maintenance';
+
+            const { error: settingsError } = await supabase
+                .from('profiles')
+                .update({ role: nextStatus })
+                .eq('id', '00000000-0000-0000-0000-000000000000');
+
+            if (settingsError) throw settingsError;
+
+            // Optimistically update the UI
+            setAdminSettings((prev: any) => ({ ...prev, role: nextStatus }));
+
+            if (!isPurged) {
+                // ACTIVATE maintenance — broadcast to all players, do NOT touch visa_points
+                await supabase.channel('admin-broadcast').send({
+                    type: 'broadcast',
+                    event: 'maintenance',
+                    payload: { active: true, message: 'System maintenance in progress. Please stand by.' }
+                });
+            } else {
+                // DEACTIVATE maintenance — broadcast resume
+                await supabase.channel('admin-broadcast').send({
+                    type: 'broadcast',
+                    event: 'maintenance',
+                    payload: { active: false, message: 'System is back online.' }
+                });
+                showAlert("MAINTENANCE MODE CLEARED", "System is back online. All player data is intact.");
+            }
+        } catch (err: any) {
+            console.error("Maintenance toggle error:", err);
+            showAlert("COMMAND REJECTED", "Failed to broadcast maintenance override.");
+        }
+    };
+
+    const handleSendBroadcast = async (msg: string) => {
+        if (!msg.trim()) return;
+        try {
+            // Update the admin_settings row so players can pick it up via postgres_changes
+            const { error } = await supabase
+                .from('profiles')
+                .update({
+                    email: `broadcast:${msg}:${Date.now()}` // encode message in email field as trigger
+                })
+                .eq('id', '00000000-0000-0000-0000-000000000000');
+            if (error) throw error;
+
+            // Also fire a Supabase Realtime broadcast for instant delivery
+            await supabase.channel('admin-broadcast').send({
+                type: 'broadcast',
+                event: 'admin_message',
+                payload: { message: msg, timestamp: Date.now() }
+            });
+
+            showAlert("BROADCAST TRANSMITTED", `Message delivered to all active sessions: "${msg}"`);
+        } catch (err) {
+            console.error("Broadcast transmission error:", err);
+            showAlert("TRANSMISSION ERROR", "Failed to deliver broadcast message.");
+        }
+    };
+
+    // Derived dashboard stats
+    const activePlayersCount = players.filter(p => p.role === 'player' && p.visa_points !== null && p.visa_points !== undefined && p.visa_points >= 0).length;
+
+    // Casualties = % of players with bottom-half (lowest) average points
+    const allPlayerPoints = players
+        .filter(p => p.role === 'player' && p.visa_points !== null && p.visa_points !== undefined)
+        .map(p => p.visa_points as number);
+    const maxPoints = allPlayerPoints.length > 0 ? Math.max(...allPlayerPoints) : 1;
+    const bottomHalfAvg = allPlayerPoints.length > 0
+        ? (allPlayerPoints.filter(v => v <= maxPoints / 2).length / allPlayerPoints.length * 100)
+        : 0;
+    const casualtyValue = bottomHalfAvg.toFixed(1) + '%';
+
+    // Sys. Integrity = % of players with top-half (highest) average points
+    const topHalfAvg = allPlayerPoints.length > 0
+        ? (allPlayerPoints.filter(v => v > maxPoints / 2).length / allPlayerPoints.length * 100)
+        : 98.2 + jitter;
+    const sysIntegrity = topHalfAvg.toFixed(1) + '%';
+
+    // Time Remaining = current realtime clock
+    const timeRemainingDisplay = currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const getGamePlayerCount = (gameKey: string) => {
+        return players.filter(p =>
+            p.role === 'player' &&
+            p.visa_points !== null && p.visa_points !== undefined && p.visa_points >= 0 &&
+            p.waiting_for_game &&
+            p.waiting_for_game.toLowerCase().includes(gameKey)
+        ).length;
+    };
+
+    const dashboardStats = [
+        { label: 'Active Players', value: activePlayersCount.toString(), icon: Users, color: 'text-cyan-400' },
+        { label: 'Casualties', value: casualtyValue, icon: Activity, color: 'text-red-500' },
+        { label: 'Sys. Integrity', value: sysIntegrity, icon: Shield, color: 'text-green-400' },
+        { label: 'Time Remaining', value: timeRemainingDisplay, icon: Clock, color: 'text-yellow-400' },
+    ];
+
 
     // ... suits definition ...
     const suits = [
-        { name: 'SPADES', type: 'Physical', id: 'spades', icon: Spade, color: 'text-blue-400', status: 'Active', description: "Strength, endurance, and physical agility are tested." },
-        { name: 'CLUBS', type: 'Team', id: 'clubs', icon: Club, color: 'text-green-400', status: 'Stable', description: "Cooperation and balancing individual vs group needs." },
-        { name: 'DIAMONDS', type: 'Intellect', id: 'diamonds', icon: Diamond, color: 'text-cyan-400', status: 'Analyzing', description: "Logic, mathematics, and strategy are essential." },
-        { name: 'HEARTS', type: 'Psychological', id: 'hearts', icon: Heart, color: 'text-red-500', status: 'Critical', description: "Trust, betrayal, and emotional manipulation." },
+        { name: 'SPADES', type: 'Physical', id: 'spades', icon: Spade, color: 'text-blue-400', dotColor: 'bg-blue-400', status: 'Active', description: "Strength, endurance, and physical agility are tested." },
+        { name: 'CLUBS', type: 'Team', id: 'clubs', icon: Club, color: 'text-green-400', dotColor: 'bg-green-400', status: 'Stable', description: "Cooperation and balancing individual vs group needs." },
+        { name: 'DIAMONDS', type: 'Intellect', id: 'diamonds', icon: Diamond, color: 'text-purple-400', dotColor: 'bg-purple-400', status: 'Analyzing', description: "Logic, mathematics, and strategy are essential." },
+        { name: 'HEARTS', type: 'Psychological', id: 'hearts', icon: Heart, color: 'text-red-500', dotColor: 'bg-red-500', status: 'Critical', description: "Trust, betrayal, and emotional manipulation." },
     ];
 
     const [newUsername, setNewUsername] = useState('');
@@ -284,13 +523,32 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
     // SPADES STATE
     const [spadesMessages, setSpadesMessages] = useState<any[]>([]);
+    const [spadesSearchQuery, setSpadesSearchQuery] = useState('');
     const [spadesGameStatus, setSpadesGameStatus] = useState<any>({
         current_round: 0,
         is_active: false,
         is_paused: false,
         system_start: false
     });
-    const [showEliminatedModal, setShowEliminatedModal] = useState(false);
+    const [showEliminatedModal, setShowEliminatedModal] = useState<string | null>(null);
+
+
+    const getEliminatedPlayers = () => {
+        if (!showEliminatedModal) return [];
+        if (showEliminatedModal === 'spades') {
+            return Object.values(spadesGameStatus?.players || {}).filter((p: any) => !p.cards || p.cards.length === 0);
+        }
+        if (showEliminatedModal === 'clubs') {
+            return Object.values(clubsGameStatus?.players || {}).filter((p: any) => p.status === 'eliminated' || p.eliminated);
+        }
+        if (showEliminatedModal === 'diamonds') {
+            return Object.values(diamondsGameStatus?.players || {}).filter((p: any) => p.status === 'eliminated' || p.eliminated || p.visa_points <= 0);
+        }
+        if (showEliminatedModal === 'hearts') {
+            return Object.values(heartsGameStatus?.players || {}).filter((p: any) => p.status === 'eliminated' || p.eliminated || p.health <= 0);
+        }
+        return [];
+    };
 
     // Listen for Spades Updates (Global for Headless)
     useEffect(() => {
@@ -461,6 +719,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
     // DIAMONDS STATE
     const [diamondsMessages, setDiamondsMessages] = useState<any[]>([]);
+    const [diamondsSearchQuery, setDiamondsSearchQuery] = useState('');
     const [diamondsGameStatus, setDiamondsGameStatus] = useState<any>({
         current_round: 0,
         is_active: false,
@@ -689,7 +948,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     }, []);
 
     const handleKickPlayer = async (userId: string, username: string) => {
-        if (!confirm(`CONFIRM: REMOVE ${username} FROM DEPLOYMENT QUEUE?`)) return;
+        const ok = await showConfirm('REMOVE FROM QUEUE', `Remove "${username}" from the deployment queue?`);
+        if (!ok) return;
 
         try {
             // 1. Clear Firestore status (Persistence)
@@ -720,7 +980,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     };
 
     const handleGlobalPurgeQueue = async () => {
-        if (!confirm("WARNING: THIS WILL CLEAR ALL QUEUES FOR ALL PLAYERS. PROCEED?")) return;
+        const ok = await showConfirm('PURGE ALL QUEUES', 'This will clear all arena queues for ALL players. This action cannot be undone.');
+        if (!ok) return;
 
         try {
             const { data, error } = await supabase.from('profiles').update({ waiting_for_game: null }).neq('waiting_for_game', null).select();
@@ -1012,7 +1273,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const handlePurgeAllMessages = async (suitId: string) => {
         const gameId = suitId === 'hearts' ? 'hearts_main' : suitId === 'spades' ? 'spades_main' : suitId === 'diamonds' ? 'diamonds_king' : 'clubs_king';
 
-        if (!confirm(`CAUTION: This will permanently erase ALL ${suitId.toUpperCase()} transcripts. Continue?`)) return;
+        const ok = await showConfirm('PURGE TRANSCRIPTS', `This will permanently erase ALL ${suitId.toUpperCase()} transcripts. This cannot be undone.`);
+        if (!ok) return;
 
         let query = supabase.from('messages').delete().eq('game_id', gameId);
 
@@ -1282,18 +1544,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         if (cached) {
             console.log('[ADMIN] Using cached player data');
             setPlayers(cached);
-            // Update stats from cache count
-            setStats(prev => prev.map(stat =>
-                stat.label === 'Active Players'
-                    ? { ...stat, value: cached.length.toString() }
-                    : stat
-            ));
         }
 
         const fetchProfiles = async () => {
             const { data, error } = await supabase.from('profiles').select('*');
             if (!error && data) {
-                setStats(prev => prev.map(stat => stat.label === 'Active Players' ? { ...stat, value: data.length.toString() } : stat));
                 const playersData = data.sort((a: any, b: any) => {
                     const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
                     const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
@@ -1374,7 +1629,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     };
 
     return (
-        <div className="min-h-screen bg-[#050508] text-white font-mono block lg:flex relative overflow-hidden">
+        <div className="min-h-[111.12vh] bg-[#050508] text-white font-sans block lg:flex relative overflow-hidden" style={{ zoom: 0.9 }}>
             {/* Background Elements */}
             <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,100,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,100,0.03)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
             <div className="absolute inset-0 bg-radial-gradient(circle_at_center,transparent_0%,#050508_90%) pointer-events-none" />
@@ -1421,21 +1676,21 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             </AnimatePresence>
             {/* LEft SIDEBAR */}
             <aside className={`
-                w-80 border-r border-white/10 bg-black/60 backdrop-blur-xl p-6 flex flex-col gap-8 h-screen z-40 overflow-y-auto admin-scrollbar transition-transform duration-300
+                w-80 border-r border-white/10 bg-black/60 backdrop-blur-xl p-6 flex flex-col gap-8 h-[111.12vh] z-40 overflow-y-auto admin-scrollbar transition-transform duration-300
                 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
                 fixed lg:sticky top-0 left-0 lg:left-auto
             `}>
                 <div className="flex justify-between items-center lg:block">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 border border-white/20 rounded flex items-center justify-center text-red-500">
-                            <Grid />
+                    <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-display font-black tracking-widest text-white">
+                                BORDER<span className="text-red-500">LAND</span>
+                            </span>
+                            <span className="text-red-500 text-[12px] sm:text-[14px] animate-pulse">♠ ♥ ♦ ♣</span>
                         </div>
-                        <div>
-                            <h1 className="font-display font-bold text-xl tracking-widest text-white">
-                                GM <span className="text-red-500">OS</span>
-                            </h1>
-                            <p className="text-xs text-gray-500 tracking-wider">v4.2.0-ALPHA</p>
-                        </div>
+                        <h1 className="font-display font-bold text-sm sm:text-base tracking-wider text-gray-400">
+                            Admin Panel For Alice
+                        </h1>
                     </div>
                     <button
                         onClick={() => setIsSidebarOpen(false)}
@@ -1485,7 +1740,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 <div className="flex-1">
                                     <div className="flex justify-between items-center">
                                         <span className="text-base font-bold tracking-wider">{suit.name}</span>
-                                        <span className={`w-2 h-2 rounded-full ${suit.status === 'Critical' ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+                                        <span className={`w-2 h-2 rounded-full shadow-[0_0_6px_var(--dot-glow)] animate-pulse ${suit.dotColor}`} />
                                     </div>
                                     <div className="text-xs text-gray-500 uppercase">{suit.type}</div>
                                 </div>
@@ -1494,32 +1749,34 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     </div>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="space-y-4">
-                    <h3 className="text-xs font-bold text-gray-500 tracking-widest uppercase">Commands</h3>
-                    <button className="w-full text-left p-3 text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded hover:bg-red-500/20 transition-colors flex items-center gap-2">
-                        <AlertTriangle size={16} />
-                        EMERGENCY PURGE
-                    </button>
-                    <button className="w-full text-left p-3 text-sm text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-2">
-                        <Radio size={16} />
-                        BROADCAST MESSAGE
-                    </button>
-                </div>
+                {/* Broadcast Message */}
+                <button
+                    onClick={async () => {
+                        const msg = await showPrompt('BROADCAST MESSAGE', 'system message to transmit to all players:', '');
+                        if (msg) handleSendBroadcast(msg);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500 hover:text-white rounded-lg text-sm font-bold uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_10px_rgba(59,130,246,0.1)]"
+                >
+                    <Radio size={18} />
+                    BROADCAST
+                </button>
 
-                <div className="mt-auto">
+
+
+                {/* Admin Profile */}
+                <div className="mt-auto flex flex-col gap-2 pt-4 border-t border-white/10">
                     <button
-                        onClick={onLogout}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 text-gray-400 rounded transition-colors text-xs tracking-widest uppercase"
+                        onClick={() => setShowAdminCard(true)}
+                        className="flex items-center justify-between gap-2 px-2 py-2 sm:px-3 sm:py-2 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer"
                     >
-                        <LogOut size={16} />
-                        <span>Log Out</span>
+                        <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}</span>
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                     </button>
                 </div>
             </aside>
 
             {/* Main Content Area */}
-            <main className="w-full lg:flex-1 p-4 lg:p-8 h-screen overflow-y-auto relative z-10 admin-scrollbar">
+            <main className="w-full lg:flex-1 p-4 lg:p-8 h-[111.12vh] overflow-y-auto relative z-10 admin-scrollbar">
 
                 {/* Header */}
                 <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8 lg:mb-12 border-b border-white/10 pb-6">
@@ -1539,7 +1796,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             </p>
                         </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-center gap-4 text-[10px] lg:text-xs font-mono text-gray-400 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-white/5 pt-4 sm:pt-0">
+                    <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4 text-[9px] sm:text-[14px] lg:text-[15px] font-mono text-gray-400 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0">
                         {activeView === 'clubs' && (
                             <div className="flex items-center gap-4 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
@@ -1570,12 +1827,47 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 </span>
                             </div>
                         )}
-                        <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]" />
-                            NETWORK STABLE
-                        </span>
-                        <span className="hidden sm:inline">|</span>
-                        <span>{new Date().toLocaleDateString()}</span>
+                        {/* Header Command Buttons */}
+                        <div className="flex items-center flex-wrap justify-center sm:justify-end gap-1.5 sm:gap-2 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-4 w-full sm:w-auto">
+                            <span className="flex items-center gap-1.5 text-[8px] sm:text-[12px] lg:text-[13px] font-mono">
+                                <span className={`w-2 h-2 rounded-full animate-pulse ${networkPing === null ? 'bg-gray-500' :
+                                    networkPing < 100 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' :
+                                        networkPing < 300 ? 'bg-yellow-500 shadow-[0_0_8px_#eab308]' :
+                                            'bg-red-500 shadow-[0_0_8px_#ef4444]'
+                                    }`} />
+                                {networkPing !== null ? `${networkPing}ms` : '...'}
+                            </span>
+
+
+                            <button
+                                onClick={handleEmergencyPurgeToggle}
+                                title={adminSettings?.role === 'maintenance' ? 'Resume System' : 'Emergency Purge'}
+                                className={`flex items-center gap-1.5 px-2 xl:px-4 py-1 sm:py-2 rounded text-[9px] sm:text-[12px] font-bold uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${adminSettings?.role === 'maintenance'
+                                    ? 'bg-green-500/20 text-green-400 border border-green-500/40 hover:bg-green-500/30 shadow-[0_0_12px_rgba(34,197,94,0.15)]'
+                                    : 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white shadow-[0_0_10px_rgba(239,68,68,0.15)]'
+                                    }`}
+                            >
+                                <AlertTriangle size={16} className="sm:size-5" />
+                                <span className="hidden xl:inline">{adminSettings?.role === 'maintenance' ? 'RESUME' : 'EMERGENCY PURGE'}</span>
+                            </button>
+                            <button
+                                onClick={onLogout}
+                                title="Log Out"
+                                className="flex items-center gap-1.5 px-2 sm:px-4 py-1 sm:py-2 bg-slate-500/15 text-slate-400 border border-slate-500/30 hover:bg-slate-500 hover:text-white rounded text-[9px] sm:text-[12px] font-bold uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap"
+                            >
+                                <LogOut size={11} className="sm:size-3" />
+                                <span>LOG OUT</span>
+                            </button>
+
+                            <button
+                                onClick={() => navigate('/home')}
+                                title="Back to Home"
+                                className="flex items-center gap-1.5 px-2 sm:px-4 py-1 sm:py-2 bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500 hover:text-white rounded text-[9px] sm:text-[12px] font-bold uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap shadow-[0_0_10px_rgba(6,182,212,0.1)]"
+                            >
+                                <ArrowLeft size={11} className="sm:size-3" />
+                                <span>BACK</span>
+                            </button>
+                        </div>
                     </div>
                 </header>
 
@@ -1583,7 +1875,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     <>
                         {/* Stats Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                            {stats.map((stat, i) => (
+                            {dashboardStats.map((stat, i) => (
                                 <motion.div
                                     key={i}
                                     initial={{ opacity: 0, y: 20 }}
@@ -1595,25 +1887,131 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         <stat.icon size={48} />
                                     </div>
                                     <h3 className="text-gray-400 text-xs uppercase tracking-widest mb-2">{stat.label}</h3>
-                                    <p className={`text-3xl font-display font-bold ${stat.color} drop-shadow-lg`}>{stat.value}</p>
+                                    <p className={`text-3xl font-mono font-bold ${stat.color} drop-shadow-lg`}>{stat.value}</p>
                                 </motion.div>
                             ))}
                         </div>
 
                         {/* Main Dashboard Grid */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            {/* Live Games Feed */}
-                            <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6 min-h-[400px]">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
+                            {/* Four Arena Status Grid */}
+                            <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col">
                                 <div className="flex items-center gap-2 mb-6 text-green-400">
-                                    <Activity size={18} />
-                                    <h2 className="font-bold tracking-widest">LIVE GAME STREAMS</h2>
+                                    <Grid size={18} />
+                                    <h2 className="font-bold tracking-widest uppercase">ARENA STATUS GRID</h2>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {[1, 2, 3, 4].map(n => (
-                                        <div key={n} className="bg-black border border-white/10 aspect-video rounded flex items-center justify-center relative group cursor-pointer overflow-hidden">
-                                            <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-40 group-hover:opacity-60 transition-opacity grayscale group-hover:grayscale-0"></div>
-                                            <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] px-2 py-0.5 rounded animate-pulse">LIVE</div>
-                                            <span className="relative z-10 font-display text-2xl text-white/20 group-hover:text-white transition-colors">CAM_0{n}</span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                                    {[
+                                        {
+                                            suit: 'Spades',
+                                            icon: Spade,
+                                            color: 'text-blue-400',
+                                            borderColor: 'border-blue-500/20',
+                                            glowColor: 'shadow-[0_0_20px_rgba(59,130,246,0.05)]',
+                                            difficulty: 'Extreme',
+                                            type: 'Physical',
+                                            active: !!spadesGameStatus?.system_start,
+                                            players: getGamePlayerCount('spades'),
+                                            gameState: spadesGameStatus?.is_active ? (spadesGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                            currentPhase: 'ROUND ' + (spadesGameStatus?.current_round || 1),
+                                            round: spadesGameStatus?.current_round || 0,
+                                            totalRounds: 5,
+                                            extra: `${spadesGameStatus?.players?.length || 0} registered`
+                                        },
+                                        {
+                                            suit: 'Clubs',
+                                            icon: Club,
+                                            color: 'text-green-400',
+                                            borderColor: 'border-green-500/20',
+                                            glowColor: 'shadow-[0_0_20px_rgba(34,197,94,0.05)]',
+                                            difficulty: 'Very Hard',
+                                            type: 'Team',
+                                            active: !!clubsGameStatus?.system_start,
+                                            players: getGamePlayerCount('clubs'),
+                                            gameState: clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                            currentPhase: `ROUND ${clubsGameStatus?.current_round || 0}/6`,
+                                            round: clubsGameStatus?.current_round || 0,
+                                            totalRounds: 6,
+                                            extra: `${clubsGameStatus?.votes_submitted || 0} votes cast`
+                                        },
+                                        {
+                                            suit: 'Diamonds',
+                                            icon: Diamond,
+                                            color: 'text-purple-400',
+                                            borderColor: 'border-purple-500/20',
+                                            glowColor: 'shadow-[0_0_20px_rgba(168,85,247,0.05)]',
+                                            difficulty: 'Hard',
+                                            type: 'Intellect',
+                                            active: !!diamondsGameStatus?.system_start,
+                                            players: getGamePlayerCount('diamonds'),
+                                            gameState: diamondsGameStatus?.is_active ? (diamondsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                            currentPhase: (diamondsGameStatus?.phase || 'IDLE').toUpperCase(),
+                                            round: diamondsGameStatus?.current_round || 0,
+                                            totalRounds: 5,
+                                            extra: `${diamondsGameStatus?.participants?.length || 0} participants`
+                                        },
+                                        {
+                                            suit: 'Hearts',
+                                            icon: Heart,
+                                            color: 'text-red-500',
+                                            borderColor: 'border-red-500/20',
+                                            glowColor: 'shadow-[0_0_20px_rgba(239,68,68,0.05)]',
+                                            difficulty: 'Hope-less',
+                                            type: 'Psychological',
+                                            active: !!heartsGameStatus?.system_start,
+                                            players: getGamePlayerCount('hearts'),
+                                            gameState: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                            currentPhase: (heartsGameStatus?.phase || 'IDLE').toUpperCase(),
+                                            round: heartsGameStatus?.current_round || 0,
+                                            totalRounds: 7,
+                                            extra: `phase ${heartsGameStatus?.phase || 'idle'}`
+                                        }
+                                    ].map((arena) => (
+                                        <div
+                                            key={arena.suit}
+                                            className={`bg-black/80 border ${arena.borderColor} p-4 rounded-lg flex flex-col hover:border-white/20 transition-all relative group overflow-hidden ${arena.glowColor}`}
+                                        >
+                                            {/* Header */}
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div className="flex items-center gap-2.5">
+                                                    <arena.icon className={`w-5 h-5 ${arena.color}`} />
+                                                    <div>
+                                                        <h3 className="font-bold tracking-wider text-sm text-white uppercase">{arena.suit}</h3>
+                                                        <span className="text-[9px] text-gray-500 tracking-widest uppercase">{arena.type} · {arena.difficulty}</span>
+                                                    </div>
+                                                </div>
+                                                <span className={`px-2 py-0.5 rounded text-[9px] font-mono tracking-widest ${arena.active ? (arena.gameState === 'PAUSED' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20') : 'bg-gray-800 text-gray-500'}`}>
+                                                    {arena.gameState}
+                                                </span>
+                                            </div>
+
+                                            {/* Stats Grid */}
+                                            <div className="grid grid-cols-2 gap-2 mb-3 flex-1">
+                                                <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Phase</p>
+                                                    <p className={`text-[11px] font-mono font-bold ${arena.active ? arena.color : 'text-gray-500'}`}>{arena.currentPhase}</p>
+                                                </div>
+                                                <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Progress</p>
+                                                    <p className="text-[11px] font-mono font-bold text-white">{arena.round}/{arena.totalRounds}</p>
+                                                </div>
+                                                <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Players</p>
+                                                    <p className="text-[11px] font-mono font-bold text-white">{arena.players}</p>
+                                                </div>
+                                                <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Status</p>
+                                                    <p className="text-[11px] font-mono font-bold text-gray-400 truncate">{arena.extra}</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Progress bar */}
+                                            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full transition-all duration-700 ${arena.active ? `bg-gradient-to-r ${arena.color === 'text-blue-400' ? 'from-blue-600 to-blue-400' : arena.color === 'text-green-400' ? 'from-green-600 to-green-400' : arena.color === 'text-purple-400' ? 'from-purple-600 to-purple-400' : 'from-red-600 to-red-400'}` : 'bg-white/10'}`}
+                                                    style={{ width: arena.totalRounds > 0 ? `${Math.min(100, (arena.round / arena.totalRounds) * 100)}%` : '0%' }}
+                                                />
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -1626,14 +2024,20 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     <h2 className="font-bold tracking-widest">SYSTEM LOGS</h2>
                                 </div>
                                 <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
-                                    {[...Array(15)].map((_, i) => (
-                                        <div key={i} className="flex gap-2 border-b border-white/5 pb-2">
-                                            <span className="text-gray-500">[{new Date().toLocaleTimeString()}]</span>
-                                            <span className={i % 3 === 0 ? 'text-red-400' : 'text-green-400'}>
-                                                {i % 3 === 0 ? 'WARNING: Player 492 pulse elevated' : 'System check complete. Grid stable.'}
-                                            </span>
-                                        </div>
-                                    ))}
+                                    {systemLogs.map((log, i) => {
+                                        const timeMatch = log.match(/^\[(.*?)\]/);
+                                        const time = timeMatch ? timeMatch[1] : '';
+                                        const message = log.replace(/^\[.*?\]\s*/, '');
+                                        const isWarning = message.includes('WARNING') || message.includes('CRITICAL') || message.includes('ERROR') || message.includes('PURGE');
+                                        return (
+                                            <div key={i} className="flex gap-2 border-b border-white/5 pb-2">
+                                                <span className="text-gray-500">[{time}]</span>
+                                                <span className={isWarning ? 'text-red-400' : 'text-green-400'}>
+                                                    {message}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </div>
@@ -1826,7 +2230,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <div key={suit.id} className="space-y-8">
                                 {/* Suit Hero */}
                                 <div className="bg-black/40 border border-white/10 rounded-xl p-6 sm:p-12 flex flex-col sm:flex-row items-center gap-6 sm:gap-12 relative overflow-hidden">
-                                    <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block pointer-events-none`}>
+                                    <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block pointer-events-none z-0`}>
                                         <suit.icon size={400} />
                                     </div>
                                     <div className={`p-6 sm:p-8 bg-white/5 rounded-full ${suit.color} relative z-10 pointer-events-none`}>
@@ -1840,7 +2244,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     </div>
 
                                     {suit.id === 'clubs' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20">
+                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
                                             <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
                                                 <div className="absolute inset-0 bg-green-500/5 mix-blend-overlay pointer-events-none" />
 
@@ -1871,9 +2275,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
 
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-[380px]">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center md:text-left">Trial Command Unit</p>
-                                                <div className="flex flex-wrap items-center gap-2">
+                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
+                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Trial Command Unit</p>
+                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
                                                     <button
                                                         onClick={() => {
                                                             if (clubsGameStatus?.system_start) {
@@ -1883,110 +2287,70 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             setSelectedSuitForModal('clubs');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className={`group flex-1 px-4 py-3 ${clubsGameStatus?.system_start ? 'bg-green-500/30 cursor-not-allowed' : 'bg-green-500 hover:shadow-[0_0_30px_rgba(34,197,94,0.5)]'} text-black text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center justify-center gap-2`}
+                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${clubsGameStatus?.system_start ? 'bg-green-500/30 cursor-not-allowed text-white/50' : 'bg-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(34,197,94,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
                                                     >
-                                                        {clubsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={clubsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
+                                                        {clubsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
                                                             const currentPaused = clubsGameStatus.is_paused;
                                                             let updatePayload: any = {};
-
                                                             if (!currentPaused) {
                                                                 const now = new Date();
                                                                 const expiry = new Date(clubsGameStatus.phase_expiry || now);
                                                                 const remaining = Math.max(0, Math.floor((expiry.getTime() - now.getTime()) / 1000));
-                                                                updatePayload = {
-                                                                    is_paused: true,
-                                                                    round_data: { ...(clubsGameStatus.round_data || {}), paused_remaining_sec: remaining }
-                                                                };
+                                                                updatePayload = { is_paused: true, round_data: { ...(clubsGameStatus.round_data || {}), paused_remaining_sec: remaining } };
                                                             } else {
                                                                 const remaining = clubsGameStatus.round_data?.paused_remaining_sec || 0;
                                                                 const newExpiry = new Date(Date.now() + remaining * 1000).toISOString();
-
-                                                                // Clean up the paused_remaining_sec from round_data
                                                                 const newRoundData = { ...(clubsGameStatus.round_data || {}) };
                                                                 delete newRoundData.paused_remaining_sec;
-
-                                                                updatePayload = {
-                                                                    is_paused: false,
-                                                                    phase_expiry: newExpiry,
-                                                                    round_data: newRoundData
-                                                                };
+                                                                updatePayload = { is_paused: false, phase_expiry: newExpiry, round_data: newRoundData };
                                                             }
-
                                                             const accessToken = await getAccessToken();
                                                             const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
                                                                 method: 'PATCH',
-                                                                headers: {
-                                                                    'Content-Type': 'application/json',
-                                                                    'Authorization': `Bearer ${accessToken}`,
-                                                                    'apikey': supabaseKey,
-                                                                    'Prefer': 'return=minimal'
-                                                                },
+                                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
                                                                 body: JSON.stringify(updatePayload)
                                                             });
-                                                            if (!response.ok) {
-                                                                const errorText = await response.text();
-                                                                console.error("HALT_PROTOCOL_ERROR:", errorText);
-                                                                showToast("ERROR: UNABLE TO TOGGLE PROTOCOL STATE.", 'error');
-                                                            } else {
-                                                                showToast(!currentPaused ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success');
-                                                            }
+                                                            if (!response.ok) { showToast("ERROR: UNABLE TO TOGGLE PROTOCOL STATE.", 'error'); }
+                                                            else { showToast(!currentPaused ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success'); }
                                                         }}
-                                                        className={`flex-1 px-4 py-3 border text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-2 ${clubsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${clubsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                     >
-                                                        {clubsGameStatus.is_paused ? <Radio size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
+                                                        {clubsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />}
                                                         {clubsGameStatus.is_paused ? 'RESUME' : 'HALT'}
                                                     </button>
                                                     <button
-                                                        onClick={() => setShowGameSettings(true)}
-                                                        className="flex-1 px-4 py-3 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[9px] font-black uppercase rounded hover:bg-purple-500 hover:text-white transition-all flex items-center justify-center gap-2"
+                                                        onClick={() => setShowEliminatedModal('clubs')}
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        <span className="text-lg">⚙</span> GAME SETTINGS
+                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
                                                     </button>
-                                                </div>
-                                                <div className="flex items-stretch gap-2">
                                                     <button
                                                         onClick={async () => {
-                                                            if (!confirm('CONFIRM: FORCE RESET ENTIRE GAME?\n\nThis will eject ALL players, reset scores, and clear game data.')) return;
-
-                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
-
+                                                            const confirmed = await showConfirm('FORCE RESET GAME', 'This will eject ALL players, reset scores, and clear all game data. This cannot be undone.');
+                                                            if (!confirmed) return;
+                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nClick Confirm to KEEP points, or Cancel to WIPE and revert to starting balance.');
                                                             try {
                                                                 console.log('=== CLUBS RESET INITIATED ===');
                                                                 const accessToken = await getAccessToken();
-
-                                                                // 1. Fetch current scores to save/revert to profiles table
                                                                 try {
                                                                     const scoreRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
-                                                                        headers: {
-                                                                            'Authorization': `Bearer ${accessToken}`,
-                                                                            'apikey': supabaseKey,
-                                                                            'Accept': 'application/vnd.pgrst.object+json'
-                                                                        }
+                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
                                                                     });
                                                                     if (scoreRes.ok) {
                                                                         const statusData = await scoreRes.json();
                                                                         const currentScores = statusData?.scores || {};
                                                                         const startScores = currentScores.start || {};
                                                                         const endedScores = currentScores.current || {};
-
                                                                         const uids = Object.keys(startScores);
                                                                         const updates = uids.map(async (uid) => {
-                                                                            const targetScore = keepPoints ?
-                                                                                (endedScores[uid] !== undefined ? Number(endedScores[uid]) : Number(startScores[uid])) :
-                                                                                Number(startScores[uid]);
-
+                                                                            const targetScore = keepPoints ? (endedScores[uid] !== undefined ? Number(endedScores[uid]) : Number(startScores[uid])) : Number(startScores[uid]);
                                                                             if (!isNaN(targetScore)) {
                                                                                 return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${uid}`, {
                                                                                     method: 'PATCH',
-                                                                                    headers: {
-                                                                                        'Content-Type': 'application/json',
-                                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                                        'apikey': supabaseKey,
-                                                                                        'Prefer': 'return=minimal'
-                                                                                    },
+                                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
                                                                                     body: JSON.stringify({ visa_points: targetScore })
                                                                                 });
                                                                             }
@@ -1994,91 +2358,30 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                         await Promise.all(updates);
                                                                         showToast(keepPoints ? "CLUBS PLAYER SCORES SAVED TO PROFILES." : "CLUBS PLAYER SCORES REVERTED TO START.", 'success');
                                                                     }
-                                                                } catch (scoreErr) {
-                                                                    console.error("CLUBS_SCORE_SAVE_ERROR:", scoreErr);
-                                                                    showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
-                                                                }
-
-                                                                // 2. Wipe Game State
+                                                                } catch (scoreErr) { console.error("CLUBS_SCORE_SAVE_ERROR:", scoreErr); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
                                                                 const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
                                                                     method: 'PATCH',
-                                                                    headers: {
-                                                                        'Content-Type': 'application/json',
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Prefer': 'return=minimal'
-                                                                    },
-                                                                    body: JSON.stringify({
-                                                                        system_start: false,
-                                                                        is_paused: false,
-                                                                        current_round: 0,
-                                                                        votes_submitted: 0,
-                                                                        is_active: false,
-                                                                        player_score: 0,
-                                                                        master_score: 0,
-                                                                        removed_cards_p: [],
-                                                                        removed_cards_m: [], // Clear master's removed cards too
-                                                                        scores: { current: {}, history: {}, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }, // Reset individual scores
-                                                                        round_data: { force_reset: Date.now() }, // Add timestamp so clients can detect
-                                                                        gameState: 'idle',
-                                                                        phase_expiry: null
-                                                                    })
+                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                    body: JSON.stringify({ system_start: false, is_paused: false, current_round: 0, votes_submitted: 0, is_active: false, player_score: 0, master_score: 0, removed_cards_p: [], removed_cards_m: [], scores: { current: {}, history: {}, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }, round_data: { force_reset: Date.now() }, gameState: 'idle', phase_expiry: null })
                                                                 });
-
-                                                                if (!response.ok) {
-                                                                    const errorText = await response.text();
-                                                                    console.error("RESET_PROTOCOL_ERROR:", errorText);
-                                                                    showToast(`ERROR: ${errorText}`, 'error');
-                                                                    return;
-                                                                }
-
+                                                                if (!response.ok) { showToast(`ERROR: ${await response.text()}`, 'error'); return; }
                                                                 console.log('Database reset successful');
-
-                                                                // Broadcast FORCE EXIT via persistent channel
-                                                                console.log('Checking broadcast channel:', clubsControlChannelRef.current ? 'READY' : 'NULL');
-
                                                                 if (clubsControlChannelRef.current) {
-                                                                    console.log('Sending force_exit via main channel...');
-                                                                    const result = await clubsControlChannelRef.current.send({
-                                                                        type: 'broadcast',
-                                                                        event: 'force_exit',
-                                                                        payload: {
-                                                                            reason: 'ADMIN_RESET',
-                                                                            timestamp: Date.now()
-                                                                        }
-                                                                    });
-                                                                    console.log('Broadcast result:', result);
+                                                                    await clubsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
                                                                 } else {
-                                                                    console.warn("Broadcast channel not ready, attempting fallback...");
-                                                                    // Fallback if ref is null for some reason
                                                                     const tempChannel = supabase.channel('clubs_king_game');
                                                                     tempChannel.subscribe(async (status) => {
-                                                                        if (status === 'SUBSCRIBED') {
-                                                                            console.log('Fallback channel subscribed, sending force_exit...');
-                                                                            await tempChannel.send({
-                                                                                type: 'broadcast',
-                                                                                event: 'force_exit',
-                                                                                payload: { reason: 'ADMIN_RESET', timestamp: Date.now() }
-                                                                            });
-                                                                            supabase.removeChannel(tempChannel);
-                                                                        }
+                                                                        if (status === 'SUBSCRIBED') { await tempChannel.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } }); supabase.removeChannel(tempChannel); }
                                                                     });
                                                                 }
-
                                                                 showToast("SYSTEM RESET. ALL PLAYERS EJECTED.", 'success');
-
-                                                                // Visual Effect
                                                                 setIsPurging(true);
                                                                 setTimeout(() => setIsPurging(false), 2500);
-
-                                                            } catch (err: any) {
-                                                                console.error("RESET_CATCH_ERROR:", err);
-                                                                showToast(`CRITICAL ERROR: ${err.message || 'Unknown'}`, 'error');
-                                                            }
+                                                            } catch (err: any) { console.error("RESET_CATCH_ERROR:", err); showToast(`CRITICAL ERROR: ${err.message || 'Unknown'}`, 'error'); }
                                                         }}
-                                                        className="flex-1 px-4 py-3 bg-white/5 text-gray-400 border border-white/10 text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all text-center whitespace-nowrap"
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        GATE RESET
+                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
                                                     </button>
                                                 </div>
                                             </div>
@@ -2086,7 +2389,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     )}
 
                                     {suit.id === 'spades' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
+                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
                                             <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
                                                 <div className="absolute inset-0 bg-blue-500/5 mix-blend-overlay pointer-events-none" />
 
@@ -2110,9 +2413,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
 
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-[380px]">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center md:text-left">Spades Command Unit</p>
-                                                <div className="flex items-stretch gap-2 flex-wrap">
+                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
+                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Spades Command Unit</p>
+                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
                                                     <button
                                                         onClick={() => {
                                                             if (spadesGameStatus?.system_start) {
@@ -2122,106 +2425,62 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             setSelectedSuitForModal('spades');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className={`group flex-1 px-4 py-3 ${spadesGameStatus?.system_start ? 'bg-blue-600/50 cursor-not-allowed text-white/50' : 'bg-blue-600 hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] text-white'} text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all flex items-center justify-center gap-2`}
+                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${spadesGameStatus?.system_start ? 'bg-blue-600/50 cursor-not-allowed text-white/50' : 'bg-blue-600 hover:shadow-[0_0_20px_rgba(37,99,235,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(37,99,235,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
                                                     >
-                                                        {spadesGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={spadesGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
+                                                        {spadesGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
                                                     </button>
                                                     <button
-                                                        onClick={async () => {
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-
-                                                                // Fetch latest state to ensure atomic toggle & calculations
-                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=is_paused,phase_started_at,phase_duration_sec`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/vnd.pgrst.object+json'
+                                                        onClick={() => {
+                                                            (async () => {
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=is_paused,phase_started_at,phase_duration_sec`, {
+                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                                                                    });
+                                                                    if (!fetchRes.ok) return;
+                                                                    const data = await fetchRes.json();
+                                                                    const currentPaused = data?.is_paused;
+                                                                    const phaseStartedAt = data?.phase_started_at;
+                                                                    const currentDuration = data?.phase_duration_sec || 0;
+                                                                    let updatePayload: any = {};
+                                                                    if (!currentPaused) {
+                                                                        const now = new Date();
+                                                                        const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                        const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                        updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
+                                                                    } else {
+                                                                        updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
                                                                     }
-                                                                });
-
-                                                                if (!fetchRes.ok) {
-                                                                    console.error("Fetch Error:", await fetchRes.text());
-                                                                    showToast(`SYNC ERROR`, 'error');
-                                                                    return;
-                                                                }
-
-                                                                const data = await fetchRes.json();
-                                                                const currentPaused = data?.is_paused;
-                                                                const phaseStartedAt = data?.phase_started_at;
-                                                                const currentDuration = data?.phase_duration_sec || 0;
-
-                                                                let updatePayload: any = {};
-
-                                                                if (!currentPaused) {
-                                                                    // PAUSING: Calculate remaining time and save it as the NEW duration
-                                                                    const now = new Date();
-                                                                    const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
-                                                                    const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                    const remaining = Math.max(0, currentDuration - elapsed);
-
-                                                                    updatePayload = {
-                                                                        is_paused: true,
-                                                                        phase_duration_sec: remaining // Save snapshot of time left
-                                                                    };
-                                                                    console.log(`[ADMIN] Pausing Spades. Time preserved: ${remaining}s`);
-                                                                } else {
-                                                                    // RESUMING: Start fresh timer with the preserved duration
-                                                                    updatePayload = {
-                                                                        is_paused: false,
-                                                                        phase_started_at: new Date().toISOString() // Restart clock NOW
-                                                                    };
-                                                                    console.log(`[ADMIN] Resuming Spades. Starting from preserved duration.`);
-                                                                }
-
-                                                                const updateRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
-                                                                    method: 'PATCH',
-                                                                    headers: {
-                                                                        'Content-Type': 'application/json',
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Prefer': 'return=minimal'
-                                                                    },
-                                                                    body: JSON.stringify(updatePayload)
-                                                                });
-
-                                                                if (!updateRes.ok) {
-                                                                    showToast(`UPDATE ERROR`, 'error');
-                                                                } else {
-                                                                    const msg = !currentPaused ? "SPADES PAUSED" : "SPADES RESUMED";
-                                                                    showToast(msg, 'info');
-                                                                    // Optimistic Update
-                                                                    setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
-                                                                }
-                                                            } catch (err) {
-                                                                console.error("HALT ERROR:", err);
-                                                            }
+                                                                    const updateRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
+                                                                        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                        body: JSON.stringify(updatePayload)
+                                                                    });
+                                                                    if (updateRes.ok) {
+                                                                        showToast(!currentPaused ? "SPADES PAUSED" : "SPADES RESUMED", 'info');
+                                                                        setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
+                                                                    }
+                                                                } catch (err) { console.error("HALT ERROR:", err); }
+                                                            })();
                                                         }}
-                                                        className="flex-1 px-4 py-3 bg-red-500/10 text-red-500 border border-red-500/20 text-[9px] font-black uppercase rounded hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
+                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${spadesGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                     >
-                                                        <AlertTriangle size={12} /> {spadesGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {spadesGameStatus.is_paused ? 'RESUME' : 'HALT'}
                                                     </button>
                                                     <button
-                                                        onClick={() => setShowEliminatedModal(true)}
-                                                        className="flex-1 px-4 py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center"
+                                                        onClick={() => setShowEliminatedModal('spades')}
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        ELIMINATED
+                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            if (!confirm('RESET SPADES PROTOCOL? (WIPES CURRENT GAME)')) return;
-
-                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
-
-                                                            // 1. Fetch Current State for Score Revert or Save
+                                                            const confirmed = await showConfirm('RESET SPADES PROTOCOL', 'This will wipe the current Spades game. All in-game progress will be lost.');
+                                                            if (!confirmed) return;
+                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
                                                             try {
                                                                 const accessToken = await getAccessToken();
                                                                 const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=players`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/vnd.pgrst.object+json'
-                                                                    }
+                                                                    headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
                                                                 });
                                                                 if (fetchRes.ok) {
                                                                     let data = await fetchRes.json();
@@ -2231,15 +2490,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                             if (p.id) {
                                                                                 const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
                                                                                 if (targetScore !== undefined) {
-                                                                                    // Save to DB using raw fetch
                                                                                     return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
                                                                                         method: 'PATCH',
-                                                                                        headers: {
-                                                                                            'Content-Type': 'application/json',
-                                                                                            'Authorization': `Bearer ${accessToken}`,
-                                                                                            'apikey': supabaseKey,
-                                                                                            'Prefer': 'return=minimal'
-                                                                                        },
+                                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
                                                                                         body: JSON.stringify({ visa_points: targetScore })
                                                                                     });
                                                                                 }
@@ -2250,137 +2503,57 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                         showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
                                                                     }
                                                                 }
-                                                            } catch (err) {
-                                                                console.error("SCORE_SAVE_ERROR:", err);
-                                                                showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
-                                                            }
-
-                                                            // 2. Wipe Game State
+                                                            } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
                                                             console.log('[ADMIN] Executing GATE RESET for Spades. Wiping state and clearing player list.');
-
-                                                            const resetData: any = {
-                                                                system_start: false,
-                                                                is_active: false,
-                                                                is_paused: false,
-                                                                phase: 'idle',
-                                                                current_round: 0,
-                                                                players: {}, // This clears the player list
-                                                                round_data: {},
-                                                                timer_display: '00:00'
-                                                            };
-
+                                                            const resetData: any = { system_start: false, is_active: false, is_paused: false, phase: 'idle', current_round: 0, players: {}, round_data: {}, timer_display: '00:00' };
                                                             const accessToken = await getAccessToken();
                                                             const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
                                                                 method: 'PATCH',
-                                                                headers: {
-                                                                    'Content-Type': 'application/json',
-                                                                    'Authorization': `Bearer ${accessToken}`,
-                                                                    'apikey': supabaseKey,
-                                                                    'Prefer': 'return=minimal'
-                                                                },
+                                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
                                                                 body: JSON.stringify(resetData)
                                                             });
-
-                                                            if (response.ok) {
-                                                                setSpadesGameStatus((prev: any) => ({ ...prev, ...resetData }));
-                                                                showToast("SPADES RESTARTED FOR ALL PLAYERS.", 'success');
-                                                            } else {
-                                                                console.error("SPADES_RESET_ERROR:", await response.text());
-                                                                showToast("ERROR: UNABLE TO RESTART SPADES.", 'error');
-                                                            }
+                                                            if (response.ok) { setSpadesGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("SPADES RESTARTED FOR ALL PLAYERS.", 'success'); }
+                                                            else { console.error("SPADES_RESET_ERROR:", await response.text()); showToast("ERROR: UNABLE TO RESTART SPADES.", 'error'); }
                                                         }}
-                                                        className="flex-1 px-4 py-3 bg-white/5 text-gray-400 border border-white/10 text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center"
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        GATE RESET
+                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
                                                     </button>
                                                 </div>
 
-                                                {/* Eliminated Players Modal */}
-                                                <AnimatePresence>
-                                                    {showEliminatedModal && (
-                                                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                                                            <motion.div
-                                                                initial={{ opacity: 0, scale: 0.95 }}
-                                                                animate={{ opacity: 1, scale: 1 }}
-                                                                exit={{ opacity: 0, scale: 0.95 }}
-                                                                className="bg-black border border-slate-700 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden"
-                                                            >
-                                                                <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-                                                                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                                                        <LogOut size={20} className="text-red-500" /> ELIMINATED SUBJECTS
-                                                                    </h3>
-                                                                    <button onClick={() => setShowEliminatedModal(false)} className="text-slate-500 hover:text-white">
-                                                                        <X size={24} />
-                                                                    </button>
-                                                                </div>
-                                                                <div className="p-6 max-h-[60vh] overflow-y-auto space-y-2">
-                                                                    {Object.values(spadesGameStatus?.players || {}).filter((p: any) => !p.cards || p.cards.length === 0).length === 0 ? (
-                                                                        <div className="text-center py-8 text-slate-500 font-mono text-sm">
-                                                                            NO CASUALTIES DETECTED
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="grid grid-cols-1 gap-2">
-                                                                            {Object.values(spadesGameStatus?.players || {})
-                                                                                .filter((p: any) => !p.cards || p.cards.length === 0)
-                                                                                .map((p: any, idx) => (
-                                                                                    <div key={idx} className="flex items-center justify-between p-4 bg-red-900/10 border border-red-900/20 rounded hover:bg-red-900/20 transition-colors">
-                                                                                        <div>
-                                                                                            <p className="text-white font-bold font-mono">{p.username || 'UNKNOWN'}</p>
-                                                                                            <p className="text-[10px] text-red-400 font-mono uppercase">ID: {p.id}</p>
-                                                                                        </div>
-                                                                                        <div className="text-right">
-                                                                                            <p className="text-red-500 font-bold text-xl">{p.score}</p>
-                                                                                            <p className="text-[9px] text-slate-500 uppercase tracking-widest">FINAL SCORE</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                ))}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                                <div className="p-4 border-t border-slate-800 bg-slate-900/30 flex justify-end">
-                                                                    <button
-                                                                        onClick={() => setShowEliminatedModal(false)}
-                                                                        className="px-6 py-2 bg-white text-black font-bold text-xs uppercase tracking-widest rounded hover:bg-slate-200"
-                                                                    >
-                                                                        CLOSE LOG
-                                                                    </button>
-                                                                </div>
-                                                            </motion.div>
-                                                        </div>
-                                                    )}
-                                                </AnimatePresence>
+                                                
                                             </div>
                                         </div>
                                     )}
 
                                     {suit.id === 'diamonds' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20">
+                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
                                             <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-cyan-500/5 mix-blend-overlay pointer-events-none" />
+                                                <div className="absolute inset-0 bg-purple-500/5 mix-blend-overlay pointer-events-none" />
 
                                                 <div className="flex justify-between items-end mb-2 relative z-10">
                                                     <div className="text-left">
-                                                        <p className="text-[9px] text-cyan-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                        <div className="text-lg sm:text-xl font-display font-black text-cyan-400 uppercase leading-none tracking-wider">
+                                                        <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                        <div className="text-lg sm:text-xl font-display font-black text-purple-400 uppercase leading-none tracking-wider">
                                                             {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
                                                         </div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <p className="text-[9px] text-cyan-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-cyan-500/50 drop-shadow-md">
+                                                        <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-purple-500/50 drop-shadow-md">
                                                             {diamondsTimerDisplay}
                                                         </div>
                                                     </div>
                                                 </div>
 
                                                 <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
-                                                    <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-1000 shadow-[0_0_10px_#06b6d4]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
+                                                    <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_#a855f7]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
                                                 </div>
                                             </div>
 
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-[380px] justify-center">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center md:text-left">Diamonds Command Unit</p>
-                                                <div className="flex flex-wrap items-center gap-1.5">
+                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
+                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Diamonds Command Unit</p>
+                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
                                                     <button
                                                         onClick={() => {
                                                             if (diamondsGameStatus?.system_start) {
@@ -2390,88 +2563,56 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             setSelectedSuitForModal('diamonds');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className={`group flex-1 px-3 py-2.5 ${diamondsGameStatus?.system_start ? 'bg-cyan-500/30 cursor-not-allowed' : 'bg-cyan-500 hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]'} text-black text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(6,182,212,0.3)] transition-all flex items-center justify-center gap-1.5`}
+                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${diamondsGameStatus?.system_start ? 'bg-purple-500/30 cursor-not-allowed' : 'bg-purple-500 hover:shadow-[0_0_20px_rgba(168,85,247,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
                                                     >
-                                                        {diamondsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={12} className={diamondsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
+                                                        {diamondsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            // Fetch latest state for atomic toggle
                                                             const { data, error: fetchError } = await supabase.from('diamonds_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'diamonds_king').single();
-                                                            if (fetchError) {
-                                                                showToast(`SYNC ERROR: ${fetchError.message}`, 'error');
-                                                                return;
-                                                            }
-
+                                                            if (fetchError) { showToast(`SYNC ERROR: ${fetchError.message}`, 'error'); return; }
                                                             const currentPaused = data?.is_paused;
                                                             const phaseStartedAt = data?.phase_started_at;
                                                             const currentDuration = data?.phase_duration_sec || 0;
-
                                                             let updatePayload: any = {};
                                                             if (!currentPaused) {
-                                                                // PAUSING: Calculate remaining time and save it as the NEW duration
                                                                 const now = new Date();
                                                                 const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
                                                                 const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                const remaining = Math.max(0, currentDuration - elapsed);
-
-                                                                updatePayload = {
-                                                                    is_paused: true,
-                                                                    phase_duration_sec: remaining // Save snapshot of time left
-                                                                };
+                                                                updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
                                                             } else {
-                                                                // RESUMING: Start fresh timer with the preserved duration
-                                                                updatePayload = {
-                                                                    is_paused: false,
-                                                                    phase_started_at: new Date().toISOString() // Restart clock NOW
-                                                                };
+                                                                updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
                                                             }
-
                                                             const { error } = await supabase.from('diamonds_game_state').update(updatePayload).eq('id', 'diamonds_king');
-                                                            if (error) {
-                                                                showToast(`ERROR: ${error.message}`, 'error');
-                                                            } else {
-                                                                showToast(!currentPaused ? "DIAMONDS HALTED (TIME FROZEN)." : "DIAMONDS RESUMED.", 'info');
-                                                            }
+                                                            if (error) { showToast(`ERROR: ${error.message}`, 'error'); }
+                                                            else { showToast(!currentPaused ? "DIAMONDS HALTED." : "DIAMONDS RESUMED.", 'info'); }
                                                         }}
-                                                        className={`flex-1 px-3 py-2.5 border text-[8px] font-black uppercase rounded transition-all flex items-center justify-center gap-1.5 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                     >
-                                                        <AlertTriangle size={11} /> {diamondsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {diamondsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setShowEliminatedModal('diamonds')}
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                    >
+                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            if (!confirm('RESET DIAMONDS PROTOCOL?')) return;
-                                                            // 1. Reset Supabase (Unified Table)
+                                                            const confirmed = await showConfirm('RESET DIAMONDS PROTOCOL', 'This will wipe the current Diamonds game state. All in-game progress will be lost.');
+                                                            if (!confirmed) return;
                                                             const { error: sbError } = await supabase.from('diamonds_game_state').upsert({
-                                                                id: 'diamonds_king',
-                                                                system_start: false,
-                                                                is_paused: false,
-                                                                current_round: 0,
-                                                                phase: 'idle',
-                                                                participants: [],
-                                                                updated_at: new Date().toISOString()
+                                                                id: 'diamonds_king', system_start: false, is_paused: false, current_round: 0, phase: 'idle', participants: [], updated_at: new Date().toISOString()
                                                             });
-
-                                                            if (sbError) {
-                                                                console.error("Supabase Reset Error:", sbError);
-                                                                showToast("RESET FAILED: DATABASE REJECTION.", 'error');
-                                                                return;
-                                                            }
-
-                                                            // 2. Broadcast FORCE EXIT
+                                                            if (sbError) { showToast("RESET FAILED: DATABASE REJECTION.", 'error'); return; }
                                                             if (diamondsControlChannelRef.current) {
-                                                                await diamondsControlChannelRef.current.send({
-                                                                    type: 'broadcast',
-                                                                    event: 'force_exit',
-                                                                    payload: { reason: 'ADMIN_RESET', timestamp: Date.now() }
-                                                                });
+                                                                await diamondsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
                                                             }
-
                                                             showToast("DIAMONDS RESET (PLAYERS EJECTED).", 'success');
                                                         }}
-                                                        className="flex-1 px-3 py-2.5 bg-white/5 text-gray-400 border border-white/10 text-[8px] font-black uppercase rounded hover:bg-white/10 transition-all text-center whitespace-nowrap"
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        RESET
+                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
                                                     </button>
                                                 </div>
                                             </div>
@@ -2479,7 +2620,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     )}
 
                                     {suit.id === 'hearts' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col md:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
+                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
                                             <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
                                                 <div className="absolute inset-0 bg-red-500/5 mix-blend-overlay pointer-events-none" />
 
@@ -2503,9 +2644,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
 
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-[380px] justify-center">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center md:text-left">Hearts Command Unit</p>
-                                                <div className="flex flex-wrap items-center gap-2">
+                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
+                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Hearts Command Unit</p>
+                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
                                                     <button
                                                         onClick={() => {
                                                             if (heartsGameStatus?.system_start) {
@@ -2515,9 +2656,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             setSelectedSuitForModal('hearts');
                                                             setShowStartModal(true);
                                                         }}
-                                                        className={`group flex-1 px-4 py-3 ${heartsGameStatus?.system_start ? 'bg-red-600/50 cursor-not-allowed text-white/50' : 'bg-red-600 hover:shadow-[0_0_30px_rgba(220,38,38,0.5)] text-white'} text-[10px] font-black uppercase rounded shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all flex items-center justify-center gap-2`}
+                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${heartsGameStatus?.system_start ? 'bg-red-600/50 cursor-not-allowed text-white/50' : 'bg-red-600 hover:shadow-[0_0_20px_rgba(220,38,38,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(220,38,38,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
                                                     >
-                                                        {heartsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={14} className={heartsGameStatus?.system_start ? '' : "group-hover:animate-pulse"} />
+                                                        {heartsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
                                                     </button>
                                                     <button
                                                         onClick={async () => {
@@ -2525,61 +2666,37 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             const currentPaused = data?.is_paused;
                                                             const currentDuration = data?.phase_duration_sec || 0;
                                                             const phaseStartedAt = data?.phase_started_at;
-
                                                             let updatePayload: any = {};
-
                                                             if (!currentPaused) {
-                                                                // PAUSING: Calculate remaining time and save it as the NEW duration
                                                                 const now = new Date();
                                                                 const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
                                                                 const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                const remaining = Math.max(0, currentDuration - elapsed);
-
-                                                                updatePayload = {
-                                                                    is_paused: true,
-                                                                    phase_duration_sec: remaining // Save snapshot of time left
-                                                                };
-                                                                console.log(`[ADMIN] Pausing Hearts. Time preserved: ${remaining}s`);
+                                                                updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
                                                             } else {
-                                                                // RESUMING: Start fresh timer with the preserved duration
-                                                                updatePayload = {
-                                                                    is_paused: false,
-                                                                    phase_started_at: new Date().toISOString() // Restart clock NOW
-                                                                };
-                                                                console.log(`[ADMIN] Resuming Hearts. Starting from preserved duration.`);
+                                                                updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
                                                             }
-
-                                                            // FIXED: Use hearts_game_state table instead of clubs_game_status
                                                             await supabase.from('hearts_game_state').update(updatePayload).eq('id', 'hearts_main');
-
-
                                                             showToast(!currentPaused ? "PROTOCOL HALTED." : "PROTOCOL RESUMED.", 'info');
                                                         }}
-                                                        className={`flex-1 px-4 py-3 border text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-2 ${heartsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${heartsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                     >
-                                                        {heartsGameStatus.is_paused ? <Radio size={12} className="animate-spin" /> : <AlertTriangle size={12} />} {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        {heartsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />} {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
                                                     </button>
                                                     <button
-                                                        onClick={() => setShowHeartsGameSettings(true)}
-                                                        className="flex-1 px-4 py-3 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[9px] font-black uppercase rounded hover:bg-purple-500 hover:text-white transition-all flex items-center justify-center gap-2"
+                                                        onClick={() => setShowEliminatedModal('hearts')}
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        <span className="text-lg">⚙</span> GAME SETTINGS
+                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
                                                     </button>
                                                     <button
                                                         onClick={async () => {
-                                                            if (!confirm('CONFIRM: TOTAL RESET HEARTS PROTOCOL?\n\nThis will wipe ALL sessions, clear round scores, and eject players.')) return;
-
-                                                            const keepPoints = confirm('Do you want players to KEEP their currently earned points?\n\n- Click OK to KEEP points.\n- Click Cancel to WIPE and REVERT points to starting balance.');
-
-                                                            // 1. Fetch Current State for Score Revert or Save
+                                                            const confirmed = await showConfirm('TOTAL RESET — HEARTS', 'This will wipe ALL sessions, clear round scores, and eject all players. This cannot be undone.');
+                                                            if (!confirmed) return;
+                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
                                                             try {
                                                                 const accessToken = await getAccessToken();
                                                                 const fetchRes = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=participants`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/vnd.pgrst.object+json'
-                                                                    }
+                                                                    headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
                                                                 });
                                                                 if (fetchRes.ok) {
                                                                     let data = await fetchRes.json();
@@ -2589,15 +2706,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                             if (p.id) {
                                                                                 const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
                                                                                 if (targetScore !== undefined) {
-                                                                                    // Save to DB using raw fetch
                                                                                     return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
                                                                                         method: 'PATCH',
-                                                                                        headers: {
-                                                                                            'Content-Type': 'application/json',
-                                                                                            'Authorization': `Bearer ${accessToken}`,
-                                                                                            'apikey': supabaseKey,
-                                                                                            'Prefer': 'return=minimal'
-                                                                                        },
+                                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
                                                                                         body: JSON.stringify({ visa_points: targetScore })
                                                                                     });
                                                                                 }
@@ -2608,53 +2719,21 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                         showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
                                                                     }
                                                                 }
-                                                            } catch (err) {
-                                                                console.error("SCORE_SAVE_ERROR:", err);
-                                                                showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error');
-                                                            }
-
+                                                            } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
                                                             console.log("=== HEARTS PROTOCOL PURGE INITIATED ===");
-
-                                                            // 2. Clear State Tables
                                                             await supabase.from('hearts_eliminated').delete().eq('game_id', 'hearts_main');
                                                             await supabase.from('hearts_guesses').delete().eq('game_id', 'hearts_main');
-
-                                                            // 3. Clear Session Tables
-                                                            await supabase.from('hearts_round_points').delete().neq('id', 0); // Delete all
+                                                            await supabase.from('hearts_round_points').delete().neq('id', 0);
                                                             await supabase.from('hearts_game_sessions').delete().neq('id', 'dummy');
-
-                                                            // 4. Reset Main Game Row
-                                                            const resetData: any = {
-                                                                phase: 'idle',
-                                                                current_round: 0,
-                                                                system_start: false,
-                                                                is_paused: false,
-                                                                active_game_id: null,
-                                                                participants: [],
-                                                                groups: {},
-                                                                pairs: {},
-                                                                guesses: {},
-                                                                chat_counts: {},
-                                                                eliminated: [],
-                                                                winners: []
-                                                            };
-
+                                                            const resetData: any = { phase: 'idle', current_round: 0, system_start: false, is_paused: false, active_game_id: null, participants: [], groups: {}, pairs: {}, guesses: {}, chat_counts: {}, eliminated: [], winners: [] };
                                                             const { error } = await supabase.from('hearts_game_state').update(resetData).eq('id', 'hearts_main');
-
-                                                            // 5. Purge Chat History
                                                             await supabase.from('messages').delete().eq('game_id', 'hearts_main');
-
-                                                            if (error) {
-                                                                showToast("PURGE FAILED: DATABASE REJECTION.", 'error');
-                                                            } else {
-                                                                // CRITICAL FIX: Instantly update local React state so HeartsGameMaster unmounts before a new START can be triggered!
-                                                                setHeartsGameStatus((prev: any) => ({ ...prev, ...resetData }));
-                                                                showToast("HEARTS PROTOCOL PURGED. READY FOR NEW SESSION.", 'success');
-                                                            }
+                                                            if (error) { showToast("PURGE FAILED: DATABASE REJECTION.", 'error'); }
+                                                            else { setHeartsGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("HEARTS PROTOCOL PURGED. READY FOR NEW SESSION.", 'success'); }
                                                         }}
-                                                        className="flex-1 px-4 py-3 bg-white/5 text-gray-400 border border-white/10 text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all text-center whitespace-nowrap"
+                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                     >
-                                                        RESET
+                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
                                                     </button>
                                                 </div>
                                             </div>
@@ -2665,24 +2744,41 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 {/* Active Games & Communication Intelligence */}
                                 <div className="flex flex-wrap lg:flex-nowrap gap-8 items-start">
                                     {/* Left: Round Monitor (Paginated) */}
-                                    <div className="w-full lg:w-[420px] space-y-6 shrink-0">
+                                    <div className="w-full lg:w-[420px] flex flex-col gap-5 shrink-0 h-full">
                                         <div className="flex justify-between items-center">
                                             <h3 className="text-sm font-bold text-gray-400 tracking-widest uppercase flex items-center gap-2">
                                                 <Activity size={16} /> {suit.id === 'hearts' ? 'PHASE MONITOR' : 'ROUND MONITOR'}
                                             </h3>
-                                            {false && suit.id === 'clubs' && (
-                                                <div className="flex gap-2">
-                                                    {/* Pagination Removed - Showing All 5 Rounds */}
-                                                </div>
-                                            )}
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: Math.max(0, (prev[suit.id] || 0) - 1) }))}
+                                                    disabled={!(roundMonitorPage[suit.id] > 0)}
+                                                    className={`p-1.5 rounded bg-white/5 border border-white/10 ${roundMonitorPage[suit.id] > 0 ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
+                                                >
+                                                    <ChevronLeft size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: (prev[suit.id] || 0) + 1 }))}
+                                                    disabled={(() => {
+                                                        const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                        return (roundMonitorPage[suit.id] || 0) >= Math.ceil(totalRounds / 4) - 1;
+                                                    })()}
+                                                    className={`p-1.5 rounded bg-white/5 border border-white/10 ${(() => {
+                                                        const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                        return (roundMonitorPage[suit.id] || 0) < Math.ceil(totalRounds / 4) - 1;
+                                                    })() ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
+                                                >
+                                                    <ChevronRight size={14} />
+                                                </button>
+                                            </div>
                                         </div>
 
-                                        <div className="grid gap-4">
+                                        <div className="flex flex-col gap-3 flex-1">
                                             {suit.id === 'hearts' ? (
                                                 ['idle', 'phase1', 'phase2', 'phase3', 'phase4', 'reveal', 'end'].map((phaseName, i) => {
                                                     const isCurrent = (heartsGameStatus as any).phase === phaseName;
                                                     return (
-                                                        <div key={phaseName} className={`bg-white/5 border rounded-lg p-5 transition-all group flex flex-col gap-3 ${isCurrent ? `border-red-500/50 bg-red-500/5` : 'border-white/10 hover:border-white/20'}`}>
+                                                        <div key={phaseName} className={`bg-white/5 border rounded-lg p-5 min-h-[95px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrent ? `border-red-500/50 bg-red-500/5` : 'border-white/10 hover:border-white/20'}`}>
                                                             <div className="flex justify-between items-center">
                                                                 <span className={`text-xs font-mono font-bold tracking-widest ${isCurrent ? `text-red-500` : 'text-gray-500'}`}>
                                                                     PHASE_{i.toString().padStart(2, '0')}
@@ -2691,13 +2787,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     {isCurrent ? (heartsGameStatus.system_start ? (heartsGameStatus.is_paused ? 'PAUSED' : 'ACTIVE') : 'STANDBY') : 'LOCKED'}
                                                                 </div>
                                                             </div>
-                                                            <h4 className="text-xl font-display font-bold text-white tracking-wider uppercase">{phaseName}</h4>
+                                                            <h4 className="text-lg font-display font-bold text-white tracking-wider uppercase">{phaseName}</h4>
                                                         </div>
                                                     );
-                                                })
+                                                }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
                                             ) : (
-                                                // MODIFIED: Show 6 Rounds for Clubs (consistent with user request)
-                                                [1, 2, 3, 4, 5, 6].slice(0, suit.id === 'clubs' ? 6 : (suit.id === 'spades' ? 5 : 3)).map(roundNum => {
+                                                // MODIFIED: Show 6 Rounds for Clubs, 5 for Spades and Diamonds
+                                                [1, 2, 3, 4, 5, 6].slice(0, suit.id === 'clubs' ? 6 : 5).map(roundNum => {
                                                     const gameStatus = suit.id === 'clubs' ? clubsGameStatus : suit.id === 'spades' ? spadesGameStatus : diamondsGameStatus;
                                                     // For Spades: Active if current matches roundNum AND is_active is true (or ignored because Spades always active if started)
                                                     // Spades uses 'system_start' which is mapped to 'is_active' in state
@@ -2705,7 +2801,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     const isCompleted = roundNum < gameStatus.current_round;
 
                                                     return (
-                                                        <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 transition-all group flex flex-col gap-3 ${isCurrentRound ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-white/20'}`}>
+                                                        <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[95px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-white/20'}`}>
                                                             <div className="flex justify-between items-center">
                                                                 <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? 'text-green-500' : 'text-gray-500'}`}>
                                                                     PHASE_{roundNum.toString().padStart(2, '0')}
@@ -2716,7 +2812,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             </div>
 
                                                             <div>
-                                                                <h4 className="text-2xl font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
+                                                                <h4 className="text-lg font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
                                                                 <div className="flex items-center gap-2 mt-1">
                                                                     <div className={`h-full transition-all duration-1000 ${isCurrentRound ? 'bg-green-500' : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
                                                                         style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
@@ -2728,7 +2824,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             </div>
                                                         </div>
                                                     );
-                                                })
+                                                }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
                                             )}
                                         </div>
                                     </div>
@@ -2786,7 +2882,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     {suit.id === 'clubs' && (
                                                         <button
                                                             onClick={async () => {
-                                                                if (!confirm('CONFIRM: FORCE GLOBAL PLAYER DATA REFRESH?\n\nThis will clear the cache for ALL users and re-download player IDs.')) return;
+                                                                const ok = await showConfirm('FORCE GLOBAL REFRESH', 'This will clear the cache for ALL users and re-download player IDs. Proceed?');
+                                                                if (!ok) return;
 
                                                                 // Clear local cache
                                                                 PlayerCache.clear();
@@ -2819,7 +2916,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                                                     <button
                                                         onClick={() => handlePurgeAllMessages(suit.id)}
-                                                        className="flex-1 sm:flex-none px-3 py-1.5 sm:px-5 sm:py-2.5 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/30 rounded-lg text-[10px] sm:text-xs font-black tracking-widest transition-all uppercase" >
+                                                        className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/30 rounded text-[10px] sm:text-[11px] font-black tracking-widest transition-all uppercase" >
                                                         <span className="hidden sm:inline">PURGE DATA</span>
                                                         <span className="sm:hidden">PURGE</span>
                                                     </button>
@@ -2833,16 +2930,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <Search size={14} className="text-gray-500" />
                                                 <input
                                                     type="text"
-                                                    value={suit.id === 'clubs' ? clubsSearchQuery : heartsSearchQuery}
-                                                    onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : setHeartsSearchQuery(e.target.value)}
+                                                    value={suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery}
+                                                    onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : suit.id === 'hearts' ? setHeartsSearchQuery(e.target.value) : suit.id === 'spades' ? setSpadesSearchQuery(e.target.value) : setDiamondsSearchQuery(e.target.value)}
                                                     placeholder="Search transcripts..."
                                                     className="bg-transparent border-none outline-none text-sm font-mono text-white placeholder:text-white/10 w-full"
                                                 />
                                             </div>
 
                                             <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
-                                                {(suit.id === 'clubs' ? clubsMessages : heartsMessages).filter(m => {
-                                                    const query = suit.id === 'clubs' ? clubsSearchQuery : heartsSearchQuery;
+                                                {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                                    const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
                                                     const matchesSearch = !query ||
                                                         m.content?.toLowerCase().includes(query.toLowerCase()) ||
                                                         m.user_name?.toLowerCase().includes(query.toLowerCase());
@@ -2865,8 +2962,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    (suit.id === 'clubs' ? clubsMessages : heartsMessages).filter(m => {
-                                                        const query = suit.id === 'clubs' ? clubsSearchQuery : heartsSearchQuery;
+                                                    (suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                                        const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
                                                         const matchesSearch = !query ||
                                                             m.content?.toLowerCase().includes(query.toLowerCase()) ||
                                                             m.user_name?.toLowerCase().includes(query.toLowerCase());
@@ -2958,16 +3055,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 initial={{ opacity: 0, scale: 0.95, y: -20 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.95, y: -20 }}
-                                className="w-full max-w-2xl bg-[#050508] border border-green-500/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[80vh]"
+                                className="w-full max-w-[95vw] sm:max-w-2xl bg-[#050508] border border-green-500/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh]"
                             >
                                 {/* Header */}
-                                <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+                                <div className="p-3 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
                                     <div>
                                         <h3 className="text-xl font-display font-bold text-white tracking-widest flex items-center gap-3">
-                                            <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-cyan-400' : 'text-green-500'} size={24} />
+                                            <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'} size={24} />
                                             WAITING LIST ({selectedSuitForModal?.toUpperCase()})
                                         </h3>
-                                        <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-cyan-400' : 'text-green-500'}`}>
+                                        <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
                                             Active Player Roster // Ready for Deployment
                                         </p>
                                     </div>
@@ -2984,11 +3081,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     <table className="w-full text-left border-collapse">
                                         <thead className="bg-white/[0.02] sticky top-0 z-10 backdrop-blur-md">
                                             <tr>
-                                                <th className="p-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">ID</th>
-                                                <th className="p-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
-                                                <th className="p-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Status</th>
-                                                <th className="p-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Visa</th>
-                                                <th className="p-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
+                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">ID</th>
+                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
+                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Status</th>
+                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Visa</th>
+                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/5">
@@ -3009,13 +3106,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
                                                         return (
                                                             <tr key={player.user_id || player.username} className="hover:bg-white/[0.02] transition-colors">
-                                                                <td className="p-4 font-mono text-xs text-green-500 font-bold">
+                                                                <td className="p-2 sm:p-4 font-mono text-xs text-green-500 font-bold hidden sm:table-cell">
                                                                     {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
                                                                 </td>
-                                                                <td className="p-4 font-mono text-xs text-gray-300">
+                                                                <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
                                                                     {player.username}
                                                                 </td>
-                                                                <td className="p-4">
+                                                                <td className="p-2 sm:p-4 hidden sm:table-cell">
                                                                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold bg-green-500/10 text-green-500 border border-green-500/20 uppercase tracking-wider">
                                                                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                                                                         READY
@@ -3128,22 +3225,22 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                             </div>
                                         );
                                     })()}
-                                    <div className="flex justify-between items-center w-full gap-4">
-                                        <div className="text-xs font-mono text-gray-500">
+                                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center w-full gap-3 sm:gap-4">
+                                        <div className="text-[10px] sm:text-xs font-mono text-gray-500 text-center sm:text-left">
                                             <span className="text-white font-bold">
                                                 {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
                                             </span> CANDIDATES READY
                                         </div>
-                                        <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2 sm:gap-3">
                                             <button
                                                 onClick={handleGlobalPurgeQueue}
-                                                className="px-6 py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
+                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[10px] sm:text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
                                             >
                                                 Global Purge
                                             </button>
                                             <button
                                                 onClick={() => setShowStartModal(false)}
-                                                className="px-6 py-3 rounded-lg border border-white/10 text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
+                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-white/10 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
                                             >
                                                 Cancel
                                             </button>
@@ -3473,7 +3570,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         showToast(`START ERROR: ${err.message}`, 'error');
                                                     }
                                                 }}
-                                                className="px-8 py-3 rounded-lg bg-green-500 text-black text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
+                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg bg-green-500 text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
                                             >
                                                 INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
                                             </button>
@@ -3530,7 +3627,199 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 {showHeartsGameSettings && (
                     <HeartsGameSettingsModal onClose={() => setShowHeartsGameSettings(false)} />
                 )}
+                {customDialog && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/70 backdrop-blur-md"
+                        onClick={() => {
+                            if (customDialog.type === 'alert') {
+                                customDialog.resolve(undefined);
+                                setCustomDialog(null);
+                            }
+                        }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.92, y: 16, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            exit={{ scale: 0.92, y: 16, opacity: 0 }}
+                            transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="relative w-full max-w-sm overflow-hidden rounded-xl border border-white/15 bg-[#0a0a10] shadow-[0_0_80px_rgba(0,0,0,0.9)] backdrop-blur-sm"
+                        >
+
+                            {/* Inner content */}
+                            <div className="px-8 pt-8 pb-8 flex flex-col items-center text-center">
+
+                                {/* Decorative suit symbol or Joker image */}
+                                {(() => {
+                                    const t = (customDialog.title || '').toLowerCase();
+                                    const isSpades = t.includes('spades');
+                                    const isClubs = t.includes('clubs');
+                                    const isDiamonds = t.includes('diamonds');
+                                    const isHearts = t.includes('hearts');
+                                    if (isSpades) return <div className="text-5xl leading-none mb-5 select-none text-blue-400/70">♠</div>;
+                                    if (isClubs) return <div className="text-5xl leading-none mb-5 select-none text-green-400/70">♣</div>;
+                                    if (isDiamonds) return <div className="text-5xl leading-none mb-5 select-none text-purple-400/70">♦</div>;
+                                    if (isHearts) return <div className="text-5xl leading-none mb-5 select-none text-red-500/70">♥</div>;
+                                    // Joker fallback
+                                    return <img src="/suit_assets/joker.png" alt="Joker" className="w-12 h-12 object-contain mb-5 opacity-70" />;
+                                })()}
+
+                                {/* Title */}
+                                {(() => {
+                                    const t = (customDialog.title || '').toLowerCase();
+                                    const colorClass = t.includes('spades') ? 'text-blue-300'
+                                        : t.includes('clubs') ? 'text-green-300'
+                                            : t.includes('diamonds') ? 'text-purple-300'
+                                                : t.includes('hearts') ? 'text-red-400'
+                                                    : customDialog.type === 'alert' ? 'text-red-400'
+                                                        : customDialog.type === 'prompt' ? 'text-blue-300'
+                                                            : 'text-white';
+                                    return (
+                                        <h3 style={{ fontFamily: "'Cinzel', serif" }} className={`text-base font-bold tracking-[0.15em] mb-3 leading-snug uppercase ${colorClass}`}>
+                                            {customDialog.title}
+                                        </h3>
+                                    );
+                                })()}
+
+                                {/* Divider */}
+                                <div className="w-12 h-px bg-white/10 mb-4" />
+
+                                {/* Message */}
+                                <p className="text-gray-400 text-[13px] leading-relaxed mb-6 whitespace-pre-line font-mono tracking-wide">
+                                    {customDialog.message}
+                                </p>
+
+                                {/* Prompt input — card-based broadcast composer */}
+                                {customDialog.type === 'prompt' && (
+                                    <div className="w-full mb-6">
+                                        <div className="bg-[#0a0a0f] border border-white/10 rounded-xl overflow-hidden focus-within:border-blue-500/40 focus-within:shadow-[0_0_0_3px_rgba(59,130,246,0.08)] transition-all">
+                                            {/* Card header */}
+                                            <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-white/5">
+                                                <span className="text-[11px] font-mono text-white-400/70 uppercase tracking-[0.25em]">System Message</span>
+                                                <span className="ml-auto text-[10px] font-mono text-gray-600">{promptValue.length}/200</span>
+                                            </div>
+                                            {/* Textarea */}
+                                            <textarea
+                                                value={promptValue}
+                                                onChange={(e) => setPromptValue(e.target.value.slice(0, 200))}
+                                                rows={3}
+                                                className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none font-mono resize-none"
+                                                placeholder="Type your broadcast message here..."
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        customDialog.resolve(promptValue);
+                                                        setCustomDialog(null);
+                                                    }
+                                                    if (e.key === 'Escape') {
+                                                        customDialog.resolve(null);
+                                                        setCustomDialog(null);
+                                                    }
+                                                }}
+                                            />
+                                            {/* Card footer hint */}
+
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Buttons */}
+                                <div className={`w-full flex gap-3 ${customDialog.type === 'alert' ? 'justify-center' : 'flex-col sm:flex-row'}`}>
+                                    {/* ALERT */}
+                                    {customDialog.type === 'alert' && (
+                                        <button
+                                            onClick={() => { customDialog.resolve(undefined); setCustomDialog(null); }}
+                                            className="flex-1 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 hover:border-red-400 text-red-400 text-[11px] font-mono font-bold uppercase tracking-[0.2em] rounded-lg transition-all active:scale-95"
+                                        >
+                                            ♦ Acknowledged
+                                        </button>
+                                    )}
+
+                                    {/* CONFIRM */}
+                                    {customDialog.type === 'confirm' && (
+                                        <>
+                                            <button
+                                                onClick={() => { customDialog.resolve(false); setCustomDialog(null); }}
+                                                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={() => { customDialog.resolve(true); setCustomDialog(null); }}
+                                                className="flex-1 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 hover:border-red-400 text-red-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                ♦ Confirm
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {/* THREE OPTIONS */}
+                                    {customDialog.type === 'confirm_three_options' && (
+                                        <div className="w-full flex flex-col gap-2">
+                                            <button
+                                                onClick={() => { customDialog.resolve('ok'); setCustomDialog(null); }}
+                                                className="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 hover:border-red-400 text-red-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                Keep Points
+                                            </button>
+                                            <button
+                                                onClick={() => { customDialog.resolve('cancel'); setCustomDialog(null); }}
+                                                className="w-full py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                Wipe Points
+                                            </button>
+                                            <button
+                                                onClick={() => { customDialog.resolve('alt'); setCustomDialog(null); }}
+                                                className="w-full py-2 text-gray-500 hover:text-gray-300 text-[10px] font-mono tracking-[0.2em] uppercase transition-colors"
+                                            >
+                                                Abort
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* PROMPT */}
+                                    {customDialog.type === 'prompt' && (
+                                        <>
+                                            <button
+                                                onClick={() => { customDialog.resolve(null); setCustomDialog(null); }}
+                                                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={() => { customDialog.resolve(promptValue); setCustomDialog(null); }}
+                                                className="flex-1 py-2.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/50 hover:border-blue-400 text-blue-300 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                            >
+                                                ♠ Transmit
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+
+                            </div>
+
+                            {/* Bottom dim glow */}
+                            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-32 h-px bg-white/5" />
+                        </motion.div>
+                    </motion.div>
+                )}
             </AnimatePresence>
+
+            {showAdminCard && adminSettings && (
+                <PlayerCardModal
+                    user={adminSettings}
+                    onClose={() => setShowAdminCard(false)}
+                />
+            )}
         </div >
     );
 };
+
+
+
+
+
