@@ -57,6 +57,27 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
     }, [players, editingPointsId]);
     
     // Create / Batch State
+    
+    const sectionMotionDefaults = {
+        initial: { opacity: 0, y: 18 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -10, transition: { duration: 0.05, ease: 'easeIn' as const } },
+        transition: { duration: 0.24, ease: 'easeOut' as const },
+    };
+
+    const sectionRise = {
+        initial: { opacity: 0, y: 20 },
+        animate: { opacity: 1, y: 0 },
+        transition: { duration: 0.28, ease: 'easeOut' as const },
+    };
+
+    const sectionFloat = {
+        initial: { opacity: 0, scale: 0.96, y: 10 },
+        animate: { opacity: 1, scale: 1, y: 0 },
+        exit: { opacity: 0, scale: 0.98, y: 5, transition: { duration: 0.05, ease: 'easeIn' as const } },
+        transition: { type: 'spring' as const, damping: 24, stiffness: 280 },
+    };
+
     const [newUsername, setNewUsername] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [isCreating, setIsCreating] = useState(false);
@@ -586,8 +607,7 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
             {showCreateForm && (
                 <div className="flex flex-col xl:flex-row gap-6 mb-6 items-start w-full">
                     <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
+                        initial={sectionRise.initial} animate={sectionRise.animate} transition={sectionRise.transition}
                         className="p-6 border border-white/10 bg-black/40 rounded-lg flex-1 min-w-[300px]"
                     >
                         <h3 className="text-lg text-white font-mono mb-6 flex items-center gap-2">
@@ -628,8 +648,7 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                     </motion.div>
 
                     <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
+                        initial={sectionRise.initial} animate={sectionRise.animate} transition={sectionRise.transition}
                         className="p-6 border border-white/10 bg-black/40 rounded-lg flex-[2] min-w-[300px]"
                     >
                         <h3 className="text-lg text-white font-mono mb-6 flex items-center gap-2">

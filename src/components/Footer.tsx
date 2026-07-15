@@ -1,8 +1,6 @@
 "use client";
 
 import { Link } from "react-router-dom";
-import { DIcons } from "dicons";
-import ThemeToogle from "./ui/footer";
 
 const navigation = {
   categories: [
@@ -75,7 +73,7 @@ const Underline = `hover:-translate-y-1 border border-dotted rounded-xl p-2.5 tr
 export const Footer = () => {
   return (
     <footer className="border-t border-white/10 bg-black text-gray-400 font-sans text-xs relative z-10 py-12 px-6">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12 px-6">
         {/* Column 1: Brand & Desc */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -94,24 +92,24 @@ export const Footer = () => {
           <h3 className="text-white font-semibold tracking-wider uppercase text-[11px]">Arena Links</h3>
           <ul className="space-y-2 text-[11px]">
             <li>
-              <Link to="/home" className="hover:text-white transition-colors">
+              <Link to="/home" className="hover:text-white transition-colors cursor-pointer">
                 &gt; SYSTEM HOME
               </Link>
             </li>
             <li>
-              <Link to="/home/card" className="hover:text-white transition-colors">
+              <Link to="/home/card" className="hover:text-white transition-colors cursor-pointer">
                 &gt; CARD SELECTION
               </Link>
             </li>
             <li>
-              <Link to="/home/leaderboard" className="hover:text-white transition-colors">
+              <a href="/home#leaderboard" className="hover:text-white transition-colors cursor-pointer">
                 &gt; PLAYER LEADERBOARD
-              </Link>
+              </a>
             </li>
             <li>
-              <Link to="/home/survival" className="hover:text-white transition-colors">
+              <a href="/home#protocol" className="hover:text-white transition-colors cursor-pointer">
                 &gt; SURVIVAL PROTOCOL
-              </Link>
+              </a>
             </li>
           </ul>
         </div>
@@ -140,8 +138,8 @@ export const Footer = () => {
         </div>
 
         {/* Column 4: Danger Alert */}
-        <div className="space-y-4">
-          <h3 className="text-red-500 font-bold tracking-wider uppercase text-[11px] flex items-center gap-1.5 animate-pulse">
+        <div className="space-y-4 text-right">
+          <h3 className="text-red-500 font-bold tracking-wider uppercase text-[11px] flex items-center gap-1.5 animate-pulse justify-end">
             ⚠️ SYSTEM WARNING
           </h3>
           <p className="leading-relaxed text-[11px] text-red-400/80">
@@ -150,7 +148,7 @@ export const Footer = () => {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto border-t border-white/5 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-gray-600">
+      <div className="border-t border-white/5 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-gray-600 px-6">
         <div>
           © {new Date().getFullYear()} BORDERLAND PROTOCOL. ALL RIGHTS RESERVED.
         </div>
@@ -161,7 +159,6 @@ export const Footer = () => {
           >
             ACCESS ADMIN TERMINAL
           </Link>
-          <ThemeToogle />
         </div>
       </div>
     </footer>

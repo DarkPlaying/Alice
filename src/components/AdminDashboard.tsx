@@ -1714,28 +1714,38 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
                 fixed lg:sticky top-0 left-0 lg:left-auto
             `}>
-                <div className="flex justify-between items-center">
-                    {!isSidebarCollapsed && (
-                        <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
-                                <img src="/suit_assets/2.png" alt="Logo" className="h-8 w-auto" />
-                            </div>
-                            <h1 className="font-display font-bold text-sm sm:text-base tracking-wider text-gray-400">
-                                Admin Panel For Alice
-                            </h1>
-                        </div>
-                    )}
-                    <motion.button
-                        onClick={() => { setIsSidebarCollapsed(!isSidebarCollapsed); setSidebarToggleRotation(prev => prev + 90); }}
-                        className={`${isSidebarCollapsed ? 'mx-auto' : ''} p-2 rounded bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors`}
-                        title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-                        animate={{ rotate: sidebarToggleRotation }}
-                        transition={{ duration: 0.4, type: 'spring', stiffness: 250, damping: 15 }}
-                        whileTap={{ scale: 0.85 }}
-                    >
-                        {isSidebarCollapsed ? <Menu size={18} /> : <X size={18} />}
-                    </motion.button>
-                </div>
+                {isSidebarCollapsed ? (
+                    <div className="flex flex-col items-center gap-4">
+                        <img src="/suit_assets/2.png" alt="Logo" className="h-6 w-auto shrink-0" />
+                        <motion.button
+                            onClick={() => { setIsSidebarCollapsed(!isSidebarCollapsed); setSidebarToggleRotation(prev => prev + 90); }}
+                            className="p-2 rounded bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                            title="Expand Sidebar"
+                            animate={{ rotate: sidebarToggleRotation }}
+                            transition={{ duration: 0.4, type: 'spring', stiffness: 250, damping: 15 }}
+                            whileTap={{ scale: 0.85 }}
+                        >
+                            <Menu size={18} />
+                        </motion.button>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2">
+                        <img src="/suit_assets/2.png" alt="Logo" className="h-7 w-auto shrink-0" />
+                        <h1 className="font-display font-bold text-sm sm:text-base tracking-wider text-gray-400 whitespace-nowrap">
+                            Admin Panel For Alice
+                        </h1>
+                        <motion.button
+                            onClick={() => { setIsSidebarCollapsed(!isSidebarCollapsed); setSidebarToggleRotation(prev => prev + 90); }}
+                            className="ml-auto p-2 rounded bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                            title="Collapse Sidebar"
+                            animate={{ rotate: sidebarToggleRotation }}
+                            transition={{ duration: 0.4, type: 'spring', stiffness: 250, damping: 15 }}
+                            whileTap={{ scale: 0.85 }}
+                        >
+                            <X size={18} />
+                        </motion.button>
+                    </div>
+                )}
 
                 {/* Navigation */}
                 <nav className={`${isSidebarCollapsed ? 'space-y-2' : 'space-y-2'}`}>
@@ -1799,7 +1809,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 </button>
 
                 {/* Admin Profile */}
-                <div className="mt-auto flex flex-col gap-1 pt-2 border-t border-white/10">
+                <div className="flex flex-col gap-1">
                     <button
                         onClick={() => setShowAdminCard(true)}
                         title={adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}
@@ -1958,7 +1968,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     </div>
                 </header>
 
-                <AnimatePresence mode="sync">
+                <AnimatePresence mode="wait">
                     {activeView === 'dashboard' && (
                         <motion.div
                             key="dashboard"

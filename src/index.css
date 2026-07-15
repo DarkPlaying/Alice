@@ -116,6 +116,7 @@
         opacity: 1;
     }
 }
+
 :root {
     --font-cinzel: 'Cinzel', serif;
     --font-oswald: 'Oswald', sans-serif;
@@ -358,4 +359,17 @@
 .animate-slow-shimmer {
     animation: slow-shimmer 6s linear infinite;
 }
-@keyframes laser-scan {\n    0% { transform: translateY(-10px); }\n    100% { transform: translateY(510px); }\n}\n\n.animate-laser-scan {\n    animation: laser-scan 4s linear infinite;\n}\n
+
+@keyframes laser-scan {
+    0% {
+        transform: translateY(-10px);
+    }
+
+    100% {
+        transform: translateY(510px);
+    }
+}
+
+.animate-laser-scan {
+    animation: laser-scan 4s linear infinite;
+}

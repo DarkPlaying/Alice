@@ -44,7 +44,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
         try {
             const sanitizedUsername = username.trim().toLowerCase().replace(/\s+/g, '');
             let email = sanitizedUsername;
-            
+
             if (!email.includes('@')) {
                 const { data: profile } = await supabase.from('profiles').select('email').eq('username', sanitizedUsername).single();
                 if (profile && profile.email) {
@@ -53,7 +53,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                     email = `${sanitizedUsername}@borderland.app`;
                 }
             }
-            
+
             console.log("Login attempt for:", email);
 
             if (isRegistering) {
@@ -88,7 +88,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 shakeForm();
                 return;
             }
-            
+
             const finalUser = { ...userData, uid: data?.user?.id, email: email, id: data?.user?.id };
 
             if (userData.role === 'master' || userData.role === 'admin' || userData.username === 'admin') {
@@ -310,7 +310,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             {/* Login Container */}
             <motion.div
                 animate={controls}
-                className="relative z-30 w-full max-w-md p-8 bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
+                className="relative z-30 w-full max-w-md p-8 bg-red backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
             >
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-wider">
@@ -379,13 +379,13 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                         type="submit"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        className="w-full relative overflow-hidden group bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-display font-bold py-3 px-6 rounded-lg uppercase tracking-widest shadow-lg transition-all duration-300"
+                        className="w-full relative overflow-hidden group bg-gradient-to-r from-red to-red-500 hover:from-red-500 hover:to-red-500 text-white font-display font-bold py-3 px-6 rounded-lg uppercase tracking-widest shadow-lg transition-all duration-300"
                     >
                         <span className="relative z-10 flex items-center justify-center gap-2">
                             Enter The Borderland <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         {/* Shine effect */}
-                        <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 skew-x-12" />
+                        <div className="absolute inset-0 bg-white/20 translate-x-[-120%] group-hover:translate-x-[100%] transition-transform duration-700 skew-x-12" />
                     </motion.button>
 
                     <div className="text-center mt-4">

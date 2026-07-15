@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import { User, Layers, HeartCrack, Clock, Play, Shield } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -40,9 +41,49 @@ const protocols = [
 ];
 
 export const SurvivalProtocol = () => {
+    const [activeNode, setActiveNode] = useState(0);
+    const [lineHeight, setLineHeight] = useState(0);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const nodeRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+    useEffect(() => {
+        const handleScroll = () => {
+            if (!containerRef.current || nodeRefs.current.length === 0) return;
+            const containerRect = containerRef.current.getBoundingClientRect();
+            const viewportCenter = window.innerHeight / 2;
+
+            let closestIndex = 0;
+            let closestDistance = Infinity;
+
+            nodeRefs.current.forEach((node, i) => {
+                if (!node) return;
+                const nodeRect = node.getBoundingClientRect();
+                const nodeCenter = nodeRect.top + nodeRect.height / 2;
+                const distance = Math.abs(nodeCenter - viewportCenter);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestIndex = i;
+                }
+            });
+
+            setActiveNode(closestIndex);
+
+            const activeNodeEl = nodeRefs.current[closestIndex];
+            if (activeNodeEl) {
+                const nodeRect = activeNodeEl.getBoundingClientRect();
+                const nodeCenterInContainer = nodeRect.top + nodeRect.height / 2 - containerRect.top;
+                const containerHeight = containerRect.height;
+                const pct = Math.min(100, Math.max(0, (nodeCenterInContainer / containerHeight) * 100));
+                setLineHeight(pct);
+            }
+        };
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        handleScroll();
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
     return (
         <section id="protocol" className="py-32 relative border-b border-white/5 overflow-hidden z-20">
-            {/* Background elements */}
             <div className="absolute inset-0 bg-home opacity-10 pointer-events-none mix-blend-overlay"></div>
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,0,80,0.05),transparent_70%)] pointer-events-none"></div>
 
@@ -56,14 +97,31 @@ export const SurvivalProtocol = () => {
                     </p>
                 </div>
 
-                <div className="relative">
-                    {/* Central Line */}
-                    <div className="absolute left-[20px] md:left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-[#ff0050]/50 to-transparent"></div>
+                <div ref={containerRef} className="relative">
+                    {/* Static base line */}
+                    <div className="absolute left-[20px] md:left-1/2 top-0 bottom-0 w-px bg-white/10 -translate-x-1/2"></div>
+                    {/* Scroll-following red line */}
+                    <div
+                        className="absolute left-1/2 top-0 w-px bg-[#ff0050] shadow-[0_0_8px_#ff0050,0_0_20px_#ff0050] -translate-x-1/2"
+                        style={{
+                            height: `${lineHeight}%`,
+                            transition: 'height 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                        }}
+                    />
+                    {/* Glowing dot at the tip */}
+                    <div
+                        className="absolute left-1/2 w-3 h-3 bg-[#ff0050] rounded-full shadow-[0_0_12px_#ff0050,0_0_24px_#ff0050] -translate-x-1/2 z-10"
+                        style={{
+                            top: `${lineHeight}%`,
+                            transition: 'top 0.4s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                        }}
+                    />
 
                     <div className="space-y-24">
                         {protocols.map((item, i) => (
                             <motion.div
                                 key={item.title}
+                                ref={(el) => { nodeRefs.current[i] = el; }}
                                 initial={{ opacity: 0, y: 50 }}
                                 whileInView={{ opacity: 1, y: 0 }}
                                 viewport={{ once: true, margin: "-100px" }}
@@ -78,8 +136,8 @@ export const SurvivalProtocol = () => {
                                 </div>
 
                                 {/* Center Node */}
-                                <div className="absolute left-[4px] md:left-1/2 -translate-x-1/2 w-10 h-10 bg-black border border-[#ff0050] rounded-full flex items-center justify-center z-20 shadow-[0_0_20px_rgba(255,0,80,0.5)]">
-                                    <item.icon size={16} className="text-white" />
+                                <div className={`absolute left-[4px] md:left-1/2 -translate-x-1/2 w-10 h-10 bg-black border rounded-full flex items-center justify-center z-20 transition-all duration-500 ${activeNode === i ? 'border-[#ff0050] shadow-[0_0_20px_#ff0050,0_0_40px_#ff0050] scale-125' : 'border-[#ff0050]/30 shadow-[0_0_10px_rgba(255,0,80,0.2)]'}`}>
+                                    <item.icon size={16} className={`transition-colors duration-500 ${activeNode === i ? 'text-[#ff0050]' : 'text-white/60'}`} />
                                 </div>
 
                                 {/* Spacer for Timeline Balance */}

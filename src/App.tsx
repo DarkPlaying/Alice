@@ -308,7 +308,7 @@ function AppContent() {
         <Route
           path="/admin"
           element={
-            isAdmin ? <AdminDashboard onLogout={handleLogout} /> : <Navigate to="/login" replace />
+            isLoading ? null : (isAdmin ? <AdminDashboard onLogout={handleLogout} /> : <Navigate to="/login" replace />)
           }
         />
       </Routes>
