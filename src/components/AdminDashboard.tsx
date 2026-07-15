@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
@@ -87,6 +87,37 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     } | null>(null);
 
     const [promptValue, setPromptValue] = useState('');
+
+    const sectionMotionDefaults = {
+        initial: { opacity: 0, y: 18 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -10, transition: { duration: 0.05, ease: 'easeIn' as const } },
+        transition: { duration: 0.24, ease: 'easeOut' as const },
+    } as const;
+
+    const sectionRise = {
+        initial: { opacity: 0, y: 20 },
+        animate: { opacity: 1, y: 0 },
+        transition: { duration: 0.28, ease: 'easeOut' as const },
+    } as const;
+
+    const sectionFloat = {
+        initial: { opacity: 0, scale: 0.96, y: 10 },
+        animate: { opacity: 1, scale: 1, y: 0 },
+        exit: { opacity: 0, scale: 0.98, y: 5, transition: { duration: 0.05, ease: 'easeIn' as const } },
+        transition: { type: 'spring' as const, damping: 24, stiffness: 280 },
+    } as const;
+
+    const getPlayerElementKey = (player: any, index: number, prefix = 'player') => {
+        const baseId = player.user_id || player.id || player.username;
+        return `${prefix}-${baseId ? String(baseId) : index}`;
+    };
+
+    const getStableKey = (base: any, fallback: string) => {
+        const rawKey = base ?? '';
+        const asString = String(rawKey).trim();
+        return asString || fallback;
+    };
 
     const showAlert = (title: string, message: string): Promise<void> => {
         return new Promise((resolve) => {
@@ -352,6 +383,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
     // MOBILE STATE
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [sidebarToggleRotation, setSidebarToggleRotation] = useState(0);
 
     // CLUBS STATE
     const [clubsMessages, setClubsMessages] = useState<any[]>([]);
@@ -1676,74 +1709,77 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             </AnimatePresence>
             {/* LEft SIDEBAR */}
             <aside className={`
-                w-80 border-r border-white/10 bg-black/60 backdrop-blur-xl p-6 flex flex-col gap-8 h-[111.12vh] z-40 overflow-y-auto admin-scrollbar transition-transform duration-300
+                border-r border-white/10 bg-black/60 backdrop-blur-xl flex flex-col gap-8 h-[111.12vh] z-40 overflow-y-auto admin-scrollbar transition-all duration-300
+                ${isSidebarCollapsed ? 'w-[72px] p-3' : 'w-80 p-6'}
                 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
                 fixed lg:sticky top-0 left-0 lg:left-auto
             `}>
-                <div className="flex justify-between items-center lg:block">
-                    <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-display font-black tracking-widest text-white">
-                                BORDER<span className="text-red-500">LAND</span>
-                            </span>
-                            <span className="text-red-500 text-[12px] sm:text-[14px] animate-pulse">♠ ♥ ♦ ♣</span>
+                <div className="flex justify-between items-center">
+                    {!isSidebarCollapsed && (
+                        <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                                <img src="/suit_assets/2.png" alt="Logo" className="h-8 w-auto" />
+                            </div>
+                            <h1 className="font-display font-bold text-sm sm:text-base tracking-wider text-gray-400">
+                                Admin Panel For Alice
+                            </h1>
                         </div>
-                        <h1 className="font-display font-bold text-sm sm:text-base tracking-wider text-gray-400">
-                            Admin Panel For Alice
-                        </h1>
-                    </div>
-                    <button
-                        onClick={() => setIsSidebarOpen(false)}
-                        className="lg:hidden text-gray-500 hover:text-white"
+                    )}
+                    <motion.button
+                        onClick={() => { setIsSidebarCollapsed(!isSidebarCollapsed); setSidebarToggleRotation(prev => prev + 90); }}
+                        className={`${isSidebarCollapsed ? 'mx-auto' : ''} p-2 rounded bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors`}
+                        title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+                        animate={{ rotate: sidebarToggleRotation }}
+                        transition={{ duration: 0.4, type: 'spring', stiffness: 250, damping: 15 }}
+                        whileTap={{ scale: 0.85 }}
                     >
-                        <X size={24} />
-                    </button>
+                        {isSidebarCollapsed ? <Menu size={18} /> : <X size={18} />}
+                    </motion.button>
                 </div>
 
                 {/* Navigation */}
-                <nav className="space-y-2">
-                    <button
-                        onClick={() => { setActiveView('dashboard'); setSelectedPlayers([]); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded text-base tracking-wider transition-all ${activeView === 'dashboard' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
-                    >
-                        <Activity size={18} />
-                        DASHBOARD
-                    </button>
-                    <button
-                        onClick={() => { setActiveView('players'); setSelectedPlayers([]); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded text-base tracking-wider transition-all ${activeView === 'players' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
-                    >
-                        <Users size={18} />
-                        PLAYERS
-                    </button>
-                    <button
-                        onClick={() => { setActiveView('masters'); setSelectedPlayers([]); setIsSidebarOpen(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded text-base tracking-wider transition-all ${activeView === 'masters' ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
-                    >
-                        <Crown size={18} />
-                        MASTERS
-                    </button>
+                <nav className={`${isSidebarCollapsed ? 'space-y-2' : 'space-y-2'}`}>
+                    {[
+                        { id: 'dashboard', icon: Activity, label: 'DASHBOARD', activeColor: 'text-red-500', activeBg: 'bg-red-500/10', activeBorder: 'border-red-500/20' },
+                        { id: 'players', icon: Users, label: 'PLAYERS', activeColor: 'text-green-500', activeBg: 'bg-green-500/10', activeBorder: 'border-green-500/20' },
+                        { id: 'masters', icon: Crown, label: 'MASTERS', activeColor: 'text-yellow-500', activeBg: 'bg-yellow-500/10', activeBorder: 'border-yellow-500/20' },
+                    ].map((item, itemIdx) => (
+                        <motion.button
+                            key={`nav-${getStableKey(item.id, String(itemIdx))}`}
+                            onClick={() => { setActiveView(item.id as any); setSelectedPlayers([]); setIsSidebarOpen(false); }}
+                            title={item.label}
+                            whileTap={{ scale: 0.97 }}
+                            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} px-4 py-3 rounded text-base tracking-wider border transition-colors duration-200 ${activeView === item.id ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}` : 'text-gray-400 hover:bg-white/5 hover:text-white border-transparent'}`}
+                        >
+                            <item.icon size={18} />
+                            {!isSidebarCollapsed && item.label}
+                        </motion.button>
+                    ))}
                 </nav>
 
                 {/* Suits Section */}
-                <div className="space-y-4">
-                    <h3 className="text-xs font-bold text-gray-500 tracking-widest uppercase">Suit Protocols</h3>
-                    <div className="grid gap-3">
+                <div className={isSidebarCollapsed ? 'space-y-2' : 'space-y-4'}>
+                    {!isSidebarCollapsed && <h3 className="text-xs font-bold text-gray-500 tracking-widest uppercase">Suit Protocols</h3>}
+                    <div className={isSidebarCollapsed ? 'space-y-2' : 'grid gap-3'}>
                         {suits.map((suit, i) => (
                             <motion.button
-                                key={i}
+                                key={getStableKey(suit.id, `suit-${i}`)}
                                 onClick={() => { setActiveView(suit.id as any); setIsSidebarOpen(false); }}
-                                whileHover={{ x: 5 }}
-                                className={`flex items-center gap-3 p-3 border rounded-lg transition-all w-full text-left ${activeView === suit.id ? 'bg-white/10 border-white/40' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
+                                whileHover={isSidebarCollapsed ? {} : { x: 4 }}
+                                whileTap={{ scale: 0.97 }}
+                                title={`${suit.name} — ${suit.type}`}
+                                className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} p-3 border rounded-lg transition-colors duration-200 w-full ${isSidebarCollapsed ? '' : 'text-left'} ${activeView === suit.id ? 'bg-white/10 border-white/40' : 'bg-white/5 border-white/5 hover:border-white/20'}`}
                             >
                                 <suit.icon className={`w-5 h-5 ${suit.color}`} />
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-base font-bold tracking-wider">{suit.name}</span>
-                                        <span className={`w-2 h-2 rounded-full shadow-[0_0_6px_var(--dot-glow)] animate-pulse ${suit.dotColor}`} />
+                                {!isSidebarCollapsed && (
+                                    <div className="flex-1">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-base font-bold tracking-wider">{suit.name}</span>
+                                            <span className={`w-2 h-2 rounded-full shadow-[0_0_6px_var(--dot-glow)] animate-pulse ${suit.dotColor}`} />
+                                        </div>
+                                        <div className="text-xs text-gray-500 uppercase">{suit.type}</div>
                                     </div>
-                                    <div className="text-xs text-gray-500 uppercase">{suit.type}</div>
-                                </div>
+                                )}
                             </motion.button>
                         ))}
                     </div>
@@ -1755,22 +1791,27 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         const msg = await showPrompt('BROADCAST MESSAGE', 'system message to transmit to all players:', '');
                         if (msg) handleSendBroadcast(msg);
                     }}
-                    className="w-full flex items-center gap-3 px-4 py-3 bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500 hover:text-white rounded-lg text-sm font-bold uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_10px_rgba(59,130,246,0.1)]"
+                    title="Broadcast"
+                    className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} px-4 py-3 bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500 hover:text-white rounded-lg text-sm font-bold uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_10px_rgba(59,130,246,0.1)]`}
                 >
                     <Radio size={18} />
-                    BROADCAST
+                    {!isSidebarCollapsed && 'BROADCAST'}
                 </button>
 
-
-
                 {/* Admin Profile */}
-                <div className="mt-auto flex flex-col gap-2 pt-4 border-t border-white/10">
+                <div className="mt-auto flex flex-col gap-1 pt-2 border-t border-white/10">
                     <button
                         onClick={() => setShowAdminCard(true)}
-                        className="flex items-center justify-between gap-2 px-2 py-2 sm:px-3 sm:py-2 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer"
+                        title={adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}
+                        className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'} gap-2 px-2 py-2.5 sm:px-3 sm:py-3 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer`}
                     >
-                        <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}</span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                        <Settings size={18} className="text-gray-400 shrink-0" />
+                        {!isSidebarCollapsed && (
+                            <>
+                                <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}</span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+                            </>
+                        )}
                     </button>
                 </div>
             </aside>
@@ -1788,8 +1829,45 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <Menu size={20} />
                         </button>
                         <div>
-                            <h2 className="text-xl lg:text-2xl font-bold tracking-widest text-white mb-1">
-                                {activeView === 'dashboard' ? 'DASHBOARD OVERVIEW' : activeView === 'players' ? 'PLAYER DATABASE' : activeView === 'masters' ? 'GAME MASTERS' : `PROTOCOL: ${activeView.toUpperCase()}`}
+                            <h2 className="text-xl lg:text-2xl font-bold tracking-widest text-white mb-1 flex items-center gap-2">
+                                {activeView === 'dashboard' ? (
+                                    <>
+                                        <Activity size={24} className="text-cyan-400" />
+                                        DASHBOARD OVERVIEW
+                                    </>
+                                ) : activeView === 'players' ? (
+                                    <>
+                                        <Users size={24} className="text-green-400" />
+                                        PLAYER DATABASE
+                                    </>
+                                ) : activeView === 'masters' ? (
+                                    <>
+                                        <Shield size={24} className="text-yellow-400" />
+                                        GAME MASTERS
+                                    </>
+                                ) : activeView === 'clubs' ? (
+                                    <>
+                                        <span className="text-2xl text-cyan-400 font-bold">♣</span>
+                                        CLUBS PROTOCOL
+                                    </>
+                                ) : activeView === 'spades' ? (
+                                    <>
+                                        <span className="text-2xl text-blue-400 font-bold">♠</span>
+                                        SPADES PROTOCOL
+                                    </>
+                                ) : activeView === 'diamonds' ? (
+                                    <>
+                                        <span className="text-2xl text-purple-400 font-bold">♦</span>
+                                        DIAMONDS PROTOCOL
+                                    </>
+                                ) : activeView === 'hearts' ? (
+                                    <>
+                                        <span className="text-2xl text-red-400 font-bold">♥</span>
+                                        HEARTS PROTOCOL
+                                    </>
+                                ) : (
+                                    `PROTOCOL: ${String(activeView).toUpperCase()}`
+                                )}
                             </h2>
                             <p className="text-[10px] text-gray-500 tracking-[0.2em] uppercase">
                                 {activeView === 'dashboard' ? 'Monitoring System Status' : activeView === 'players' ? 'Visa Management' : activeView === 'masters' ? 'Admin Access Control' : `Active Game Management`}
@@ -1800,7 +1878,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'clubs' && (
                             <div className="flex items-center gap-4 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full animate-pulse ${clubsGameStatus.is_active ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500'}`} />
+                                    <span className={`text-xl font-bold ${clubsGameStatus.is_active ? 'text-green-500' : 'text-gray-500'}`}>♣</span>
                                     {clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
                                 </span>
                                 <span className="text-gray-600">|</span>
@@ -1812,17 +1890,27 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'spades' && (
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full animate-pulse ${spadesGameStatus.is_active ? 'bg-blue-500 shadow-[0_0_8px_#3b82f6]' : 'bg-red-500'}`} />
+                                    <span className={`text-xl font-bold ${spadesGameStatus.is_active ? 'text-blue-500' : 'text-gray-500'}`}>♠</span>
                                     {spadesGameStatus.is_active ? (spadesGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
                                 </span>
                                 <span className="text-gray-600">|</span>
                                 <span className="text-blue-400 uppercase">{spadesTimerDisplay}</span>
                             </div>
                         )}
+                        {activeView === 'diamonds' && (
+                            <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
+                                <span className="flex items-center gap-2">
+                                    <span className={`text-xl font-bold ${diamondsGameStatus.is_active ? 'text-purple-500' : 'text-gray-500'}`}>♦</span>
+                                    {diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                </span>
+                                <span className="text-gray-600">|</span>
+                                <span className="text-purple-400">ROUND {diamondsGameStatus.current_round}/5</span>
+                            </div>
+                        )}
                         {activeView === 'hearts' && (
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full animate-pulse ${heartsGameStatus.is_active ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-gray-500'}`} />
+                                    <span className={`text-xl font-bold ${heartsGameStatus.is_active ? 'text-red-500' : 'text-gray-500'}`}>♥</span>
                                     {heartsGameStatus.is_active ? (heartsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
                                 </span>
                             </div>
@@ -1839,6 +1927,14 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             </span>
 
 
+                            <button
+                                onClick={() => navigate('/home')}
+                                title="Back to Home"
+                                className="flex items-center gap-1.5 px-2 sm:px-4 py-1 sm:py-2 bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500 hover:text-white rounded text-[9px] sm:text-[12px] font-bold uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap shadow-[0_0_10px_rgba(6,182,212,0.1)]"
+                            >
+                                <ArrowLeft size={11} className="sm:size-3" />
+                                <span>BACK</span>
+                            </button>
                             <button
                                 onClick={handleEmergencyPurgeToggle}
                                 title={adminSettings?.role === 'maintenance' ? 'Resume System' : 'Emergency Purge'}
@@ -1858,232 +1954,231 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 <LogOut size={11} className="sm:size-3" />
                                 <span>LOG OUT</span>
                             </button>
-
-                            <button
-                                onClick={() => navigate('/home')}
-                                title="Back to Home"
-                                className="flex items-center gap-1.5 px-2 sm:px-4 py-1 sm:py-2 bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500 hover:text-white rounded text-[9px] sm:text-[12px] font-bold uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap shadow-[0_0_10px_rgba(6,182,212,0.1)]"
-                            >
-                                <ArrowLeft size={11} className="sm:size-3" />
-                                <span>BACK</span>
-                            </button>
                         </div>
                     </div>
                 </header>
 
-                {activeView === 'dashboard' && (
-                    <>
-                        {/* Stats Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                            {dashboardStats.map((stat, i) => (
-                                <motion.div
-                                    key={i}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: i * 0.1 }}
-                                    className="bg-black/40 border border-white/10 p-6 rounded-lg backdrop-blur-sm relative overflow-hidden group"
-                                >
-                                    <div className={`absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-40 transition-opacity ${stat.color}`}>
-                                        <stat.icon size={48} />
-                                    </div>
-                                    <h3 className="text-gray-400 text-xs uppercase tracking-widest mb-2">{stat.label}</h3>
-                                    <p className={`text-3xl font-mono font-bold ${stat.color} drop-shadow-lg`}>{stat.value}</p>
-                                </motion.div>
-                            ))}
-                        </div>
+                <AnimatePresence mode="sync">
+                    {activeView === 'dashboard' && (
+                        <motion.div
+                            key="dashboard"
+                            initial={sectionMotionDefaults.initial}
+                            animate={sectionMotionDefaults.animate}
+                            exit={sectionMotionDefaults.exit}
+                            transition={sectionMotionDefaults.transition}
+                        >
+                            {/* Stats Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+                                {dashboardStats.map((stat, i) => (
+                                    <motion.div
+                                        key={getStableKey(stat.label, `dashboard-stat-${i}`)}
+                                        initial={sectionRise.initial}
+                                        animate={sectionRise.animate}
+                                        transition={{ ...sectionRise.transition, delay: i * 0.08 }}
+                                        className="bg-black/40 border border-white/10 p-6 rounded-lg backdrop-blur-sm relative overflow-hidden group"
+                                    >
+                                        <div className={`absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-40 transition-opacity ${stat.color}`}>
+                                            <stat.icon size={48} />
+                                        </div>
+                                        <h3 className="text-gray-400 text-xs uppercase tracking-widest mb-2">{stat.label}</h3>
+                                        <p className={`text-3xl font-mono font-bold ${stat.color} drop-shadow-lg`}>{stat.value}</p>
+                                    </motion.div>
+                                ))}
+                            </div>
 
-                        {/* Main Dashboard Grid */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
-                            {/* Four Arena Status Grid */}
-                            <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col">
-                                <div className="flex items-center gap-2 mb-6 text-green-400">
-                                    <Grid size={18} />
-                                    <h2 className="font-bold tracking-widest uppercase">ARENA STATUS GRID</h2>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                                    {[
-                                        {
-                                            suit: 'Spades',
-                                            icon: Spade,
-                                            color: 'text-blue-400',
-                                            borderColor: 'border-blue-500/20',
-                                            glowColor: 'shadow-[0_0_20px_rgba(59,130,246,0.05)]',
-                                            difficulty: 'Extreme',
-                                            type: 'Physical',
-                                            active: !!spadesGameStatus?.system_start,
-                                            players: getGamePlayerCount('spades'),
-                                            gameState: spadesGameStatus?.is_active ? (spadesGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
-                                            currentPhase: 'ROUND ' + (spadesGameStatus?.current_round || 1),
-                                            round: spadesGameStatus?.current_round || 0,
-                                            totalRounds: 5,
-                                            extra: `${spadesGameStatus?.players?.length || 0} registered`
-                                        },
-                                        {
-                                            suit: 'Clubs',
-                                            icon: Club,
-                                            color: 'text-green-400',
-                                            borderColor: 'border-green-500/20',
-                                            glowColor: 'shadow-[0_0_20px_rgba(34,197,94,0.05)]',
-                                            difficulty: 'Very Hard',
-                                            type: 'Team',
-                                            active: !!clubsGameStatus?.system_start,
-                                            players: getGamePlayerCount('clubs'),
-                                            gameState: clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
-                                            currentPhase: `ROUND ${clubsGameStatus?.current_round || 0}/6`,
-                                            round: clubsGameStatus?.current_round || 0,
-                                            totalRounds: 6,
-                                            extra: `${clubsGameStatus?.votes_submitted || 0} votes cast`
-                                        },
-                                        {
-                                            suit: 'Diamonds',
-                                            icon: Diamond,
-                                            color: 'text-purple-400',
-                                            borderColor: 'border-purple-500/20',
-                                            glowColor: 'shadow-[0_0_20px_rgba(168,85,247,0.05)]',
-                                            difficulty: 'Hard',
-                                            type: 'Intellect',
-                                            active: !!diamondsGameStatus?.system_start,
-                                            players: getGamePlayerCount('diamonds'),
-                                            gameState: diamondsGameStatus?.is_active ? (diamondsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
-                                            currentPhase: (diamondsGameStatus?.phase || 'IDLE').toUpperCase(),
-                                            round: diamondsGameStatus?.current_round || 0,
-                                            totalRounds: 5,
-                                            extra: `${diamondsGameStatus?.participants?.length || 0} participants`
-                                        },
-                                        {
-                                            suit: 'Hearts',
-                                            icon: Heart,
-                                            color: 'text-red-500',
-                                            borderColor: 'border-red-500/20',
-                                            glowColor: 'shadow-[0_0_20px_rgba(239,68,68,0.05)]',
-                                            difficulty: 'Hope-less',
-                                            type: 'Psychological',
-                                            active: !!heartsGameStatus?.system_start,
-                                            players: getGamePlayerCount('hearts'),
-                                            gameState: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
-                                            currentPhase: (heartsGameStatus?.phase || 'IDLE').toUpperCase(),
-                                            round: heartsGameStatus?.current_round || 0,
-                                            totalRounds: 7,
-                                            extra: `phase ${heartsGameStatus?.phase || 'idle'}`
-                                        }
-                                    ].map((arena) => (
-                                        <div
-                                            key={arena.suit}
-                                            className={`bg-black/80 border ${arena.borderColor} p-4 rounded-lg flex flex-col hover:border-white/20 transition-all relative group overflow-hidden ${arena.glowColor}`}
-                                        >
-                                            {/* Header */}
-                                            <div className="flex justify-between items-start mb-3">
-                                                <div className="flex items-center gap-2.5">
-                                                    <arena.icon className={`w-5 h-5 ${arena.color}`} />
-                                                    <div>
-                                                        <h3 className="font-bold tracking-wider text-sm text-white uppercase">{arena.suit}</h3>
-                                                        <span className="text-[9px] text-gray-500 tracking-widest uppercase">{arena.type} · {arena.difficulty}</span>
+                            {/* Main Dashboard Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
+                                {/* Four Arena Status Grid */}
+                                <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col">
+                                    <div className="flex items-center gap-2 mb-6 text-green-400">
+                                        <Grid size={18} />
+                                        <h2 className="font-bold tracking-widest uppercase">ARENA STATUS GRID</h2>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                                        {[
+                                            {
+                                                suit: 'Spades',
+                                                icon: Spade,
+                                                color: 'text-blue-400',
+                                                borderColor: 'border-blue-500/20',
+                                                glowColor: 'shadow-[0_0_20px_rgba(59,130,246,0.05)]',
+                                                difficulty: 'Extreme',
+                                                type: 'Physical',
+                                                active: !!spadesGameStatus?.system_start,
+                                                players: getGamePlayerCount('spades'),
+                                                gameState: spadesGameStatus?.is_active ? (spadesGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                currentPhase: 'ROUND ' + (spadesGameStatus?.current_round || 1),
+                                                round: spadesGameStatus?.current_round || 0,
+                                                totalRounds: 5,
+                                                extra: `${spadesGameStatus?.players?.length || 0} registered`
+                                            },
+                                            {
+                                                suit: 'Clubs',
+                                                icon: Club,
+                                                color: 'text-green-400',
+                                                borderColor: 'border-green-500/20',
+                                                glowColor: 'shadow-[0_0_20px_rgba(34,197,94,0.05)]',
+                                                difficulty: 'Very Hard',
+                                                type: 'Team',
+                                                active: !!clubsGameStatus?.system_start,
+                                                players: getGamePlayerCount('clubs'),
+                                                gameState: clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                currentPhase: `ROUND ${clubsGameStatus?.current_round || 0}/6`,
+                                                round: clubsGameStatus?.current_round || 0,
+                                                totalRounds: 6,
+                                                extra: `${clubsGameStatus?.votes_submitted || 0} votes cast`
+                                            },
+                                            {
+                                                suit: 'Diamonds',
+                                                icon: Diamond,
+                                                color: 'text-purple-400',
+                                                borderColor: 'border-purple-500/20',
+                                                glowColor: 'shadow-[0_0_20px_rgba(168,85,247,0.05)]',
+                                                difficulty: 'Hard',
+                                                type: 'Intellect',
+                                                active: !!diamondsGameStatus?.system_start,
+                                                players: getGamePlayerCount('diamonds'),
+                                                gameState: diamondsGameStatus?.is_active ? (diamondsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                currentPhase: (diamondsGameStatus?.phase || 'IDLE').toUpperCase(),
+                                                round: diamondsGameStatus?.current_round || 0,
+                                                totalRounds: 5,
+                                                extra: `${diamondsGameStatus?.participants?.length || 0} participants`
+                                            },
+                                            {
+                                                suit: 'Hearts',
+                                                icon: Heart,
+                                                color: 'text-red-500',
+                                                borderColor: 'border-red-500/20',
+                                                glowColor: 'shadow-[0_0_20px_rgba(239,68,68,0.05)]',
+                                                difficulty: 'Hope-less',
+                                                type: 'Psychological',
+                                                active: !!heartsGameStatus?.system_start,
+                                                players: getGamePlayerCount('hearts'),
+                                                gameState: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                currentPhase: (heartsGameStatus?.phase || 'IDLE').toUpperCase(),
+                                                round: heartsGameStatus?.current_round || 0,
+                                                totalRounds: 7,
+                                                extra: `phase ${heartsGameStatus?.phase || 'idle'}`
+                                            }
+                                        ].map((arena, arenaIdx) => (
+                                            <div
+                                                key={`arena-${getStableKey(arena.suit, String(arenaIdx))}`}
+                                                className={`bg-black/80 border ${arena.borderColor} p-4 rounded-lg flex flex-col hover:border-white/20 transition-all relative group overflow-hidden ${arena.glowColor}`}
+                                            >
+                                                {/* Header */}
+                                                <div className="flex justify-between items-start mb-3">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <arena.icon className={`w-5 h-5 ${arena.color}`} />
+                                                        <div>
+                                                            <h3 className="font-bold tracking-wider text-sm text-white uppercase">{arena.suit}</h3>
+                                                            <span className="text-[9px] text-gray-500 tracking-widest uppercase">{arena.type} · {arena.difficulty}</span>
+                                                        </div>
+                                                    </div>
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-mono tracking-widest ${arena.active ? (arena.gameState === 'PAUSED' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20') : 'bg-gray-800 text-gray-500'}`}>
+                                                        {arena.gameState}
+                                                    </span>
+                                                </div>
+
+                                                {/* Stats Grid */}
+                                                <div className="grid grid-cols-2 gap-2 mb-3 flex-1">
+                                                    <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                        <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Phase</p>
+                                                        <p className={`text-[11px] font-mono font-bold ${arena.active ? arena.color : 'text-gray-500'}`}>{arena.currentPhase}</p>
+                                                    </div>
+                                                    <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                        <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Progress</p>
+                                                        <p className="text-[11px] font-mono font-bold text-white">{arena.round}/{arena.totalRounds}</p>
+                                                    </div>
+                                                    <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                        <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Players</p>
+                                                        <p className="text-[11px] font-mono font-bold text-white">{arena.players}</p>
+                                                    </div>
+                                                    <div className="bg-white/3 rounded p-2 border border-white/5">
+                                                        <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Status</p>
+                                                        <p className="text-[11px] font-mono font-bold text-gray-400 truncate">{arena.extra}</p>
                                                     </div>
                                                 </div>
-                                                <span className={`px-2 py-0.5 rounded text-[9px] font-mono tracking-widest ${arena.active ? (arena.gameState === 'PAUSED' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20') : 'bg-gray-800 text-gray-500'}`}>
-                                                    {arena.gameState}
-                                                </span>
-                                            </div>
 
-                                            {/* Stats Grid */}
-                                            <div className="grid grid-cols-2 gap-2 mb-3 flex-1">
-                                                <div className="bg-white/3 rounded p-2 border border-white/5">
-                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Phase</p>
-                                                    <p className={`text-[11px] font-mono font-bold ${arena.active ? arena.color : 'text-gray-500'}`}>{arena.currentPhase}</p>
-                                                </div>
-                                                <div className="bg-white/3 rounded p-2 border border-white/5">
-                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Progress</p>
-                                                    <p className="text-[11px] font-mono font-bold text-white">{arena.round}/{arena.totalRounds}</p>
-                                                </div>
-                                                <div className="bg-white/3 rounded p-2 border border-white/5">
-                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Players</p>
-                                                    <p className="text-[11px] font-mono font-bold text-white">{arena.players}</p>
-                                                </div>
-                                                <div className="bg-white/3 rounded p-2 border border-white/5">
-                                                    <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-0.5">Status</p>
-                                                    <p className="text-[11px] font-mono font-bold text-gray-400 truncate">{arena.extra}</p>
+                                                {/* Progress bar */}
+                                                <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full transition-all duration-700 ${arena.active ? `bg-gradient-to-r ${arena.color === 'text-blue-400' ? 'from-blue-600 to-blue-400' : arena.color === 'text-green-400' ? 'from-green-600 to-green-400' : arena.color === 'text-purple-400' ? 'from-purple-600 to-purple-400' : 'from-red-600 to-red-400'}` : 'bg-white/10'}`}
+                                                        style={{ width: arena.totalRounds > 0 ? `${Math.min(100, (arena.round / arena.totalRounds) * 100)}%` : '0%' }}
+                                                    />
                                                 </div>
                                             </div>
+                                        ))}
+                                    </div>
+                                </div>
 
-                                            {/* Progress bar */}
-                                            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full transition-all duration-700 ${arena.active ? `bg-gradient-to-r ${arena.color === 'text-blue-400' ? 'from-blue-600 to-blue-400' : arena.color === 'text-green-400' ? 'from-green-600 to-green-400' : arena.color === 'text-purple-400' ? 'from-purple-600 to-purple-400' : 'from-red-600 to-red-400'}` : 'bg-white/10'}`}
-                                                    style={{ width: arena.totalRounds > 0 ? `${Math.min(100, (arena.round / arena.totalRounds) * 100)}%` : '0%' }}
-                                                />
-                                            </div>
-                                        </div>
-                                    ))}
+                                {/* System Logs */}
+                                <div className="bg-black/40 border border-white/10 rounded-xl p-6 relative overflow-hidden">
+                                    <div className="flex items-center gap-2 mb-6 text-blue-400">
+                                        <Database size={18} />
+                                        <h2 className="font-bold tracking-widest">SYSTEM LOGS</h2>
+                                    </div>
+                                    <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
+                                        {systemLogs.map((log, i) => {
+                                            const timeMatch = log.match(/^\[(.*?)\]/);
+                                            const time = timeMatch ? timeMatch[1] : '';
+                                            const message = log.replace(/^\[.*?\]\s*/, '');
+                                            const isWarning = /warning|critical/i.test(log);
+                                            return (
+                                                <div key={getStableKey(`${time}-${message.slice(0, 50)}`, `system-log-${i}`)} className="flex gap-2 border-b border-white/5 pb-2">
+                                                    <span className="text-gray-500">[{time}]</span>
+                                                    <span className={isWarning ? 'text-red-400' : 'text-green-400'}>
+                                                        {message}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </div>
+                        </motion.div>
+                    )}
 
-                            {/* System Logs */}
-                            <div className="bg-black/40 border border-white/10 rounded-xl p-6 relative overflow-hidden">
-                                <div className="flex items-center gap-2 mb-6 text-blue-400">
-                                    <Database size={18} />
-                                    <h2 className="font-bold tracking-widest">SYSTEM LOGS</h2>
-                                </div>
-                                <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
-                                    {systemLogs.map((log, i) => {
-                                        const timeMatch = log.match(/^\[(.*?)\]/);
-                                        const time = timeMatch ? timeMatch[1] : '';
-                                        const message = log.replace(/^\[.*?\]\s*/, '');
-                                        const isWarning = message.includes('WARNING') || message.includes('CRITICAL') || message.includes('ERROR') || message.includes('PURGE');
-                                        return (
-                                            <div key={i} className="flex gap-2 border-b border-white/5 pb-2">
-                                                <span className="text-gray-500">[{time}]</span>
-                                                <span className={isWarning ? 'text-red-400' : 'text-green-400'}>
-                                                    {message}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    </>
-                )}
+                    {(activeView === 'players' || activeView === 'masters') && (
+                        <motion.div
+                            key={activeView}
+                            initial={sectionMotionDefaults.initial}
+                            animate={sectionMotionDefaults.animate}
+                            exit={sectionMotionDefaults.exit}
+                            transition={{ ...sectionMotionDefaults.transition, duration: 0.22 }}
+                        >
+                            <VisaManagement
+                                players={players}
+                                activeView={activeView as 'players' | 'masters'}
+                                onRefreshRequest={() => setRefreshTrigger(prev => prev + 1)}
+                                setPlayers={setPlayers}
+                                onHistoryRequest={(player) => {
+                                    setActiveView('clubs');
+                                    setClubsCommsMode(player.role === 'master' ? 'master' : 'player');
+                                    setClubsFilterUserId(player.id);
+                                }}
+                            />
+                        </motion.div>
+                    )}
 
-                {(activeView === 'players' || activeView === 'masters') && (
-                    <VisaManagement
-                        players={players}
-                        activeView={activeView as 'players' | 'masters'}
-                        onRefreshRequest={() => setRefreshTrigger(prev => prev + 1)}
-                        setPlayers={setPlayers}
-                        onHistoryRequest={(player) => {
-                            setActiveView('clubs');
-                            setClubsCommsMode(player.role === 'master' ? 'master' : 'player');
-                            setClubsFilterUserId(player.id);
-                        }}
-                    />
-                )}
 
+                </AnimatePresence>
 
                 {/* GENERAL TOAST */}
-                <AnimatePresence>
+                <AnimatePresence key="toast-presence">
                     {toast && (
                         <motion.div
-                            initial={{ opacity: 0, y: 50 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 20 }}
-                            className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-4 rounded-lg flex items-center gap-4 z-[60] shadow-[0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-md border ${toast.type === 'error' ? 'bg-red-950/90 border-red-500 text-red-100' :
-                                toast.type === 'success' ? 'bg-green-950/90 border-green-500 text-green-100' :
-                                    'bg-gray-900/90 border-white/20 text-white'
-                                }`}
+                            initial={sectionMotionDefaults.initial}
+                            animate={sectionMotionDefaults.animate}
+                            exit={sectionMotionDefaults.exit}
+                            transition={sectionMotionDefaults.transition}
+                            className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-4 rounded-lg flex items-center gap-4 z-[60] shadow-[0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-md border ${toast.type === 'error' ? 'bg-red-950/90 border-red-500 text-red-100' : toast.type === 'success' ? 'bg-green-950/90 border-green-500 text-green-100' : 'bg-gray-900/90 border-white/20 text-white'}`}
                         >
-                            <div className={`p-2 rounded-full ${toast.type === 'error' ? 'bg-red-500/20' :
-                                toast.type === 'success' ? 'bg-green-500/20' :
-                                    'bg-white/10'
-                                }`}>
-                                {toast.type === 'error' ? <AlertTriangle size={20} className="text-red-500" /> :
-                                    toast.type === 'success' ? <CheckSquare size={20} className="text-green-500" /> :
-                                        <Radio size={20} className="text-white" />}
+                            <div className={`p-2 rounded-full ${toast.type === 'error' ? 'bg-red-500/20' : toast.type === 'success' ? 'bg-green-500/20' : 'bg-white/10'}`}>
+                                {toast.type === 'error' ? <AlertTriangle size={20} className="text-red-500" /> : toast.type === 'success' ? <CheckSquare size={20} className="text-green-500" /> : <Radio size={20} className="text-white" />}
                             </div>
                             <div className="flex flex-col">
                                 <span className="font-display font-bold tracking-widest text-sm uppercase">
-                                    {toast.type === 'error' ? 'SYSTEM ERROR' :
-                                        toast.type === 'success' ? 'COMMAND EXECUTED' :
-                                            'SYSTEM NOTICE'}
+                                    {toast.type === 'error' ? 'SYSTEM ERROR' : toast.type === 'success' ? 'COMMAND EXECUTED' : 'SYSTEM NOTICE'}
                                 </span>
                                 <span className="text-xs font-mono opacity-80 uppercase tracking-wider">
                                     {toast.message}
@@ -2094,12 +2189,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 </AnimatePresence>
 
                 {/* UNDO TOAST (PERMANENT) */}
-                <AnimatePresence>
+                <AnimatePresence key="undo-presence">
                     {showUndo && (
                         <motion.div
-                            initial={{ opacity: 0, y: 50 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 50 }}
+                            initial={sectionMotionDefaults.initial}
+                            animate={sectionMotionDefaults.animate}
+                            exit={sectionMotionDefaults.exit}
+                            transition={sectionMotionDefaults.transition}
                             className="fixed bottom-8 right-8 bg-[#0a0a0a] border border-white/20 p-4 rounded-lg flex items-center gap-4 z-50 shadow-2xl"
                         >
                             <div className="flex flex-col">
@@ -2134,7 +2230,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
 
                 {/* TRACKING MODAL */}
-                <AnimatePresence>
+                <AnimatePresence key="tracking-presence">
                     {trackingPlayer && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
                             <motion.div
@@ -2220,1332 +2316,1319 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             </motion.div>
                         </div>
                     )}
-                </AnimatePresence>
 
-                {/* Suits View */}
-                {
-                    ['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView) && suits.map(suit => {
-                        if (suit.id !== activeView) return null;
-                        return (
-                            <div key={suit.id} className="space-y-8">
-                                {/* Suit Hero */}
-                                <div className="bg-black/40 border border-white/10 rounded-xl p-6 sm:p-12 flex flex-col sm:flex-row items-center gap-6 sm:gap-12 relative overflow-hidden">
-                                    <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block pointer-events-none z-0`}>
-                                        <suit.icon size={400} />
-                                    </div>
-                                    <div className={`p-6 sm:p-8 bg-white/5 rounded-full ${suit.color} relative z-10 pointer-events-none`}>
-                                        <suit.icon size={32} className="sm:hidden" />
-                                        <suit.icon size={64} className="hidden sm:block" />
-                                    </div>
-                                    <div className="relative z-10 text-center sm:text-left">
-                                        <h2 className={`font-display font-bold tracking-widest mb-1 ${suit.id === 'diamonds' ? 'text-2xl sm:text-4xl' : 'text-3xl sm:text-5xl'}`}>{suit.name}</h2>
-                                        <h3 className={`font-mono tracking-wider mb-3 ${suit.color} ${suit.id === 'diamonds' ? 'text-sm sm:text-base' : 'text-base sm:text-xl'}`}>{suit.type}</h3>
-                                        <p className="text-gray-400 max-w-xl text-[13px] sm:text-base leading-relaxed">{suit.description}</p>
-                                    </div>
 
-                                    {suit.id === 'clubs' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-green-500/5 mix-blend-overlay pointer-events-none" />
+                    {/* Suits View */}
+                    {
+                        ['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView) && suits.map(suit => {
+                            if (suit.id !== activeView) return null;
+                            return (
+                                <motion.div
+                                    key={suit.id}
+                                    initial={sectionMotionDefaults.initial}
+                                    animate={sectionMotionDefaults.animate}
+                                    exit={sectionMotionDefaults.exit}
+                                    transition={sectionMotionDefaults.transition}
+                                    className="space-y-8"
+                                >
+                                    {/* Suit Hero */}
+                                    <div className="bg-black/40 border border-white/10 rounded-xl p-6 sm:p-12 flex flex-col sm:flex-row items-center gap-6 sm:gap-12 relative overflow-hidden">
+                                        <div className={`absolute top-0 right-0 p-12 opacity-10 ${suit.color} hidden sm:block pointer-events-none z-0`}>
+                                            <suit.icon size={400} />
+                                        </div>
+                                        <div className={`p-6 sm:p-8 bg-white/5 rounded-full ${suit.color} relative z-10 pointer-events-none`}>
+                                            <suit.icon size={32} className="sm:hidden" />
+                                            <suit.icon size={64} className="hidden sm:block" />
+                                        </div>
+                                        <div className="relative z-10 text-center sm:text-left">
+                                            <h2 className={`font-display font-bold tracking-widest mb-1 ${suit.id === 'diamonds' ? 'text-2xl sm:text-4xl' : 'text-3xl sm:text-5xl'}`}>{suit.name}</h2>
+                                            <h3 className={`font-mono tracking-wider mb-3 ${suit.color} ${suit.id === 'diamonds' ? 'text-sm sm:text-base' : 'text-base sm:text-xl'}`}>{suit.type}</h3>
+                                            <p className="text-gray-400 max-w-xl text-[13px] sm:text-base leading-relaxed">{suit.description}</p>
+                                        </div>
 
-                                                <div className="flex justify-between items-end mb-2 relative z-10">
-                                                    <div className="text-left">
-                                                        <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                        <div className="text-xl sm:text-2xl font-display font-black text-green-500 uppercase leading-none tracking-wider">
-                                                            {(() => {
-                                                                const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
-                                                                if (p === 'setup_phase1') return 'SETUP';
-                                                                if (p === 'selection_reveal') return 'REVEAL';
-                                                                if (p === 'playing_phase' || p === 'playing') return 'PLAYING';
-                                                                if (p === 'round_reveal') return 'ROUND';
-                                                                return p.replace('_', ' ');
-                                                            })()}
+                                        {suit.id === 'clubs' && (
+                                            <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
+                                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                    <div className="absolute inset-0 bg-green-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                    <div className="flex justify-between items-end mb-2 relative z-10">
+                                                        <div className="text-left">
+                                                            <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                            <div className="text-xl sm:text-2xl font-display font-black text-green-500 uppercase leading-none tracking-wider">
+                                                                {(() => {
+                                                                    const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
+                                                                    if (p === 'setup_phase1') return 'SETUP';
+                                                                    if (p === 'selection_reveal') return 'REVEAL';
+                                                                    if (p === 'playing_phase' || p === 'playing') return 'PLAYING';
+                                                                    if (p === 'round_reveal') return 'ROUND';
+                                                                    return p.replace('_', ' ');
+                                                                })()}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-green-500/50 drop-shadow-md">
+                                                                {clubsTimerDisplay}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                    <div className="text-right">
-                                                        <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-green-500/50 drop-shadow-md">
-                                                            {clubsTimerDisplay}
-                                                        </div>
+
+                                                    <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10 mt-auto">
+                                                        <div className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-1000 shadow-[0_0_10px_#22c55e]" style={{ width: clubsGameStatus?.system_start ? '100%' : '0%' }} />
                                                     </div>
                                                 </div>
 
-                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10 mt-auto">
-                                                    <div className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-1000 shadow-[0_0_10px_#22c55e]" style={{ width: clubsGameStatus?.system_start ? '100%' : '0%' }} />
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Trial Command Unit</p>
-                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
-                                                    <button
-                                                        onClick={() => {
-                                                            if (clubsGameStatus?.system_start) {
-                                                                showToast("Clubs is already active. Use GATE RESET to restart.", "info");
-                                                                return;
-                                                            }
-                                                            setSelectedSuitForModal('clubs');
-                                                            setShowStartModal(true);
-                                                        }}
-                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${clubsGameStatus?.system_start ? 'bg-green-500/30 cursor-not-allowed text-white/50' : 'bg-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(34,197,94,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
-                                                    >
-                                                        {clubsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const currentPaused = clubsGameStatus.is_paused;
-                                                            let updatePayload: any = {};
-                                                            if (!currentPaused) {
-                                                                const now = new Date();
-                                                                const expiry = new Date(clubsGameStatus.phase_expiry || now);
-                                                                const remaining = Math.max(0, Math.floor((expiry.getTime() - now.getTime()) / 1000));
-                                                                updatePayload = { is_paused: true, round_data: { ...(clubsGameStatus.round_data || {}), paused_remaining_sec: remaining } };
-                                                            } else {
-                                                                const remaining = clubsGameStatus.round_data?.paused_remaining_sec || 0;
-                                                                const newExpiry = new Date(Date.now() + remaining * 1000).toISOString();
-                                                                const newRoundData = { ...(clubsGameStatus.round_data || {}) };
-                                                                delete newRoundData.paused_remaining_sec;
-                                                                updatePayload = { is_paused: false, phase_expiry: newExpiry, round_data: newRoundData };
-                                                            }
-                                                            const accessToken = await getAccessToken();
-                                                            const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
-                                                                method: 'PATCH',
-                                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                body: JSON.stringify(updatePayload)
-                                                            });
-                                                            if (!response.ok) { showToast("ERROR: UNABLE TO TOGGLE PROTOCOL STATE.", 'error'); }
-                                                            else { showToast(!currentPaused ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success'); }
-                                                        }}
-                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${clubsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
-                                                    >
-                                                        {clubsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />}
-                                                        {clubsGameStatus.is_paused ? 'RESUME' : 'HALT'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowEliminatedModal('clubs')}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const confirmed = await showConfirm('FORCE RESET GAME', 'This will eject ALL players, reset scores, and clear all game data. This cannot be undone.');
-                                                            if (!confirmed) return;
-                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nClick Confirm to KEEP points, or Cancel to WIPE and revert to starting balance.');
-                                                            try {
-                                                                console.log('=== CLUBS RESET INITIATED ===');
+                                                <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
+                                                    <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Trial Command Unit</p>
+                                                    <div className="flex flex-wrap items-stretch gap-2 w-full">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (clubsGameStatus?.system_start) {
+                                                                    showToast("Clubs is already active. Use GATE RESET to restart.", "info");
+                                                                    return;
+                                                                }
+                                                                setSelectedSuitForModal('clubs');
+                                                                setShowStartModal(true);
+                                                            }}
+                                                            className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${clubsGameStatus?.system_start ? 'bg-green-500/30 cursor-not-allowed text-white/50' : 'bg-green-500 hover:shadow-[0_0_20px_rgba(34,197,94,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(34,197,94,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
+                                                        >
+                                                            {clubsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const currentPaused = clubsGameStatus.is_paused;
+                                                                let updatePayload: any = {};
+                                                                if (!currentPaused) {
+                                                                    const now = new Date();
+                                                                    const expiry = new Date(clubsGameStatus.phase_expiry || now);
+                                                                    const remaining = Math.max(0, Math.floor((expiry.getTime() - now.getTime()) / 1000));
+                                                                    updatePayload = { is_paused: true, round_data: { ...(clubsGameStatus.round_data || {}), paused_remaining_sec: remaining } };
+                                                                } else {
+                                                                    const remaining = clubsGameStatus.round_data?.paused_remaining_sec || 0;
+                                                                    const newExpiry = new Date(Date.now() + remaining * 1000).toISOString();
+                                                                    const newRoundData = { ...(clubsGameStatus.round_data || {}) };
+                                                                    delete newRoundData.paused_remaining_sec;
+                                                                    updatePayload = { is_paused: false, phase_expiry: newExpiry, round_data: newRoundData };
+                                                                }
                                                                 const accessToken = await getAccessToken();
-                                                                try {
-                                                                    const scoreRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
-                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
-                                                                    });
-                                                                    if (scoreRes.ok) {
-                                                                        const statusData = await scoreRes.json();
-                                                                        const currentScores = statusData?.scores || {};
-                                                                        const startScores = currentScores.start || {};
-                                                                        const endedScores = currentScores.current || {};
-                                                                        const uids = Object.keys(startScores);
-                                                                        const updates = uids.map(async (uid) => {
-                                                                            const targetScore = keepPoints ? (endedScores[uid] !== undefined ? Number(endedScores[uid]) : Number(startScores[uid])) : Number(startScores[uid]);
-                                                                            if (!isNaN(targetScore)) {
-                                                                                return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${uid}`, {
-                                                                                    method: 'PATCH',
-                                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                                    body: JSON.stringify({ visa_points: targetScore })
-                                                                                });
-                                                                            }
-                                                                        });
-                                                                        await Promise.all(updates);
-                                                                        showToast(keepPoints ? "CLUBS PLAYER SCORES SAVED TO PROFILES." : "CLUBS PLAYER SCORES REVERTED TO START.", 'success');
-                                                                    }
-                                                                } catch (scoreErr) { console.error("CLUBS_SCORE_SAVE_ERROR:", scoreErr); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
                                                                 const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
                                                                     method: 'PATCH',
                                                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                    body: JSON.stringify({ system_start: false, is_paused: false, current_round: 0, votes_submitted: 0, is_active: false, player_score: 0, master_score: 0, removed_cards_p: [], removed_cards_m: [], scores: { current: {}, history: {}, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }, round_data: { force_reset: Date.now() }, gameState: 'idle', phase_expiry: null })
+                                                                    body: JSON.stringify(updatePayload)
                                                                 });
-                                                                if (!response.ok) { showToast(`ERROR: ${await response.text()}`, 'error'); return; }
-                                                                console.log('Database reset successful');
-                                                                if (clubsControlChannelRef.current) {
-                                                                    await clubsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
-                                                                } else {
-                                                                    const tempChannel = supabase.channel('clubs_king_game');
-                                                                    tempChannel.subscribe(async (status) => {
-                                                                        if (status === 'SUBSCRIBED') { await tempChannel.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } }); supabase.removeChannel(tempChannel); }
-                                                                    });
-                                                                }
-                                                                showToast("SYSTEM RESET. ALL PLAYERS EJECTED.", 'success');
-                                                                setIsPurging(true);
-                                                                setTimeout(() => setIsPurging(false), 2500);
-                                                            } catch (err: any) { console.error("RESET_CATCH_ERROR:", err); showToast(`CRITICAL ERROR: ${err.message || 'Unknown'}`, 'error'); }
-                                                        }}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {suit.id === 'spades' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-blue-500/5 mix-blend-overlay pointer-events-none" />
-
-                                                <div className="flex justify-between items-end mb-2 relative z-10">
-                                                    <div className="text-left">
-                                                        <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                        <div className="text-xl sm:text-2xl font-display font-black text-blue-500 uppercase leading-none tracking-wider">
-                                                            {spadesGameStatus?.is_active && spadesGameStatus?.phase ? spadesGameStatus.phase.replace('_', ' ') : 'IDLE'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-blue-500/50 drop-shadow-md">
-                                                            {spadesTimerDisplay}
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
-                                                    <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-1000 shadow-[0_0_10px_#3b82f6]" style={{ width: spadesGameStatus.is_active ? '100%' : '0%' }} />
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Spades Command Unit</p>
-                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
-                                                    <button
-                                                        onClick={() => {
-                                                            if (spadesGameStatus?.system_start) {
-                                                                showToast("Spades is already active. Use GATE RESET to restart.", "info");
-                                                                return;
-                                                            }
-                                                            setSelectedSuitForModal('spades');
-                                                            setShowStartModal(true);
-                                                        }}
-                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${spadesGameStatus?.system_start ? 'bg-blue-600/50 cursor-not-allowed text-white/50' : 'bg-blue-600 hover:shadow-[0_0_20px_rgba(37,99,235,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(37,99,235,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
-                                                    >
-                                                        {spadesGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            (async () => {
-                                                                try {
-                                                                    const accessToken = await getAccessToken();
-                                                                    const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=is_paused,phase_started_at,phase_duration_sec`, {
-                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
-                                                                    });
-                                                                    if (!fetchRes.ok) return;
-                                                                    const data = await fetchRes.json();
-                                                                    const currentPaused = data?.is_paused;
-                                                                    const phaseStartedAt = data?.phase_started_at;
-                                                                    const currentDuration = data?.phase_duration_sec || 0;
-                                                                    let updatePayload: any = {};
-                                                                    if (!currentPaused) {
-                                                                        const now = new Date();
-                                                                        const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
-                                                                        const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                        updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
-                                                                    } else {
-                                                                        updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
-                                                                    }
-                                                                    const updateRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
-                                                                        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                        body: JSON.stringify(updatePayload)
-                                                                    });
-                                                                    if (updateRes.ok) {
-                                                                        showToast(!currentPaused ? "SPADES PAUSED" : "SPADES RESUMED", 'info');
-                                                                        setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
-                                                                    }
-                                                                } catch (err) { console.error("HALT ERROR:", err); }
-                                                            })();
-                                                        }}
-                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${spadesGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
-                                                    >
-                                                        <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {spadesGameStatus.is_paused ? 'RESUME' : 'HALT'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowEliminatedModal('spades')}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const confirmed = await showConfirm('RESET SPADES PROTOCOL', 'This will wipe the current Spades game. All in-game progress will be lost.');
-                                                            if (!confirmed) return;
-                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=players`, {
-                                                                    headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
-                                                                });
-                                                                if (fetchRes.ok) {
-                                                                    let data = await fetchRes.json();
-                                                                    const currentState = Array.isArray(data) ? data[0] : data;
-                                                                    if (currentState && currentState.players) {
-                                                                        const updates = Object.values(currentState.players).map(async (p: any) => {
-                                                                            if (p.id) {
-                                                                                const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
-                                                                                if (targetScore !== undefined) {
-                                                                                    return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
-                                                                                        method: 'PATCH',
-                                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                                        body: JSON.stringify({ visa_points: targetScore })
-                                                                                    });
-                                                                                }
-                                                                            }
-                                                                            return Promise.resolve();
-                                                                        });
-                                                                        await Promise.all(updates);
-                                                                        showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
-                                                                    }
-                                                                }
-                                                            } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
-                                                            console.log('[ADMIN] Executing GATE RESET for Spades. Wiping state and clearing player list.');
-                                                            const resetData: any = { system_start: false, is_active: false, is_paused: false, phase: 'idle', current_round: 0, players: {}, round_data: {}, timer_display: '00:00' };
-                                                            const accessToken = await getAccessToken();
-                                                            const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
-                                                                method: 'PATCH',
-                                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                body: JSON.stringify(resetData)
-                                                            });
-                                                            if (response.ok) { setSpadesGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("SPADES RESTARTED FOR ALL PLAYERS.", 'success'); }
-                                                            else { console.error("SPADES_RESET_ERROR:", await response.text()); showToast("ERROR: UNABLE TO RESTART SPADES.", 'error'); }
-                                                        }}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
-                                                    </button>
-                                                </div>
-
-                                                
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {suit.id === 'diamonds' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-purple-500/5 mix-blend-overlay pointer-events-none" />
-
-                                                <div className="flex justify-between items-end mb-2 relative z-10">
-                                                    <div className="text-left">
-                                                        <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                        <div className="text-lg sm:text-xl font-display font-black text-purple-400 uppercase leading-none tracking-wider">
-                                                            {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-purple-500/50 drop-shadow-md">
-                                                            {diamondsTimerDisplay}
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
-                                                    <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_#a855f7]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Diamonds Command Unit</p>
-                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
-                                                    <button
-                                                        onClick={() => {
-                                                            if (diamondsGameStatus?.system_start) {
-                                                                showToast("Diamonds is already active. Use GATE RESET to restart.", "info");
-                                                                return;
-                                                            }
-                                                            setSelectedSuitForModal('diamonds');
-                                                            setShowStartModal(true);
-                                                        }}
-                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${diamondsGameStatus?.system_start ? 'bg-purple-500/30 cursor-not-allowed' : 'bg-purple-500 hover:shadow-[0_0_20px_rgba(168,85,247,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
-                                                    >
-                                                        {diamondsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const { data, error: fetchError } = await supabase.from('diamonds_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'diamonds_king').single();
-                                                            if (fetchError) { showToast(`SYNC ERROR: ${fetchError.message}`, 'error'); return; }
-                                                            const currentPaused = data?.is_paused;
-                                                            const phaseStartedAt = data?.phase_started_at;
-                                                            const currentDuration = data?.phase_duration_sec || 0;
-                                                            let updatePayload: any = {};
-                                                            if (!currentPaused) {
-                                                                const now = new Date();
-                                                                const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
-                                                                const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
-                                                            } else {
-                                                                updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
-                                                            }
-                                                            const { error } = await supabase.from('diamonds_game_state').update(updatePayload).eq('id', 'diamonds_king');
-                                                            if (error) { showToast(`ERROR: ${error.message}`, 'error'); }
-                                                            else { showToast(!currentPaused ? "DIAMONDS HALTED." : "DIAMONDS RESUMED.", 'info'); }
-                                                        }}
-                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
-                                                    >
-                                                        <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {diamondsGameStatus.is_paused ? 'RESUME' : 'HALT'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowEliminatedModal('diamonds')}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const confirmed = await showConfirm('RESET DIAMONDS PROTOCOL', 'This will wipe the current Diamonds game state. All in-game progress will be lost.');
-                                                            if (!confirmed) return;
-                                                            const { error: sbError } = await supabase.from('diamonds_game_state').upsert({
-                                                                id: 'diamonds_king', system_start: false, is_paused: false, current_round: 0, phase: 'idle', participants: [], updated_at: new Date().toISOString()
-                                                            });
-                                                            if (sbError) { showToast("RESET FAILED: DATABASE REJECTION.", 'error'); return; }
-                                                            if (diamondsControlChannelRef.current) {
-                                                                await diamondsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
-                                                            }
-                                                            showToast("DIAMONDS RESET (PLAYERS EJECTED).", 'success');
-                                                        }}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {suit.id === 'hearts' && (
-                                        <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
-                                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-red-500/5 mix-blend-overlay pointer-events-none" />
-
-                                                <div className="flex justify-between items-end mb-2 relative z-10">
-                                                    <div className="text-left">
-                                                        <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                        <div className="text-xl sm:text-2xl font-display font-black text-red-500 uppercase leading-none tracking-wider">
-                                                            {heartsGameStatus.phase || 'IDLE'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                        <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-red-500/50 drop-shadow-md">
-                                                            {heartsTimerDisplay}
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
-                                                    <div className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-1000 shadow-[0_0_10px_#ef4444]" style={{ width: heartsGameStatus.phase !== 'idle' ? '100%' : '0%' }} />
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
-                                                <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Hearts Command Unit</p>
-                                                <div className="flex flex-wrap items-stretch gap-2 w-full">
-                                                    <button
-                                                        onClick={() => {
-                                                            if (heartsGameStatus?.system_start) {
-                                                                showToast("Hearts is already active. Use GATE RESET to restart.", "info");
-                                                                return;
-                                                            }
-                                                            setSelectedSuitForModal('hearts');
-                                                            setShowStartModal(true);
-                                                        }}
-                                                        className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${heartsGameStatus?.system_start ? 'bg-red-600/50 cursor-not-allowed text-white/50' : 'bg-red-600 hover:shadow-[0_0_20px_rgba(220,38,38,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(220,38,38,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
-                                                    >
-                                                        {heartsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const { data } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
-                                                            const currentPaused = data?.is_paused;
-                                                            const currentDuration = data?.phase_duration_sec || 0;
-                                                            const phaseStartedAt = data?.phase_started_at;
-                                                            let updatePayload: any = {};
-                                                            if (!currentPaused) {
-                                                                const now = new Date();
-                                                                const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
-                                                                const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
-                                                            } else {
-                                                                updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
-                                                            }
-                                                            await supabase.from('hearts_game_state').update(updatePayload).eq('id', 'hearts_main');
-                                                            showToast(!currentPaused ? "PROTOCOL HALTED." : "PROTOCOL RESUMED.", 'info');
-                                                        }}
-                                                        className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${heartsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
-                                                    >
-                                                        {heartsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />} {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowEliminatedModal('hearts')}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            const confirmed = await showConfirm('TOTAL RESET — HEARTS', 'This will wipe ALL sessions, clear round scores, and eject all players. This cannot be undone.');
-                                                            if (!confirmed) return;
-                                                            const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-                                                                const fetchRes = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=participants`, {
-                                                                    headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
-                                                                });
-                                                                if (fetchRes.ok) {
-                                                                    let data = await fetchRes.json();
-                                                                    const currentState = Array.isArray(data) ? data[0] : data;
-                                                                    if (currentState && currentState.participants) {
-                                                                        const updates = currentState.participants.map(async (p: any) => {
-                                                                            if (p.id) {
-                                                                                const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
-                                                                                if (targetScore !== undefined) {
-                                                                                    return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
-                                                                                        method: 'PATCH',
-                                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                                                        body: JSON.stringify({ visa_points: targetScore })
-                                                                                    });
-                                                                                }
-                                                                            }
-                                                                            return Promise.resolve();
-                                                                        });
-                                                                        await Promise.all(updates);
-                                                                        showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
-                                                                    }
-                                                                }
-                                                            } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
-                                                            console.log("=== HEARTS PROTOCOL PURGE INITIATED ===");
-                                                            await supabase.from('hearts_eliminated').delete().eq('game_id', 'hearts_main');
-                                                            await supabase.from('hearts_guesses').delete().eq('game_id', 'hearts_main');
-                                                            await supabase.from('hearts_round_points').delete().neq('id', 0);
-                                                            await supabase.from('hearts_game_sessions').delete().neq('id', 'dummy');
-                                                            const resetData: any = { phase: 'idle', current_round: 0, system_start: false, is_paused: false, active_game_id: null, participants: [], groups: {}, pairs: {}, guesses: {}, chat_counts: {}, eliminated: [], winners: [] };
-                                                            const { error } = await supabase.from('hearts_game_state').update(resetData).eq('id', 'hearts_main');
-                                                            await supabase.from('messages').delete().eq('game_id', 'hearts_main');
-                                                            if (error) { showToast("PURGE FAILED: DATABASE REJECTION.", 'error'); }
-                                                            else { setHeartsGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("HEARTS PROTOCOL PURGED. READY FOR NEW SESSION.", 'success'); }
-                                                        }}
-                                                        className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
-                                                    >
-                                                        <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Active Games & Communication Intelligence */}
-                                <div className="flex flex-wrap lg:flex-nowrap gap-8 items-start">
-                                    {/* Left: Round Monitor (Paginated) */}
-                                    <div className="w-full lg:w-[420px] flex flex-col gap-5 shrink-0 h-full">
-                                        <div className="flex justify-between items-center">
-                                            <h3 className="text-sm font-bold text-gray-400 tracking-widest uppercase flex items-center gap-2">
-                                                <Activity size={16} /> {suit.id === 'hearts' ? 'PHASE MONITOR' : 'ROUND MONITOR'}
-                                            </h3>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: Math.max(0, (prev[suit.id] || 0) - 1) }))}
-                                                    disabled={!(roundMonitorPage[suit.id] > 0)}
-                                                    className={`p-1.5 rounded bg-white/5 border border-white/10 ${roundMonitorPage[suit.id] > 0 ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
-                                                >
-                                                    <ChevronLeft size={14} />
-                                                </button>
-                                                <button
-                                                    onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: (prev[suit.id] || 0) + 1 }))}
-                                                    disabled={(() => {
-                                                        const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
-                                                        return (roundMonitorPage[suit.id] || 0) >= Math.ceil(totalRounds / 4) - 1;
-                                                    })()}
-                                                    className={`p-1.5 rounded bg-white/5 border border-white/10 ${(() => {
-                                                        const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
-                                                        return (roundMonitorPage[suit.id] || 0) < Math.ceil(totalRounds / 4) - 1;
-                                                    })() ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
-                                                >
-                                                    <ChevronRight size={14} />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex flex-col gap-3 flex-1">
-                                            {suit.id === 'hearts' ? (
-                                                ['idle', 'phase1', 'phase2', 'phase3', 'phase4', 'reveal', 'end'].map((phaseName, i) => {
-                                                    const isCurrent = (heartsGameStatus as any).phase === phaseName;
-                                                    return (
-                                                        <div key={phaseName} className={`bg-white/5 border rounded-lg p-5 min-h-[95px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrent ? `border-red-500/50 bg-red-500/5` : 'border-white/10 hover:border-white/20'}`}>
-                                                            <div className="flex justify-between items-center">
-                                                                <span className={`text-xs font-mono font-bold tracking-widest ${isCurrent ? `text-red-500` : 'text-gray-500'}`}>
-                                                                    PHASE_{i.toString().padStart(2, '0')}
-                                                                </span>
-                                                                <div className={`px-2 py-0.5 rounded text-[9px] font-bold ${isCurrent ? (heartsGameStatus.system_start ? (heartsGameStatus.is_paused ? 'PAUSED' : 'ACTIVE') : 'bg-gray-500 text-white') : 'bg-white/5 text-gray-600'}`}>
-                                                                    {isCurrent ? (heartsGameStatus.system_start ? (heartsGameStatus.is_paused ? 'PAUSED' : 'ACTIVE') : 'STANDBY') : 'LOCKED'}
-                                                                </div>
-                                                            </div>
-                                                            <h4 className="text-lg font-display font-bold text-white tracking-wider uppercase">{phaseName}</h4>
-                                                        </div>
-                                                    );
-                                                }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
-                                            ) : (
-                                                // MODIFIED: Show 6 Rounds for Clubs, 5 for Spades and Diamonds
-                                                [1, 2, 3, 4, 5, 6].slice(0, suit.id === 'clubs' ? 6 : 5).map(roundNum => {
-                                                    const gameStatus = suit.id === 'clubs' ? clubsGameStatus : suit.id === 'spades' ? spadesGameStatus : diamondsGameStatus;
-                                                    // For Spades: Active if current matches roundNum AND is_active is true (or ignored because Spades always active if started)
-                                                    // Spades uses 'system_start' which is mapped to 'is_active' in state
-                                                    const isCurrentRound = roundNum === gameStatus.current_round && gameStatus.system_start;
-                                                    const isCompleted = roundNum < gameStatus.current_round;
-
-                                                    return (
-                                                        <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[95px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-white/20'}`}>
-                                                            <div className="flex justify-between items-center">
-                                                                <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? 'text-green-500' : 'text-gray-500'}`}>
-                                                                    PHASE_{roundNum.toString().padStart(2, '0')}
-                                                                </span>
-                                                                <div className={`px-2 py-0.5 rounded text-[9px] font-bold ${isCurrentRound ? 'bg-green-500 text-black animate-pulse' : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
-                                                                    {isCurrentRound ? (gameStatus.is_paused ? 'PAUSED' : (gameStatus.phase?.toUpperCase() || 'ACTIVE')) : isCompleted ? 'CLEARED' : 'LOCKED'}
-                                                                </div>
-                                                            </div>
-
-                                                            <div>
-                                                                <h4 className="text-lg font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
-                                                                <div className="flex items-center gap-2 mt-1">
-                                                                    <div className={`h-full transition-all duration-1000 ${isCurrentRound ? 'bg-green-500' : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
-                                                                        style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
-                                                                    />
-                                                                    <span className="text-[9px] font-mono text-gray-500 uppercase tracking-tighter">
-                                                                        {isCurrentRound ? `${gameStatus.votes_submitted || 0} VOTES CAST` : isCompleted ? 'SYNC DONE' : 'WAITING'}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Right: Communication Intelligence (Chat) */}
-                                    <div className="flex-1 w-full space-y-6 min-w-0">
-                                        <div className="flex justify-between items-center mb-6">
-                                            <h3 className={`text-sm font-bold tracking-widest uppercase flex items-center gap-2 ${suit.id === 'hearts' ? 'text-red-500' : 'text-green-400'}`}>
-                                                <Radio size={16} className="animate-pulse" /> COM INTELLIGENCE
-                                                {(suit.id === 'clubs' ? clubsFilterUserId : null) && (
-                                                    <button
-                                                        onClick={() => suit.id === 'clubs' ? setClubsFilterUserId(null) : null}
-                                                        className="ml-4 px-2 py-0.5 bg-green-500 text-black text-[9px] font-black rounded hover:bg-green-400 transition-all flex items-center gap-1"
-                                                    >
-                                                        HISTORY <X size={10} />
-                                                    </button>
-                                                )}
-                                            </h3>
-                                            <div className="flex flex-col xl:flex-row items-end xl:items-center gap-3">
-                                                {/* Mode Switcher */}
-                                                {suit.id === 'clubs' && (
-                                                    <div className="flex bg-white/5 p-1 rounded-lg border border-white/10 shrink-0">
-                                                        <button
-                                                            onClick={() => setClubsCommsMode('all')}
-                                                            className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'all' ? 'bg-white/20 text-white' : 'text-gray-500 hover:text-gray-400'}`}                       >
-                                                            ALL
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setClubsCommsMode('player')}
-                                                            className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'player' ? 'bg-green-500 text-black' : 'text-gray-500 hover:text-gray-400'}`}       >
-                                                            PLAYERS
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setClubsCommsMode('master')}
-                                                            className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'master' ? 'bg-red-500 text-white' : 'text-gray-500 hover:text-gray-400'}`}    >
-                                                            MASTERS
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
-                                                    {suit.id === 'clubs' && (
-                                                        <button
-                                                            onClick={() => {
-                                                                setActiveView('dashboard');
-                                                                setTimeout(() => setActiveView('clubs'), 10);
+                                                                if (!response.ok) { showToast("ERROR: UNABLE TO TOGGLE PROTOCOL STATE.", 'error'); }
+                                                                else { showToast(!currentPaused ? "PROTOCOL PAUSED." : "PROTOCOL RESUMED.", 'success'); }
                                                             }}
-                                                            className="p-1.5 sm:p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-gray-500 hover:text-green-500 shrink-0"
-                                                            title="Force Resync"
+                                                            className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${clubsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                         >
-                                                            <RotateCcw size={16} />
+                                                            {clubsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />}
+                                                            {clubsGameStatus.is_paused ? 'RESUME' : 'HALT'}
                                                         </button>
-                                                    )}
-
-                                                    {suit.id === 'clubs' && (
+                                                        <button
+                                                            onClick={() => setShowEliminatedModal('clubs')}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
+                                                        </button>
                                                         <button
                                                             onClick={async () => {
-                                                                const ok = await showConfirm('FORCE GLOBAL REFRESH', 'This will clear the cache for ALL users and re-download player IDs. Proceed?');
-                                                                if (!ok) return;
-
-                                                                // Clear local cache
-                                                                PlayerCache.clear();
-
-                                                                // Broadcast to all clients via Supabase
-                                                                await supabase.channel('global_admin').send({
-                                                                    type: 'broadcast',
-                                                                    event: 'cache_invalidate',
-                                                                    payload: { timestamp: Date.now() }
-                                                                });
-
-                                                                // Force local re-fetch
-                                                                window.location.reload();
-
-                                                                showToast('PLAYER CACHE PURGED GLOBALLY', 'success');
+                                                                const confirmed = await showConfirm('RESET CLUBS PROTOCOL', 'This will eject ALL players, reset scores, and clear all game data. This cannot be undone.');
+                                                                if (!confirmed) return;
+                                                                const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nClick Confirm to KEEP points, or Cancel to WIPE and revert to starting balance.');
+                                                                try {
+                                                                    console.log('=== CLUBS RESET INITIATED ===');
+                                                                    const accessToken = await getAccessToken();
+                                                                    try {
+                                                                        const scoreRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
+                                                                            headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                                                                        });
+                                                                        if (scoreRes.ok) {
+                                                                            const statusData = await scoreRes.json();
+                                                                            const currentScores = statusData?.scores || {};
+                                                                            const startScores = currentScores.start || {};
+                                                                            const endedScores = currentScores.current || {};
+                                                                            const uids = Object.keys(startScores);
+                                                                            const updates = uids.map(async (uid) => {
+                                                                                const targetScore = keepPoints ? (endedScores[uid] !== undefined ? Number(endedScores[uid]) : Number(startScores[uid])) : Number(startScores[uid]);
+                                                                                if (!isNaN(targetScore)) {
+                                                                                    return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${uid}`, {
+                                                                                        method: 'PATCH',
+                                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                                        body: JSON.stringify({ visa_points: targetScore })
+                                                                                    });
+                                                                                }
+                                                                            });
+                                                                            await Promise.all(updates);
+                                                                            showToast(keepPoints ? "CLUBS PLAYER SCORES SAVED TO PROFILES." : "CLUBS PLAYER SCORES REVERTED TO START.", 'success');
+                                                                        }
+                                                                    } catch (scoreErr) { console.error("CLUBS_SCORE_SAVE_ERROR:", scoreErr); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
+                                                                    const response = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king`, {
+                                                                        method: 'PATCH',
+                                                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                        body: JSON.stringify({ system_start: false, is_paused: false, current_round: 0, votes_submitted: 0, is_active: false, player_score: 0, master_score: 0, removed_cards_p: [], removed_cards_m: [], scores: { current: {}, history: {}, high_player: { score: 0, uid: '-' }, high_master: { score: 0, uid: '-' } }, round_data: { force_reset: Date.now() }, gameState: 'idle', phase_expiry: null })
+                                                                    });
+                                                                    if (!response.ok) { showToast(`ERROR: ${await response.text()}`, 'error'); return; }
+                                                                    console.log('Database reset successful');
+                                                                    if (clubsControlChannelRef.current) {
+                                                                        await clubsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
+                                                                    } else {
+                                                                        const tempChannel = supabase.channel('clubs_king_game');
+                                                                        tempChannel.subscribe(async (status) => {
+                                                                            if (status === 'SUBSCRIBED') { await tempChannel.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } }); supabase.removeChannel(tempChannel); }
+                                                                        });
+                                                                    }
+                                                                    showToast("SYSTEM RESET. ALL PLAYERS EJECTED.", 'success');
+                                                                    setIsPurging(true);
+                                                                    setTimeout(() => setIsPurging(false), 2500);
+                                                                } catch (err: any) { console.error("RESET_CATCH_ERROR:", err); showToast(`CRITICAL ERROR: ${err.message || 'Unknown'}`, 'error'); }
                                                             }}
-                                                            className="p-1.5 sm:p-2 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors text-red-500 hover:text-red-400 shrink-0"
-                                                            title="Force Refresh Player Cache (Global)"
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                         >
-                                                            <Database size={16} />
+                                                            <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
                                                         </button>
-                                                    )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
 
-                                                    <div className="flex-1 sm:flex-none flex items-center bg-white/5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-white/10 shadow-inner whitespace-nowrap">
-                                                        <span className="text-[10px] sm:text-xs text-gray-500 font-mono font-bold uppercase tracking-widest mr-2">LOGS:</span>
-                                                        <span className="text-white text-sm sm:text-lg font-black tracking-tighter">
-                                                            {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => !m.is_system).length}
-                                                        </span>
+                                        {suit.id === 'spades' && (
+                                            <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
+                                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                    <div className="absolute inset-0 bg-blue-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                    <div className="flex justify-between items-end mb-2 relative z-10">
+                                                        <div className="text-left">
+                                                            <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                            <div className="text-xl sm:text-2xl font-display font-black text-blue-500 uppercase leading-none tracking-wider">
+                                                                {spadesGameStatus?.is_active && spadesGameStatus?.phase ? spadesGameStatus.phase.replace('_', ' ') : 'IDLE'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-blue-500/50 drop-shadow-md">
+                                                                {spadesTimerDisplay}
+                                                            </div>
+                                                        </div>
                                                     </div>
 
+                                                    <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                        <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-1000 shadow-[0_0_10px_#3b82f6]" style={{ width: spadesGameStatus.is_active ? '100%' : '0%' }} />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full">
+                                                    <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Spades Command Unit</p>
+                                                    <div className="flex flex-wrap items-stretch gap-2 w-full">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (spadesGameStatus?.system_start) {
+                                                                    showToast("Spades is already active. Use GATE RESET to restart.", "info");
+                                                                    return;
+                                                                }
+                                                                setSelectedSuitForModal('spades');
+                                                                setShowStartModal(true);
+                                                            }}
+                                                            className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${spadesGameStatus?.system_start ? 'bg-blue-600/50 cursor-not-allowed text-white/50' : 'bg-blue-600 hover:shadow-[0_0_20px_rgba(37,99,235,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(37,99,235,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
+                                                        >
+                                                            {spadesGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                (async () => {
+                                                                    try {
+                                                                        const accessToken = await getAccessToken();
+                                                                        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=is_paused,phase_started_at,phase_duration_sec`, {
+                                                                            headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                                                                        });
+                                                                        if (!fetchRes.ok) return;
+                                                                        const data = await fetchRes.json();
+                                                                        const currentPaused = data?.is_paused;
+                                                                        const phaseStartedAt = data?.phase_started_at;
+                                                                        const currentDuration = data?.phase_duration_sec || 0;
+                                                                        let updatePayload: any = {};
+                                                                        if (!currentPaused) {
+                                                                            const now = new Date();
+                                                                            const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                            const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                            updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
+                                                                        } else {
+                                                                            updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
+                                                                        }
+                                                                        const updateRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
+                                                                            method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                            body: JSON.stringify(updatePayload)
+                                                                        });
+                                                                        if (updateRes.ok) {
+                                                                            showToast(!currentPaused ? "SPADES PAUSED" : "SPADES RESUMED", 'info');
+                                                                            setSpadesGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
+                                                                        }
+                                                                    } catch (err) { console.error("HALT ERROR:", err); }
+                                                                })();
+                                                            }}
+                                                            className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${spadesGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        >
+                                                            <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {spadesGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowEliminatedModal('spades')}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const confirmed = await showConfirm('RESET SPADES PROTOCOL', 'This will wipe the current Spades game. All in-game progress will be lost.');
+                                                                if (!confirmed) return;
+                                                                const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main&select=players`, {
+                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                                                                    });
+                                                                    if (fetchRes.ok) {
+                                                                        let data = await fetchRes.json();
+                                                                        const currentState = Array.isArray(data) ? data[0] : data;
+                                                                        if (currentState && currentState.players) {
+                                                                            const updates = Object.values(currentState.players).map(async (p: any) => {
+                                                                                if (p.id) {
+                                                                                    const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
+                                                                                    if (targetScore !== undefined) {
+                                                                                        return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                                            body: JSON.stringify({ visa_points: targetScore })
+                                                                                        });
+                                                                                    }
+                                                                                }
+                                                                                return Promise.resolve();
+                                                                            });
+                                                                            await Promise.all(updates);
+                                                                            showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
+                                                                        }
+                                                                    }
+                                                                } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
+                                                                console.log('[ADMIN] Executing GATE RESET for Spades. Wiping state and clearing player list.');
+                                                                const resetData: any = { system_start: false, is_active: false, is_paused: false, phase: 'idle', current_round: 0, players: {}, round_data: {}, timer_display: '00:00' };
+                                                                const accessToken = await getAccessToken();
+                                                                const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.spades_main`, {
+                                                                    method: 'PATCH',
+                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                    body: JSON.stringify(resetData)
+                                                                });
+                                                                if (response.ok) { setSpadesGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("SPADES RESTARTED FOR ALL PLAYERS.", 'success'); }
+                                                                else { console.error("SPADES_RESET_ERROR:", await response.text()); showToast("ERROR: UNABLE TO RESTART SPADES.", 'error'); }
+                                                            }}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
+                                                        </button>
+                                                    </div>
+
+
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {suit.id === 'diamonds' && (
+                                            <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20">
+                                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                    <div className="absolute inset-0 bg-purple-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                    <div className="flex justify-between items-end mb-2 relative z-10">
+                                                        <div className="text-left">
+                                                            <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                            <div className="text-lg sm:text-xl font-display font-black text-purple-400 uppercase leading-none tracking-wider">
+                                                                {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-purple-500/50 drop-shadow-md">
+                                                                {diamondsTimerDisplay}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                        <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_#a855f7]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
+                                                    <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Diamonds Command Unit</p>
+                                                    <div className="flex flex-wrap items-stretch gap-2 w-full">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (diamondsGameStatus?.system_start) {
+                                                                    showToast("Diamonds is already active. Use GATE RESET to restart.", "info");
+                                                                    return;
+                                                                }
+                                                                setSelectedSuitForModal('diamonds');
+                                                                setShowStartModal(true);
+                                                            }}
+                                                            className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${diamondsGameStatus?.system_start ? 'bg-purple-500/30 cursor-not-allowed' : 'bg-purple-500 hover:shadow-[0_0_20px_rgba(168,85,247,0.5)]'} text-black text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(168,85,247,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
+                                                        >
+                                                            {diamondsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const { data, error: fetchError } = await supabase.from('diamonds_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'diamonds_king').single();
+                                                                if (fetchError) { showToast(`SYNC ERROR: ${fetchError.message}`, 'error'); return; }
+                                                                const currentPaused = data?.is_paused;
+                                                                const phaseStartedAt = data?.phase_started_at;
+                                                                const currentDuration = data?.phase_duration_sec || 0;
+                                                                let updatePayload: any = {};
+                                                                if (!currentPaused) {
+                                                                    const now = new Date();
+                                                                    const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                    const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                    updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
+                                                                } else {
+                                                                    updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
+                                                                }
+                                                                const { error } = await supabase.from('diamonds_game_state').update(updatePayload).eq('id', 'diamonds_king');
+                                                                if (error) { showToast(`ERROR: ${error.message}`, 'error'); }
+                                                                else { showToast(!currentPaused ? "DIAMONDS HALTED." : "DIAMONDS RESUMED.", 'info'); }
+                                                            }}
+                                                            className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        >
+                                                            <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {diamondsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowEliminatedModal('diamonds')}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const confirmed = await showConfirm('RESET DIAMONDS PROTOCOL', 'This will wipe the current Diamonds game state. All in-game progress will be lost.');
+                                                                if (!confirmed) return;
+                                                                const { error: sbError } = await supabase.from('diamonds_game_state').upsert({
+                                                                    id: 'diamonds_king', system_start: false, is_paused: false, current_round: 0, phase: 'idle', participants: [], updated_at: new Date().toISOString()
+                                                                });
+                                                                if (sbError) { showToast("RESET FAILED: DATABASE REJECTION.", 'error'); return; }
+                                                                if (diamondsControlChannelRef.current) {
+                                                                    await diamondsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
+                                                                }
+                                                                showToast("DIAMONDS RESET (PLAYERS EJECTED).", 'success');
+                                                            }}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {suit.id === 'hearts' && (
+                                            <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
+                                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                    <div className="absolute inset-0 bg-red-500/5 mix-blend-overlay pointer-events-none" />
+
+                                                    <div className="flex justify-between items-end mb-2 relative z-10">
+                                                        <div className="text-left">
+                                                            <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                            <div className="text-xl sm:text-2xl font-display font-black text-red-500 uppercase leading-none tracking-wider">
+                                                                {heartsGameStatus.phase || 'IDLE'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-red-500/50 drop-shadow-md">
+                                                                {heartsTimerDisplay}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                        <div className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-1000 shadow-[0_0_10px_#ef4444]" style={{ width: heartsGameStatus.phase !== 'idle' ? '100%' : '0%' }} />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
+                                                    <p className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.2em] mb-1 text-center">Hearts Command Unit</p>
+                                                    <div className="flex flex-wrap items-stretch gap-2 w-full">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (heartsGameStatus?.system_start) {
+                                                                    showToast("Hearts is already active. Use GATE RESET to restart.", "info");
+                                                                    return;
+                                                                }
+                                                                setSelectedSuitForModal('hearts');
+                                                                setShowStartModal(true);
+                                                            }}
+                                                            className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${heartsGameStatus?.system_start ? 'bg-red-600/50 cursor-not-allowed text-white/50' : 'bg-red-600 hover:shadow-[0_0_20px_rgba(220,38,38,0.5)] text-white'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded shadow-[0_0_10px_rgba(220,38,38,0.2)] transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
+                                                        >
+                                                            {heartsGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const { data } = await supabase.from('hearts_game_state').select('*').eq('id', 'hearts_main').single();
+                                                                const currentPaused = data?.is_paused;
+                                                                const currentDuration = data?.phase_duration_sec || 0;
+                                                                const phaseStartedAt = data?.phase_started_at;
+                                                                let updatePayload: any = {};
+                                                                if (!currentPaused) {
+                                                                    const now = new Date();
+                                                                    const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
+                                                                    const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+                                                                    updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
+                                                                } else {
+                                                                    updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
+                                                                }
+                                                                await supabase.from('hearts_game_state').update(updatePayload).eq('id', 'hearts_main');
+                                                                showToast(!currentPaused ? "PROTOCOL HALTED." : "PROTOCOL RESUMED.", 'info');
+                                                            }}
+                                                            className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${heartsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20 hover:bg-yellow-500 hover:text-black' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        >
+                                                            {heartsGameStatus.is_paused ? <Radio size={10} className="sm:size-[10px] lg:size-[12px] animate-spin" /> : <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" />} {heartsGameStatus.is_paused ? 'RESUME' : 'HALT'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowEliminatedModal('hearts')}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-700/50 text-slate-300 border border-slate-600/50 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <Users size={8} className="sm:size-[10px] lg:size-[12px]" /> ELIMINATED
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const confirmed = await showConfirm('TOTAL RESET — HEARTS', 'This will wipe ALL sessions, clear round scores, and eject all players. This cannot be undone.');
+                                                                if (!confirmed) return;
+                                                                const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const fetchRes = await fetch(`${supabaseUrl}/rest/v1/hearts_game_state?id=eq.hearts_main&select=participants`, {
+                                                                        headers: { 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Accept': 'application/vnd.pgrst.object+json' }
+                                                                    });
+                                                                    if (fetchRes.ok) {
+                                                                        let data = await fetchRes.json();
+                                                                        const currentState = Array.isArray(data) ? data[0] : data;
+                                                                        if (currentState && currentState.participants) {
+                                                                            const updates = currentState.participants.map(async (p: any) => {
+                                                                                if (p.id) {
+                                                                                    const targetScore = keepPoints ? (p.score !== undefined ? p.score : p.start_score) : (p.start_score !== undefined ? p.start_score : p.score);
+                                                                                    if (targetScore !== undefined) {
+                                                                                        return fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${p.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
+                                                                                            body: JSON.stringify({ visa_points: targetScore })
+                                                                                        });
+                                                                                    }
+                                                                                }
+                                                                                return Promise.resolve();
+                                                                            });
+                                                                            await Promise.all(updates);
+                                                                            showToast(keepPoints ? "PLAYER SCORES SAVED." : "PLAYER SCORES REVERTED TO START.", 'success');
+                                                                        }
+                                                                    }
+                                                                } catch (err) { console.error("SCORE_SAVE_ERROR:", err); showToast("WARNING: SCORE SAVE/REVERT FAILED.", 'error'); }
+                                                                console.log("=== HEARTS PROTOCOL PURGE INITIATED ===");
+                                                                await supabase.from('hearts_eliminated').delete().eq('game_id', 'hearts_main');
+                                                                await supabase.from('hearts_guesses').delete().eq('game_id', 'hearts_main');
+                                                                await supabase.from('hearts_round_points').delete().neq('id', 0);
+                                                                await supabase.from('hearts_game_sessions').delete().neq('id', 'dummy');
+                                                                const resetData: any = { phase: 'idle', current_round: 0, system_start: false, is_paused: false, active_game_id: null, participants: [], groups: {}, pairs: {}, guesses: {}, chat_counts: {}, eliminated: [], winners: [] };
+                                                                const { error } = await supabase.from('hearts_game_state').update(resetData).eq('id', 'hearts_main');
+                                                                await supabase.from('messages').delete().eq('game_id', 'hearts_main');
+                                                                if (error) { showToast("PURGE FAILED: DATABASE REJECTION.", 'error'); }
+                                                                else { setHeartsGameStatus((prev: any) => ({ ...prev, ...resetData })); showToast("HEARTS PROTOCOL PURGED. READY FOR NEW SESSION.", 'success'); }
+                                                            }}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Active Games & Communication Intelligence */}
+                                    <div className="flex flex-wrap lg:flex-nowrap gap-8 items-start">
+                                        {/* Left: Round Monitor (Paginated) */}
+                                        <div className="w-full lg:w-[420px] flex flex-col gap-5 shrink-0 h-full">
+                                            <div className="flex justify-between items-center">
+                                                <h3 className="text-sm font-bold text-gray-400 tracking-widest uppercase flex items-center gap-2">
+                                                    <Activity size={16} /> {suit.id === 'hearts' ? 'PHASE MONITOR' : 'ROUND MONITOR'}
+                                                </h3>
+                                                <div className="flex gap-2">
                                                     <button
-                                                        onClick={() => handlePurgeAllMessages(suit.id)}
-                                                        className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/30 rounded text-[10px] sm:text-[11px] font-black tracking-widest transition-all uppercase" >
-                                                        <span className="hidden sm:inline">PURGE DATA</span>
-                                                        <span className="sm:hidden">PURGE</span>
+                                                        onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: Math.max(0, (prev[suit.id] || 0) - 1) }))}
+                                                        disabled={!(roundMonitorPage[suit.id] > 0)}
+                                                        className={`p-1.5 rounded bg-white/5 border border-white/10 ${roundMonitorPage[suit.id] > 0 ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
+                                                    >
+                                                        <ChevronLeft size={14} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: (prev[suit.id] || 0) + 1 }))}
+                                                        disabled={(() => {
+                                                            const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                            return (roundMonitorPage[suit.id] || 0) >= Math.ceil(totalRounds / 4) - 1;
+                                                        })()}
+                                                        className={`p-1.5 rounded bg-white/5 border border-white/10 ${(() => {
+                                                            const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                            return (roundMonitorPage[suit.id] || 0) < Math.ceil(totalRounds / 4) - 1;
+                                                        })() ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
+                                                    >
+                                                        <ChevronRight size={14} />
                                                     </button>
                                                 </div>
                                             </div>
+
+                                            <div className="flex flex-col gap-3 flex-1">
+                                                {suit.id === 'hearts' ? (
+                                                    ['idle', 'phase1', 'phase2', 'phase3', 'phase4', 'reveal', 'end'].map((phaseName, i) => {
+                                                        const isCurrent = (heartsGameStatus as any).phase === phaseName;
+                                                        return (
+                                                            <div key={phaseName} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrent ? `border-red-500/50 bg-red-500/5` : 'border-white/10 hover:border-white/20'}`}>
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrent ? `text-red-500` : 'text-gray-500'}`}>
+                                                                        PHASE_{i.toString().padStart(2, '0')}
+                                                                    </span>
+                                                                    <div className={`px-2 py-0.5 rounded text-[9px] font-bold ${isCurrent ? (heartsGameStatus.system_start ? (heartsGameStatus.is_paused ? 'PAUSED' : 'ACTIVE') : 'bg-gray-500 text-white') : 'bg-white/5 text-gray-600'}`}>
+                                                                        {isCurrent ? (heartsGameStatus.system_start ? (heartsGameStatus.is_paused ? 'PAUSED' : 'ACTIVE') : 'STANDBY') : 'LOCKED'}
+                                                                    </div>
+                                                                </div>
+                                                                <h4 className="text-lg font-display font-bold text-white tracking-wider uppercase">{phaseName}</h4>
+                                                            </div>
+                                                        );
+                                                    }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
+                                                ) : (
+                                                    // MODIFIED: Show 6 Rounds for Clubs, 5 for Spades and Diamonds
+                                                    [1, 2, 3, 4, 5, 6].slice(0, suit.id === 'clubs' ? 6 : 5).map(roundNum => {
+                                                        const gameStatus = suit.id === 'clubs' ? clubsGameStatus : suit.id === 'spades' ? spadesGameStatus : diamondsGameStatus;
+                                                        // For Spades: Active if current matches roundNum AND is_active is true (or ignored because Spades always active if started)
+                                                        // Spades uses 'system_start' which is mapped to 'is_active' in state
+                                                        const isCurrentRound = roundNum === gameStatus.current_round && gameStatus.system_start;
+                                                        const isCompleted = roundNum < gameStatus.current_round;
+
+                                                        return (
+                                                            <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-white/20'}`}>
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? 'text-green-500' : 'text-gray-500'}`}>
+                                                                        PHASE_{roundNum.toString().padStart(2, '0')}
+                                                                    </span>
+                                                                    <div className={`px-2 py-0.5 rounded text-[9px] font-bold ${isCurrentRound ? 'bg-green-500 text-black animate-pulse' : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
+                                                                        {isCurrentRound ? (gameStatus.is_paused ? 'PAUSED' : (gameStatus.phase?.toUpperCase() || 'ACTIVE')) : isCompleted ? 'CLEARED' : 'LOCKED'}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <h4 className="text-lg font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
+                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                        <div className={`h-full transition-all duration-1000 ${isCurrentRound ? 'bg-green-500' : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
+                                                                            style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
+                                                                        />
+                                                                        <span className="text-[9px] font-mono text-gray-500 uppercase tracking-tighter">
+                                                                            {isCurrentRound ? `${gameStatus.votes_submitted || 0} VOTES CAST` : isCompleted ? 'SYNC DONE' : 'WAITING'}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
+                                                )}
+                                            </div>
                                         </div>
 
-                                        <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden backdrop-blur-sm flex flex-col h-[400px] lg:h-[500px]">
-                                            {/* Search Bar */}
-                                            <div className="p-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">
-                                                <Search size={14} className="text-gray-500" />
-                                                <input
-                                                    type="text"
-                                                    value={suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery}
-                                                    onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : suit.id === 'hearts' ? setHeartsSearchQuery(e.target.value) : suit.id === 'spades' ? setSpadesSearchQuery(e.target.value) : setDiamondsSearchQuery(e.target.value)}
-                                                    placeholder="Search transcripts..."
-                                                    className="bg-transparent border-none outline-none text-sm font-mono text-white placeholder:text-white/10 w-full"
-                                                />
+                                        {/* Right: Communication Intelligence (Chat) */}
+                                        <div className="flex-1 w-full space-y-6 min-w-0">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <h3 className={`text-sm font-bold tracking-widest uppercase flex items-center gap-2 ${suit.id === 'hearts' ? 'text-red-500' : 'text-green-400'}`}>
+                                                    <Radio size={16} className="animate-pulse" /> COM INTELLIGENCE
+                                                    {(suit.id === 'clubs' ? clubsFilterUserId : null) && (
+                                                        <button
+                                                            onClick={() => suit.id === 'clubs' ? setClubsFilterUserId(null) : null}
+                                                            className="ml-4 px-2 py-0.5 bg-green-500 text-black text-[9px] font-black rounded hover:bg-green-400 transition-all flex items-center gap-1"
+                                                        >
+                                                            HISTORY <X size={10} />
+                                                        </button>
+                                                    )}
+                                                </h3>
+                                                <div className="flex flex-col xl:flex-row items-end xl:items-center gap-3">
+                                                    {/* Mode Switcher */}
+                                                    {suit.id === 'clubs' && (
+                                                        <div className="flex bg-white/5 p-1 rounded-lg border border-white/10 shrink-0">
+                                                            <button
+                                                                onClick={() => setClubsCommsMode('all')}
+                                                                className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'all' ? 'bg-white/20 text-white' : 'text-gray-500 hover:text-gray-400'}`}                       >
+                                                                ALL
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setClubsCommsMode('player')}
+                                                                className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'player' ? 'bg-green-500 text-black' : 'text-gray-500 hover:text-gray-400'}`}       >
+                                                                PLAYERS
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setClubsCommsMode('master')}
+                                                                className={`px-2.5 py-1 sm:px-4 sm:py-1.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${clubsCommsMode === 'master' ? 'bg-red-500 text-white' : 'text-gray-500 hover:text-gray-400'}`}    >
+                                                                MASTERS
+                                                            </button>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                                                        {suit.id === 'clubs' && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setActiveView('dashboard');
+                                                                    setTimeout(() => setActiveView('clubs'), 10);
+                                                                }}
+                                                                className="p-1.5 sm:p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-gray-500 hover:text-green-500 shrink-0"
+                                                                title="Force Resync"
+                                                            >
+                                                                <RotateCcw size={16} />
+                                                            </button>
+                                                        )}
+
+                                                        {suit.id === 'clubs' && (
+                                                            <button
+                                                                onClick={async () => {
+                                                                    const ok = await showConfirm('FORCE GLOBAL REFRESH', 'This will clear the cache for ALL users and re-download player IDs. Proceed?');
+                                                                    if (!ok) return;
+
+                                                                    // Clear local cache
+                                                                    PlayerCache.clear();
+
+                                                                    // Broadcast to all clients via Supabase
+                                                                    await supabase.channel('global_admin').send({
+                                                                        type: 'broadcast',
+                                                                        event: 'cache_invalidate',
+                                                                        payload: { timestamp: Date.now() }
+                                                                    });
+
+                                                                    // Force local re-fetch
+                                                                    window.location.reload();
+
+                                                                    showToast('PLAYER CACHE PURGED GLOBALLY', 'success');
+                                                                }}
+                                                                className="p-1.5 sm:p-2 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors text-red-500 hover:text-red-400 shrink-0"
+                                                                title="Force Refresh Player Cache (Global)"
+                                                            >
+                                                                <Database size={16} />
+                                                            </button>
+                                                        )}
+
+                                                        <div className="flex-1 sm:flex-none flex items-center bg-white/5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-white/10 shadow-inner whitespace-nowrap">
+                                                            <span className="text-[10px] sm:text-xs text-gray-500 font-mono font-bold uppercase tracking-widest mr-2">LOGS:</span>
+                                                            <span className="text-white text-sm sm:text-lg font-black tracking-tighter">
+                                                                {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => !m.is_system).length}
+                                                            </span>
+                                                        </div>
+
+                                                        <button
+                                                            onClick={() => handlePurgeAllMessages(suit.id)}
+                                                            className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/30 rounded text-[10px] sm:text-[11px] font-black tracking-widest transition-all uppercase" >
+                                                            <span className="hidden sm:inline">PURGE DATA</span>
+                                                            <span className="sm:hidden">PURGE</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
 
-                                            <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
-                                                {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
-                                                    const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
-                                                    const matchesSearch = !query ||
-                                                        m.content?.toLowerCase().includes(query.toLowerCase()) ||
-                                                        m.user_name?.toLowerCase().includes(query.toLowerCase());
-                                                    const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true; // Hearts doesn't have user filter
-                                                    const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true; // Hearts doesn't have comms mode
-                                                    return matchesSearch && matchesUser && matchesMode && !m.is_system;
-                                                }).length === 0 ? (
-                                                    <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-600 font-mono text-xs uppercase tracking-[0.2em] text-center p-8">
-                                                        <Database size={32} className="opacity-20 mb-2" />
-                                                        <div className="space-y-1">
-                                                            <p>{(suit.id === 'clubs' ? clubsSearchQuery || clubsFilterUserId : heartsSearchQuery) ? 'No transcripts match criteria' : 'Awaiting Signal Broadcast...'}</p>
-                                                            {suit.id === 'clubs' && clubsFilterUserId && (
-                                                                <button
-                                                                    onClick={() => setClubsFilterUserId(null)}
-                                                                    className="text-[10px] text-green-500 hover:text-green-400 font-black uppercase tracking-widest"
-                                                                >
-                                                                    [ RESET USER FILTER ]
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    (suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                            <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden backdrop-blur-sm flex flex-col h-[400px] lg:h-[500px]">
+                                                {/* Search Bar */}
+                                                <div className="p-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">
+                                                    <Search size={14} className="text-gray-500" />
+                                                    <input
+                                                        type="text"
+                                                        value={suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery}
+                                                        onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : suit.id === 'hearts' ? setHeartsSearchQuery(e.target.value) : suit.id === 'spades' ? setSpadesSearchQuery(e.target.value) : setDiamondsSearchQuery(e.target.value)}
+                                                        placeholder="Search transcripts..."
+                                                        className="bg-transparent border-none outline-none text-sm font-mono text-white placeholder:text-white/10 w-full"
+                                                    />
+                                                </div>
+
+                                                <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
+                                                    {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
                                                         const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
                                                         const matchesSearch = !query ||
                                                             m.content?.toLowerCase().includes(query.toLowerCase()) ||
                                                             m.user_name?.toLowerCase().includes(query.toLowerCase());
-                                                        const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true;
-                                                        const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true;
+                                                        const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true; // Hearts doesn't have user filter
+                                                        const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true; // Hearts doesn't have comms mode
                                                         return matchesSearch && matchesUser && matchesMode && !m.is_system;
-                                                    }).map((msg) => (
-                                                        <div key={msg.id} className="group border-b border-white/5 pb-3">
-                                                            <div className="flex justify-between items-start mb-1">
-                                                                <div className="flex items-center gap-2">
-                                                                    {suit.id === 'clubs' ? (
-                                                                        <button
-                                                                            onClick={() => {
-                                                                                const cleanName = msg.user_name?.trim();
-                                                                                const cleanNameLower = cleanName?.toLowerCase();
-                                                                                const mappedId = clubsIDMap[cleanName] || clubsIDMap[cleanNameLower]; // Lookup by name since IDMap is name-keyed
-
-                                                                                if (msg.user_id) {
-                                                                                    // Set tracking with partial data + correct ID
-                                                                                    setTrackingPlayer({
-                                                                                        id: msg.user_id,
-                                                                                        name: msg.user_name || 'UNKNOWN',
-                                                                                        displayId: mappedId || 'UNKNOWN'
-                                                                                    });
-                                                                                    setClubsFilterUserId(msg.user_id);
-                                                                                }
-                                                                            }}
-                                                                            className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.is_system
-                                                                                ? 'bg-red-500 text-white'
-                                                                                : (players.find(p => p.id === msg.user_id)?.role === 'master')
-                                                                                    ? 'text-yellow-500 hover:bg-yellow-500/10'
-                                                                                    : 'text-cyan-400 hover:bg-cyan-400/10'
-                                                                                }`}
-                                                                        >
-                                                                            {(() => {
-                                                                                const cleanName = msg.user_name?.trim();
-                                                                                const cleanNameLower = cleanName?.toLowerCase();
-                                                                                // Source: Supabase Profile Map (Matches Player View)
-                                                                                const mapped = clubsIDMap[msg.user_id] || (cleanName ? clubsIDMap[cleanName] : undefined) || (cleanNameLower ? clubsIDMap[cleanNameLower] : undefined);
-
-                                                                                const name = msg.user_name || 'UNKNOWN';
-
-                                                                                if (mapped && name.includes(mapped)) return name;
-                                                                                return mapped ? `${mapped} [${name}]` : name;
-                                                                            })()}
-                                                                        </button>
-                                                                    ) : (
-                                                                        <span className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.channel === 'master' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                                                                            {msg.user_name}
-                                                                        </span>
-                                                                    )}
-                                                                    <span className="text-xs text-gray-500 font-mono">
-                                                                        {new Date(msg.created_at).toLocaleTimeString()}
-                                                                    </span>
-                                                                </div>
-                                                                <button
-                                                                    onClick={() => handleDeleteMessage(msg.id, suit.id)}
-                                                                    className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-500 transition-all p-1"
-                                                                    title="Purge Transcript"
-                                                                >
-                                                                    <Trash2 size={12} />
-                                                                </button>
-                                                            </div>
-                                                            <p className={`text-base font-mono break-words leading-relaxed tracking-wide ${msg.is_system ? 'text-gray-500 italic text-sm' : 'text-gray-100'}`}>
-                                                                {msg.content}
-                                                            </p>
-                                                        </div>
-                                                    ))
-                                                )}
-                                            </div>
-                                            <div className="p-3 bg-white/5 border-t border-white/10 text-[9px] text-gray-500 font-mono flex justify-between">
-                                                <span>ENCRYPTION: AES-256-GCM</span>
-                                                <span>SIGNAL INTENSITY: 98%</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div >
-                        );
-                    })
-                }
-
-
-                {/* START GAME WAITING LIST WINDOW */}
-                <AnimatePresence>
-                    {showStartModal && (
-                        <div className="fixed inset-0 z-[100] flex items-start justify-center pt-20 bg-black/80 backdrop-blur-sm">
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.95, y: -20 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -20 }}
-                                className="w-full max-w-[95vw] sm:max-w-2xl bg-[#050508] border border-green-500/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh]"
-                            >
-                                {/* Header */}
-                                <div className="p-3 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
-                                    <div>
-                                        <h3 className="text-xl font-display font-bold text-white tracking-widest flex items-center gap-3">
-                                            <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'} size={24} />
-                                            WAITING LIST ({selectedSuitForModal?.toUpperCase()})
-                                        </h3>
-                                        <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
-                                            Active Player Roster // Ready for Deployment
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={() => setShowStartModal(false)}
-                                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-500 hover:text-white"
-                                    >
-                                        <X size={20} />
-                                    </button>
-                                </div>
-
-                                {/* List */}
-                                <div className="flex-1 overflow-y-auto p-0 admin-scrollbar">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead className="bg-white/[0.02] sticky top-0 z-10 backdrop-blur-md">
-                                            <tr>
-                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">ID</th>
-                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
-                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Status</th>
-                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Visa</th>
-                                                <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-white/5">
-                                            {waitingPlayers.length > 0 ? (
-                                                waitingPlayers
-                                                    .filter(player => {
-                                                        const modalSuit = (selectedSuitForModal || '').toLowerCase();
-                                                        const pType = (player.game_type || '').toLowerCase();
-
-                                                        if (!modalSuit) return true;
-
-                                                        // Legacy fallback
-                                                        if (!pType) return modalSuit === 'clubs';
-
-                                                        return pType === modalSuit;
-                                                    })
-                                                    .map((player) => {
-                                                        const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
-                                                        return (
-                                                            <tr key={player.user_id || player.username} className="hover:bg-white/[0.02] transition-colors">
-                                                                <td className="p-2 sm:p-4 font-mono text-xs text-green-500 font-bold hidden sm:table-cell">
-                                                                    {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
-                                                                </td>
-                                                                <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
-                                                                    {player.username}
-                                                                </td>
-                                                                <td className="p-2 sm:p-4 hidden sm:table-cell">
-                                                                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold bg-green-500/10 text-green-500 border border-green-500/20 uppercase tracking-wider">
-                                                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                                                                        READY
-                                                                    </span>
-                                                                </td>
-                                                                <td className="p-4 font-mono text-xs text-gray-500">
-                                                                    {dbUser?.visaDays || '???'} Days
-                                                                </td>
-                                                                <td className="p-4 text-right">
+                                                    }).length === 0 ? (
+                                                        <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-600 font-mono text-xs uppercase tracking-[0.2em] text-center p-8">
+                                                            <Database size={32} className="opacity-20 mb-2" />
+                                                            <div className="space-y-1">
+                                                                <p>{(suit.id === 'clubs' ? clubsSearchQuery || clubsFilterUserId : heartsSearchQuery) ? 'No transcripts match criteria' : 'Awaiting Signal Broadcast...'}</p>
+                                                                {suit.id === 'clubs' && clubsFilterUserId && (
                                                                     <button
-                                                                        onClick={() => handleKickPlayer(player.user_id, player.username)}
-                                                                        className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
-                                                                        title="Remove from Queue"
+                                                                        onClick={() => setClubsFilterUserId(null)}
+                                                                        className="text-[10px] text-green-500 hover:text-green-400 font-black uppercase tracking-widest"
                                                                     >
-                                                                        <Trash2 size={14} />
+                                                                        [ RESET USER FILTER ]
                                                                     </button>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })
-                                            ) : (
-                                                <tr>
-                                                    <td colSpan={4} className="p-8 text-center text-gray-500 font-mono text-xs uppercase tracking-widest">
-                                                        Running Scan... No Active Players Detected.
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        (suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                                            const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
+                                                            const matchesSearch = !query ||
+                                                                m.content?.toLowerCase().includes(query.toLowerCase()) ||
+                                                                m.user_name?.toLowerCase().includes(query.toLowerCase());
+                                                            const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true;
+                                                            const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true;
+                                                            return matchesSearch && matchesUser && matchesMode && !m.is_system;
+                                                        }).map((msg, idx) => (
+                                                            <div key={getStableKey(msg.id, `${suit.id}-msg-${idx}-${msg.user_id || msg.user_name || String(msg.content || '').slice(0, 20)}`)} className="group border-b border-white/5 pb-3">
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        {suit.id === 'clubs' ? (
+                                                                            <button
+                                                                                onClick={() => {
+                                                                                    const cleanName = msg.user_name?.trim();
+                                                                                    const cleanNameLower = cleanName?.toLowerCase();
+                                                                                    const mappedId = clubsIDMap[cleanName] || clubsIDMap[cleanNameLower]; // Lookup by name since IDMap is name-keyed
 
-                                {bannedPlayers.length > 0 && (
-                                    <div className="border-t border-red-500/20 bg-red-900/10 max-h-48 overflow-y-auto">
-                                        <div className="p-4 border-b border-red-500/20 sticky top-0 bg-red-950/90 backdrop-blur">
-                                            <h4 className="text-red-500 font-bold font-mono text-xs uppercase tracking-widest flex items-center gap-2">
-                                                BANNED CANDIDATES
-                                            </h4>
+                                                                                    if (msg.user_id) {
+                                                                                        // Set tracking with partial data + correct ID
+                                                                                        setTrackingPlayer({
+                                                                                            id: msg.user_id,
+                                                                                            name: msg.user_name || 'UNKNOWN',
+                                                                                            displayId: mappedId || 'UNKNOWN'
+                                                                                        });
+                                                                                        setClubsFilterUserId(msg.user_id);
+                                                                                    }
+                                                                                }}
+                                                                                className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.is_system
+                                                                                    ? 'bg-red-500 text-white'
+                                                                                    : (players.find(p => p.id === msg.user_id)?.role === 'master')
+                                                                                        ? 'text-yellow-500 hover:bg-yellow-500/10'
+                                                                                        : 'text-cyan-400 hover:bg-cyan-400/10'
+                                                                                    }`}
+                                                                            >
+                                                                                {(() => {
+                                                                                    const cleanName = msg.user_name?.trim();
+                                                                                    const cleanNameLower = cleanName?.toLowerCase();
+                                                                                    // Source: Supabase Profile Map (Matches Player View)
+                                                                                    const mapped = clubsIDMap[msg.user_id] || (cleanName ? clubsIDMap[cleanName] : undefined) || (cleanNameLower ? clubsIDMap[cleanNameLower] : undefined);
+
+                                                                                    const name = msg.user_name || 'UNKNOWN';
+
+                                                                                    if (mapped && name.includes(mapped)) return name;
+                                                                                    return mapped ? `${mapped} [${name}]` : name;
+                                                                                })()}
+                                                                            </button>
+                                                                        ) : (
+                                                                            <span className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.channel === 'master' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                                                                {msg.user_name}
+                                                                            </span>
+                                                                        )}
+                                                                        <span className="text-xs text-gray-500 font-mono">
+                                                                            {new Date(msg.created_at).toLocaleTimeString()}
+                                                                        </span>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => handleDeleteMessage(msg.id, suit.id)}
+                                                                        className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-500 transition-all p-1"
+                                                                        title="Purge Transcript"
+                                                                    >
+                                                                        <Trash2 size={12} />
+                                                                    </button>
+                                                                </div>
+                                                                <p className={`text-base font-mono break-words leading-relaxed tracking-wide ${msg.is_system ? 'text-gray-500 italic text-sm' : 'text-gray-100'}`}>
+                                                                    {msg.content}
+                                                                </p>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                                <div className="p-3 bg-white/5 border-t border-white/10 text-[9px] text-gray-500 font-mono flex justify-between">
+                                                    <span>ENCRYPTION: AES-256-GCM</span>
+                                                    <span>SIGNAL INTENSITY: 98%</span>
+                                                </div>
+                                            </div>
                                         </div>
+                                    </div>
+                                </motion.div >
+                            );
+                        })
+                    }
+
+
+                    {/* START GAME WAITING LIST WINDOW */}
+                    <AnimatePresence key="start-presence">
+                        {showStartModal && (
+                            <div className="fixed inset-0 z-[100] flex items-start justify-center pt-20 bg-black/80 backdrop-blur-sm">
+                                <motion.div
+                                    initial={sectionFloat.initial}
+                                    animate={sectionFloat.animate}
+                                    exit={sectionFloat.exit}
+                                    transition={sectionFloat.transition}
+                                    className="w-full max-w-[95vw] sm:max-w-2xl bg-[#050508] border border-green-500/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh]"
+                                >
+                                    {/* Header */}
+                                    <div className="p-3 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+                                        <div>
+                                            <h3 className="text-xl font-display font-bold text-white tracking-widest flex items-center gap-3">
+                                                <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'} size={24} />
+                                                WAITING LIST ({selectedSuitForModal?.toUpperCase()})
+                                            </h3>
+                                            <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
+                                                Active Player Roster // Ready for Deployment
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setShowStartModal(false)}
+                                            className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-500 hover:text-white"
+                                        >
+                                            <X size={20} />
+                                        </button>
+                                    </div>
+
+                                    {/* List */}
+                                    <div className="flex-1 overflow-y-auto p-0 admin-scrollbar">
                                         <table className="w-full text-left border-collapse">
-                                            <tbody>
-                                                {bannedPlayers.map((player) => (
-                                                    <tr key={player.user_id} className="border-b border-red-500/10 last:border-0 hover:bg-red-500/5 transition-colors">
-                                                        <td className="p-4 text-gray-500 font-mono text-xs w-1/4 truncate">{player.user_id.slice(0, 10)}...</td>
-                                                        <td className="p-4 text-white font-mono text-sm w-1/3 truncate">{player.username}</td>
-                                                        <td className="p-4 text-center w-1/4">
-                                                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/20 text-red-500 text-[10px] uppercase font-bold tracking-wider border border-red-500/30">
-                                                                BANNED
-                                                            </span>
-                                                        </td>
-                                                        <td className="p-4 text-right w-1/4">
-                                                            <button
-                                                                onClick={() => {
-                                                                    bannedPlayersRef.current = bannedPlayersRef.current.filter(p => p.user_id !== player.user_id);
-                                                                    setBannedPlayers(bannedPlayersRef.current);
-                                                                }}
-                                                                className="text-gray-400 hover:text-green-400 transition-colors text-xs font-bold uppercase tracking-widest"
-                                                                title="RESTORE PLAYER"
-                                                            >
-                                                                RESTORE
-                                                            </button>
+                                            <thead className="bg-white/[0.02] sticky top-0 z-10 backdrop-blur-md">
+                                                <tr>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">ID</th>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Status</th>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Visa</th>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-white/5">
+                                                {waitingPlayers.length > 0 ? (
+                                                    waitingPlayers
+                                                        .filter(player => {
+                                                            const modalSuit = (selectedSuitForModal || '').toLowerCase();
+                                                            const pType = (player.game_type || '').toLowerCase();
+
+                                                            if (!modalSuit) return true;
+
+                                                            // Legacy fallback
+                                                            if (!pType) return modalSuit === 'clubs';
+
+                                                            return pType === modalSuit;
+                                                        })
+                                                        .map((player, idx) => {
+                                                            const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
+                                                            return (
+                                                                <tr key={getPlayerElementKey(player, idx, 'waiting')} className="hover:bg-white/[0.02] transition-colors">
+                                                                    <td className="p-2 sm:p-4 font-mono text-xs text-green-500 font-bold hidden sm:table-cell">
+                                                                        {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
+                                                                    </td>
+                                                                    <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
+                                                                        {player.username}
+                                                                    </td>
+                                                                    <td className="p-2 sm:p-4 hidden sm:table-cell">
+                                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold bg-green-500/10 text-green-500 border border-green-500/20 uppercase tracking-wider">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                                                            READY
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="p-4 font-mono text-xs text-gray-500">
+                                                                        {dbUser?.visaDays || '???'} Days
+                                                                    </td>
+                                                                    <td className="p-4 text-right">
+                                                                        <button
+                                                                            onClick={() => handleKickPlayer(player.user_id, player.username)}
+                                                                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                                                                            title="Remove from Queue"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })
+                                                ) : (
+                                                    <tr>
+                                                        <td colSpan={4} className="p-8 text-center text-gray-500 font-mono text-xs uppercase tracking-widest">
+                                                            Running Scan... No Active Players Detected.
                                                         </td>
                                                     </tr>
-                                                ))}
+                                                )}
                                             </tbody>
                                         </table>
                                     </div>
-                                )}
 
-                                {/* Footer / Actions */}
-                                <div className="p-6 border-t border-white/10 bg-black/40 flex flex-col gap-4">
-                                    {(!selectedSuitForModal || selectedSuitForModal.toLowerCase() === 'clubs') && (() => {
-                                        const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
-                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
-                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
-
-                                        if (hasPlayer && hasMaster) return null;
-
-                                        return (
-                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse">
-                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
-                                                    ⚠️ WARNING: CLUBS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
-                                                </span>
+                                    {bannedPlayers.length > 0 && (
+                                        <div className="border-t border-red-500/20 bg-red-900/10 max-h-48 overflow-y-auto">
+                                            <div className="p-4 border-b border-red-500/20 sticky top-0 bg-red-950/90 backdrop-blur">
+                                                <h4 className="text-red-500 font-bold font-mono text-xs uppercase tracking-widest flex items-center gap-2">
+                                                    BANNED CANDIDATES
+                                                </h4>
                                             </div>
-                                        );
-                                    })()}
-                                    {(selectedSuitForModal?.toLowerCase() === 'hearts') && (() => {
-                                        const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'hearts');
-                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
-                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
-
-                                        if (hasPlayer && hasMaster) return null;
-
-                                        return (
-                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
-                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
-                                                    ⚠️ WARNING: HEARTS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
-                                                </span>
-                                            </div>
-                                        );
-                                    })()}
-                                    {(selectedSuitForModal?.toLowerCase() === 'spades') && (() => {
-                                        const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'spades');
-                                        const playersCount = finalFiltered.filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin').length;
-                                        if (playersCount >= 2) return null;
-                                        return (
-                                            <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
-                                                <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
-                                                    ⚠️ WARNING: SPADES PROTOCOL REQUIRES AT LEAST 2 PLAYERS TO INITIATE
-                                                </span>
-                                            </div>
-                                        );
-                                    })()}
-                                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center w-full gap-3 sm:gap-4">
-                                        <div className="text-[10px] sm:text-xs font-mono text-gray-500 text-center sm:text-left">
-                                            <span className="text-white font-bold">
-                                                {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
-                                            </span> CANDIDATES READY
+                                            <table className="w-full text-left border-collapse">
+                                                <tbody>
+                                                    {bannedPlayers.map((player, idx) => (
+                                                        <tr key={getPlayerElementKey(player, idx, 'banned')} className="border-b border-red-500/10 last:border-0 hover:bg-red-500/5 transition-colors">
+                                                            <td className="p-4 text-gray-500 font-mono text-xs w-1/4 truncate">{player.user_id?.slice(0, 10) ?? 'UNKNOWN'}...</td>
+                                                            <td className="p-4 text-white font-mono text-sm w-1/3 truncate">{player.username}</td>
+                                                            <td className="p-4 text-center w-1/4">
+                                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/20 text-red-500 text-[10px] uppercase font-bold tracking-wider border border-red-500/30">
+                                                                    BANNED
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4 text-right w-1/4">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        bannedPlayersRef.current = bannedPlayersRef.current.filter(p => p.user_id !== player.user_id);
+                                                                        setBannedPlayers(bannedPlayersRef.current);
+                                                                    }}
+                                                                    className="text-gray-400 hover:text-green-400 transition-colors text-xs font-bold uppercase tracking-widest"
+                                                                    title="RESTORE PLAYER"
+                                                                >
+                                                                    RESTORE
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
                                         </div>
-                                        <div className="flex items-center gap-2 sm:gap-3">
-                                            <button
-                                                onClick={handleGlobalPurgeQueue}
-                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[10px] sm:text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
-                                            >
-                                                Global Purge
-                                            </button>
-                                            <button
-                                                onClick={() => setShowStartModal(false)}
-                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-white/10 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={async () => {
-                                                    // Filter again for action
-                                                    const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
-                                                    // FIXED: Filter out Masters and Admins from the scoring whitelist (allowed_players)
-                                                    // This ensures they don't appear in the "Top Player" ranking.
-                                                    const allowedIds = finalFiltered
-                                                        .filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin')
-                                                        .map(p => p.user_id)
-                                                        .filter(Boolean);
+                                    )}
 
-                                                    if (selectedSuitForModal?.toLowerCase() === 'spades' && allowedIds.length < 2) {
-                                                        showToast("FAILURE: SPADES REQUIRES AT LEAST 2 PLAYERS.", 'error');
-                                                        return;
-                                                    }
+                                    {/* Footer / Actions */}
+                                    <div className="p-6 border-t border-white/10 bg-black/40 flex flex-col gap-4">
+                                        {(!selectedSuitForModal || selectedSuitForModal.toLowerCase() === 'clubs') && (() => {
+                                            const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
+                                            const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                            const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
 
-                                                    const suit = selectedSuitForModal || 'clubs';
-                                                    const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
+                                            if (hasPlayer && hasMaster) return null;
 
-                                                    console.log(`Saving Allowed Players for ${suit} to Supabase:`, allowedIds);
+                                            return (
+                                                <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse">
+                                                    <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                        ⚠️ WARNING: CLUBS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
+                                        {(selectedSuitForModal?.toLowerCase() === 'hearts') && (() => {
+                                            const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'hearts');
+                                            const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                            const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
 
-                                                    // 1. Save Allowed Players to Supabase
-                                                    try {
-                                                        console.log("=> STEP 1: Attempting to save allowed_players...");
-                                                        const accessToken = await getAccessToken();
-                                                        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${suit === 'spades' ? 'spades_game_state' : 'clubs_game_status'}?id=eq.${suitKey}`, {
-                                                            method: 'PATCH',
-                                                            headers: {
-                                                                'Content-Type': 'application/json',
-                                                                'Authorization': `Bearer ${accessToken}`,
-                                                                'apikey': supabaseKey,
-                                                                'Prefer': 'return=minimal'
-                                                            },
-                                                            body: JSON.stringify({ allowed_players: allowedIds })
-                                                        });
-                                                        if (!fetchRes.ok) {
-                                                            console.warn("Failed to save allowed players:", await fetchRes.text());
-                                                        }
-                                                    } catch (err) {
-                                                        console.warn("Failed to save allowed players (Network or Timeout):", err);
-                                                    }
+                                            if (hasPlayer && hasMaster) return null;
 
-                                                    console.log("=> STEP 2: Moving past allowed players block.");
+                                            return (
+                                                <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
+                                                    <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                        ⚠️ WARNING: HEARTS PROTOCOL REQUIRES AT LEAST 1 PLAYER AND 1 MASTER TO INITIATE
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
+                                        {(selectedSuitForModal?.toLowerCase() === 'spades') && (() => {
+                                            const finalFiltered = waitingPlayers.filter(p => p.game_type?.toLowerCase() === 'spades');
+                                            const playersCount = finalFiltered.filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin').length;
+                                            if (playersCount >= 2) return null;
+                                            return (
+                                                <div className="w-full bg-red-500/10 border border-red-500/30 rounded p-2 text-center animate-pulse mb-2">
+                                                    <span className="text-[9px] font-mono font-bold text-red-500 tracking-widest uppercase">
+                                                        ⚠️ WARNING: SPADES PROTOCOL REQUIRES AT LEAST 2 PLAYERS TO INITIATE
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
+                                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center w-full gap-3 sm:gap-4">
+                                            <div className="text-[10px] sm:text-xs font-mono text-gray-500 text-center sm:text-left">
+                                                <span className="text-white font-bold">
+                                                    {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
+                                                </span> CANDIDATES READY
+                                            </div>
+                                            <div className="flex items-center gap-2 sm:gap-3">
+                                                <button
+                                                    onClick={handleGlobalPurgeQueue}
+                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[10px] sm:text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
+                                                >
+                                                    Global Purge
+                                                </button>
+                                                <button
+                                                    onClick={() => setShowStartModal(false)}
+                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-white/10 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={async () => {
+                                                        // Filter again for action
+                                                        const finalFiltered = waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs'));
+                                                        // FIXED: Filter out Masters and Admins from the scoring whitelist (allowed_players)
+                                                        // This ensures they don't appear in the "Top Player" ranking.
+                                                        const allowedIds = finalFiltered
+                                                            .filter(p => p.role !== 'master' && p.role !== 'admin' && p.username !== 'admin')
+                                                            .map(p => p.user_id)
+                                                            .filter(Boolean);
 
-                                                    if (suit === 'diamonds') {
-                                                    }
-
-                                                    console.log("=> STEP 3: Checking restrictions...");
-                                                    const isHearts = suit === 'hearts';
-                                                    const isSpades = suit === 'spades';
-
-                                                    if (isSpades) {
-                                                        const invalidPlayers = finalFiltered.filter(p => p.role === 'master' || p.role === 'admin');
-                                                        if (invalidPlayers.length > 0) {
-                                                            const names = invalidPlayers.map(p => p.username).join(', ');
-                                                            showToast(`FAILURE: SPADES IS PLAYER-ONLY. REMOVE: ${names}`, 'error');
+                                                        if (selectedSuitForModal?.toLowerCase() === 'spades' && allowedIds.length < 2) {
+                                                            showToast("FAILURE: SPADES REQUIRES AT LEAST 2 PLAYERS.", 'error');
                                                             return;
                                                         }
-                                                    }
 
-                                                    if (suit === 'clubs') {
-                                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
-                                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
+                                                        const suit = selectedSuitForModal || 'clubs';
+                                                        const suitKey = suit === 'hearts' ? 'hearts_main' : suit === 'spades' ? 'spades_main' : suit === 'diamonds' ? 'diamonds_king' : 'clubs_king';
 
-                                                        if (!hasPlayer || !hasMaster) {
-                                                            showToast("FAILURE: CLUBS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
-                                                            return;
+                                                        console.log(`Saving Allowed Players for ${suit} to Supabase:`, allowedIds);
+
+                                                        // 1. Save Allowed Players to Supabase
+                                                        try {
+                                                            console.log("=> STEP 1: Attempting to save allowed_players...");
+                                                            const accessToken = await getAccessToken();
+                                                            const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${suit === 'spades' ? 'spades_game_state' : 'clubs_game_status'}?id=eq.${suitKey}`, {
+                                                                method: 'PATCH',
+                                                                headers: {
+                                                                    'Content-Type': 'application/json',
+                                                                    'Authorization': `Bearer ${accessToken}`,
+                                                                    'apikey': supabaseKey,
+                                                                    'Prefer': 'return=minimal'
+                                                                },
+                                                                body: JSON.stringify({ allowed_players: allowedIds })
+                                                            });
+                                                            if (!fetchRes.ok) {
+                                                                console.warn("Failed to save allowed players:", await fetchRes.text());
+                                                            }
+                                                        } catch (err) {
+                                                            console.warn("Failed to save allowed players (Network or Timeout):", err);
                                                         }
-                                                    }
 
-                                                    if (suit === 'hearts') {
-                                                        const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
-                                                        const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
+                                                        console.log("=> STEP 2: Moving past allowed players block.");
 
-                                                        if (!hasPlayer || !hasMaster) {
-                                                            showToast("FAILURE: HEARTS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
-                                                            return;
+                                                        if (suit === 'diamonds') {
                                                         }
-                                                    }
 
-                                                    console.log("=> STEP 4: Restrictions passed. Building updateData.");
-                                                    const currentTable = isHearts ? 'hearts_game_state' : isSpades ? 'spades_game_state' : suit === 'diamonds' ? 'diamonds_game_state' : 'clubs_game_status';
-
-                                                    const updateData: any = {
-                                                        system_start: true,
-                                                        is_paused: false
-                                                    };
-
-                                                    if (!isHearts) {
-                                                        updateData.is_active = true;
-                                                        updateData.allowed_players = allowedIds;
-                                                    }
-
-
-                                                    if (suit === 'clubs' || suit === 'hearts' || suit === 'spades' || suit === 'diamonds') {
-                                                        const now = new Date();
-                                                        updateData.current_round = 1;
+                                                        console.log("=> STEP 3: Checking restrictions...");
+                                                        const isHearts = suit === 'hearts';
+                                                        const isSpades = suit === 'spades';
 
                                                         if (isSpades) {
-                                                            updateData.phase = 'briefing';
-                                                            updateData.phase_started_at = now.toISOString();
-                                                            updateData.phase_duration_sec = 60;
-
-                                                            let profilesData: any[] = [];
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
-                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/json'
-                                                                    }
-                                                                });
-                                                                if (profileRes.ok) {
-                                                                    const rawData = await profileRes.json();
-                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
-                                                                } else {
-                                                                    console.warn("Failed to fetch visa points, defaulting to 1000:", await profileRes.text());
-                                                                }
-                                                            } catch (err) {
-                                                                console.warn("Exception fetching visa points:", err);
-                                                            }
-
-                                                            const visaMap: Record<string, number> = {};
-                                                            profilesData?.forEach((p: any) => {
-                                                                if (p.id) visaMap[p.id] = p.visa_points;
-                                                            });
-
-                                                            const spadesPlayers: Record<string, any> = {};
-                                                            for (const p of finalFiltered) {
-                                                                if (p.user_id) {
-                                                                    const startingScore = visaMap[p.user_id] ?? 1000;
-                                                                    spadesPlayers[p.user_id] = {
-                                                                        id: p.user_id,
-                                                                        username: p.username || `PLAYER${p.user_id.slice(0, 4)}`,
-                                                                        score: startingScore,
-                                                                        start_score: startingScore,
-                                                                        cards: [],
-                                                                        bid: 0,
-                                                                        status: 'active'
-                                                                    };
-                                                                }
-                                                            }
-                                                            updateData.players = spadesPlayers;
-                                                            updateData.round_data = {};
-                                                        } else if (isHearts) {
-                                                            const masters = finalFiltered.filter(p => p.role === 'master');
-                                                            const players = finalFiltered.filter(p => p.role === 'player' || !p.role || p.role === 'admin');
-
-                                                            if (masters.length < 1 || players.length < 1) {
-                                                                setShowStartModal(false);
-                                                                showToast("FAILURE: HEARTS REQUIRES 1 MASTER + 1 PLAYER.", 'error');
+                                                            const invalidPlayers = finalFiltered.filter(p => p.role === 'master' || p.role === 'admin');
+                                                            if (invalidPlayers.length > 0) {
+                                                                const names = invalidPlayers.map(p => p.username).join(', ');
+                                                                showToast(`FAILURE: SPADES IS PLAYER-ONLY. REMOVE: ${names}`, 'error');
                                                                 return;
                                                             }
-
-                                                            updateData.phase = 'briefing';
-                                                            updateData.phase_started_at = now.toISOString();
-                                                            updateData.phase_duration_sec = 60;
-
-                                                            let profilesData: any[] = [];
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
-                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/json'
-                                                                    }
-                                                                });
-                                                                if (profileRes.ok) {
-                                                                    const rawData = await profileRes.json();
-                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
-                                                                }
-                                                            } catch (err) {
-                                                                console.warn("Exception fetching visa points for Hearts:", err);
-                                                            }
-
-                                                            const visaMap: Record<string, number> = {};
-                                                            profilesData?.forEach((p: any) => {
-                                                                if (p.id) visaMap[p.id] = p.visa_points ?? 1000;
-                                                            });
-
-                                                            updateData.participants = finalFiltered.map(p => {
-                                                                const startingScore = p.user_id && visaMap[p.user_id] !== undefined ? visaMap[p.user_id] : 1000;
-                                                                return {
-                                                                    id: p.user_id,
-                                                                    name: p.username || 'Unknown',
-                                                                    role: p.role || 'player',
-                                                                    status: 'active',
-                                                                    score: startingScore,
-                                                                    start_score: startingScore,
-                                                                    last_total_score: startingScore,
-                                                                    eye_of_truth_uses: p.role === 'master' ? 2 : 1
-                                                                };
-                                                            });
-                                                        } else if (suit === 'clubs') {
-                                                            updateData.gameState = 'idle';
-                                                            updateData.round_data = {
-                                                                master_selection: null,
-                                                                player_selection: null
-                                                            };
-
-                                                            // VISA SCORE INJECTION FOR CLUBS
-                                                            try {
-                                                                const accessToken = await getAccessToken();
-                                                                const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
-                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
-                                                                    headers: {
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Accept': 'application/json'
-                                                                    }
-                                                                });
-                                                                let profilesData: any[] = [];
-                                                                if (profileRes.ok) {
-                                                                    const rawData = await profileRes.json();
-                                                                    profilesData = Array.isArray(rawData) ? rawData : [rawData];
-                                                                }
-
-                                                                const startScores: Record<string, number> = {};
-                                                                Array.isArray(profilesData) && profilesData.forEach((p: any) => {
-                                                                    if (p.id) startScores[p.id] = p.visa_points || 0;
-                                                                });
-
-                                                                updateData.scores = {
-                                                                    start: startScores,
-                                                                    current: { ...startScores },
-                                                                    history: {},
-                                                                    high_player: { score: 0, uid: null },
-                                                                    high_master: { score: 0, uid: null }
-                                                                };
-                                                                console.log("Injecting Visa Scores for Clubs:", startScores);
-                                                            } catch (err) {
-                                                                console.warn("=> STEP 5 ERROR: Failed to inject Visa Scores:", err);
-                                                            }
-
-                                                            console.log("=> STEP 6: Creating Game Session...");
-                                                            try {
-                                                                const newGameId = generateGameId();
-                                                                const accessToken = await getAccessToken();
-                                                                const sessionRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_sessions`, {
-                                                                    method: 'POST',
-                                                                    headers: {
-                                                                        'Content-Type': 'application/json',
-                                                                        'Authorization': `Bearer ${accessToken}`,
-                                                                        'apikey': supabaseKey,
-                                                                        'Prefer': 'return=minimal'
-                                                                    },
-                                                                    body: JSON.stringify({
-                                                                        id: newGameId,
-                                                                        status: 'active',
-                                                                        current_round: 1,
-                                                                        total_rounds: 6
-                                                                    })
-                                                                });
-
-                                                                if (!sessionRes.ok) {
-                                                                    console.warn("[GAME TRACKING] Failed to create session:", await sessionRes.text());
-                                                                } else {
-                                                                    updateData.active_game_id = newGameId;
-                                                                    console.log(`[GAME TRACKING] Created session: ${newGameId}`);
-                                                                }
-                                                            } catch (trackErr) {
-                                                                console.warn("[GAME TRACKING] Failed to create session exception:", trackErr);
-                                                            }
-                                                        } else if (suit === 'diamonds') {
-                                                            updateData.phase = 'idle';
-                                                            updateData.current_round = 1;
-                                                            updateData.system_start = true;
-                                                            updateData.phase_started_at = now.toISOString();
-                                                            updateData.phase_duration_sec = 0;
-                                                            updateData.updated_at = now.toISOString();
                                                         }
-                                                    }
 
-                                                    console.log("=> STEP 7: Executing final game start update on", currentTable);
-                                                    try {
-                                                        const accessToken = await getAccessToken();
-                                                        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
-                                                            method: 'PATCH',
-                                                            headers: {
-                                                                'Content-Type': 'application/json',
-                                                                'Authorization': `Bearer ${accessToken}`,
-                                                                'apikey': supabaseKey,
-                                                                'Prefer': 'return=minimal'
-                                                            },
-                                                            body: JSON.stringify(updateData)
-                                                        });
+                                                        if (suit === 'clubs') {
+                                                            const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                                            const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
 
-                                                        if (!fetchRes.ok) {
-                                                            const errText = await fetchRes.text();
-                                                            console.warn("Retrying start without allowed_players (Schema Mismatch)");
-                                                            delete updateData.allowed_players;
-
-                                                            if (isSpades && errText.includes('phase_started_at')) {
-                                                                delete updateData.phase_started_at;
-                                                                delete updateData.phase_duration_sec;
-                                                                delete updateData.paused_remaining_sec;
+                                                            if (!hasPlayer || !hasMaster) {
+                                                                showToast("FAILURE: CLUBS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
+                                                                return;
                                                             }
-                                                            const retryRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
+                                                        }
+
+                                                        if (suit === 'hearts') {
+                                                            const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
+                                                            const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
+
+                                                            if (!hasPlayer || !hasMaster) {
+                                                                showToast("FAILURE: HEARTS REQUIRES AT LEAST 1 PLAYER AND 1 MASTER.", 'error');
+                                                                return;
+                                                            }
+                                                        }
+
+                                                        console.log("=> STEP 4: Restrictions passed. Building updateData.");
+                                                        const currentTable = isHearts ? 'hearts_game_state' : isSpades ? 'spades_game_state' : suit === 'diamonds' ? 'diamonds_game_state' : 'clubs_game_status';
+
+                                                        const updateData: any = {
+                                                            system_start: true,
+                                                            is_paused: false
+                                                        };
+
+                                                        if (!isHearts) {
+                                                            updateData.is_active = true;
+                                                            updateData.allowed_players = allowedIds;
+                                                        }
+
+
+                                                        if (suit === 'clubs' || suit === 'hearts' || suit === 'spades' || suit === 'diamonds') {
+                                                            const now = new Date();
+                                                            updateData.current_round = 1;
+
+                                                            if (isSpades) {
+                                                                updateData.phase = 'briefing';
+                                                                updateData.phase_started_at = now.toISOString();
+                                                                updateData.phase_duration_sec = 60;
+
+                                                                let profilesData: any[] = [];
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                    const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                        headers: {
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Accept': 'application/json'
+                                                                        }
+                                                                    });
+                                                                    if (profileRes.ok) {
+                                                                        const rawData = await profileRes.json();
+                                                                        profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                    } else {
+                                                                        console.warn("Failed to fetch visa points, defaulting to 1000:", await profileRes.text());
+                                                                    }
+                                                                } catch (err) {
+                                                                    console.warn("Exception fetching visa points:", err);
+                                                                }
+
+                                                                const visaMap: Record<string, number> = {};
+                                                                profilesData?.forEach((p: any) => {
+                                                                    if (p.id) visaMap[p.id] = p.visa_points;
+                                                                });
+
+                                                                const spadesPlayers: Record<string, any> = {};
+                                                                for (const p of finalFiltered) {
+                                                                    if (p.user_id) {
+                                                                        const startingScore = visaMap[p.user_id] ?? 1000;
+                                                                        spadesPlayers[p.user_id] = {
+                                                                            id: p.user_id,
+                                                                            username: p.username || `PLAYER${p.user_id.slice(0, 4)}`,
+                                                                            score: startingScore,
+                                                                            start_score: startingScore,
+                                                                            cards: [],
+                                                                            bid: 0,
+                                                                            status: 'active'
+                                                                        };
+                                                                    }
+                                                                }
+                                                                updateData.players = spadesPlayers;
+                                                                updateData.round_data = {};
+                                                            } else if (isHearts) {
+                                                                const masters = finalFiltered.filter(p => p.role === 'master');
+                                                                const players = finalFiltered.filter(p => p.role === 'player' || !p.role || p.role === 'admin');
+
+                                                                if (masters.length < 1 || players.length < 1) {
+                                                                    setShowStartModal(false);
+                                                                    showToast("FAILURE: HEARTS REQUIRES 1 MASTER + 1 PLAYER.", 'error');
+                                                                    return;
+                                                                }
+
+                                                                updateData.phase = 'briefing';
+                                                                updateData.phase_started_at = now.toISOString();
+                                                                updateData.phase_duration_sec = 60;
+
+                                                                let profilesData: any[] = [];
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                    const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                        headers: {
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Accept': 'application/json'
+                                                                        }
+                                                                    });
+                                                                    if (profileRes.ok) {
+                                                                        const rawData = await profileRes.json();
+                                                                        profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                    }
+                                                                } catch (err) {
+                                                                    console.warn("Exception fetching visa points for Hearts:", err);
+                                                                }
+
+                                                                const visaMap: Record<string, number> = {};
+                                                                profilesData?.forEach((p: any) => {
+                                                                    if (p.id) visaMap[p.id] = p.visa_points ?? 1000;
+                                                                });
+
+                                                                updateData.participants = finalFiltered.map(p => {
+                                                                    const startingScore = p.user_id && visaMap[p.user_id] !== undefined ? visaMap[p.user_id] : 1000;
+                                                                    return {
+                                                                        id: p.user_id,
+                                                                        name: p.username || 'Unknown',
+                                                                        role: p.role || 'player',
+                                                                        status: 'active',
+                                                                        score: startingScore,
+                                                                        start_score: startingScore,
+                                                                        last_total_score: startingScore,
+                                                                        eye_of_truth_uses: p.role === 'master' ? 2 : 1
+                                                                    };
+                                                                });
+                                                            } else if (suit === 'clubs') {
+                                                                updateData.gameState = 'idle';
+                                                                updateData.round_data = {
+                                                                    master_selection: null,
+                                                                    player_selection: null
+                                                                };
+
+                                                                // VISA SCORE INJECTION FOR CLUBS
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const allParticipantIds = finalFiltered.map(p => p.user_id).filter(Boolean);
+                                                                    const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allParticipantIds.join(',')})&select=id,visa_points`, {
+                                                                        headers: {
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Accept': 'application/json'
+                                                                        }
+                                                                    });
+                                                                    let profilesData: any[] = [];
+                                                                    if (profileRes.ok) {
+                                                                        const rawData = await profileRes.json();
+                                                                        profilesData = Array.isArray(rawData) ? rawData : [rawData];
+                                                                    }
+
+                                                                    const startScores: Record<string, number> = {};
+                                                                    Array.isArray(profilesData) && profilesData.forEach((p: any) => {
+                                                                        if (p.id) startScores[p.id] = p.visa_points || 0;
+                                                                    });
+
+                                                                    updateData.scores = {
+                                                                        start: startScores,
+                                                                        current: { ...startScores },
+                                                                        history: {},
+                                                                        high_player: { score: 0, uid: null },
+                                                                        high_master: { score: 0, uid: null }
+                                                                    };
+                                                                    console.log("Injecting Visa Scores for Clubs:", startScores);
+                                                                } catch (err) {
+                                                                    console.warn("=> STEP 5 ERROR: Failed to inject Visa Scores:", err);
+                                                                }
+
+                                                                console.log("=> STEP 6: Creating Game Session...");
+                                                                try {
+                                                                    const newGameId = generateGameId();
+                                                                    const accessToken = await getAccessToken();
+                                                                    const sessionRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_sessions`, {
+                                                                        method: 'POST',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Prefer': 'return=minimal'
+                                                                        },
+                                                                        body: JSON.stringify({
+                                                                            id: newGameId,
+                                                                            status: 'active',
+                                                                            current_round: 1,
+                                                                            total_rounds: 6
+                                                                        })
+                                                                    });
+
+                                                                    if (!sessionRes.ok) {
+                                                                        console.warn("[GAME TRACKING] Failed to create session:", await sessionRes.text());
+                                                                    } else {
+                                                                        updateData.active_game_id = newGameId;
+                                                                        console.log(`[GAME TRACKING] Created session: ${newGameId}`);
+                                                                    }
+                                                                } catch (trackErr) {
+                                                                    console.warn("[GAME TRACKING] Failed to create session exception:", trackErr);
+                                                                }
+                                                            } else if (suit === 'diamonds') {
+                                                                updateData.phase = 'idle';
+                                                                updateData.current_round = 1;
+                                                                updateData.system_start = true;
+                                                                updateData.phase_started_at = now.toISOString();
+                                                                updateData.phase_duration_sec = 0;
+                                                                updateData.updated_at = now.toISOString();
+                                                            }
+                                                        }
+
+                                                        console.log("=> STEP 7: Executing final game start update on", currentTable);
+                                                        try {
+                                                            const accessToken = await getAccessToken();
+                                                            const fetchRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
                                                                 method: 'PATCH',
                                                                 headers: {
                                                                     'Content-Type': 'application/json',
@@ -3555,33 +3638,55 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 },
                                                                 body: JSON.stringify(updateData)
                                                             });
-                                                            if (!retryRes.ok) {
-                                                                showToast(`START ERROR: ${await retryRes.text()}`, 'error');
+
+                                                            if (!fetchRes.ok) {
+                                                                const errText = await fetchRes.text();
+                                                                console.warn("Retrying start without allowed_players (Schema Mismatch)");
+                                                                delete updateData.allowed_players;
+
+                                                                if (isSpades && errText.includes('phase_started_at')) {
+                                                                    delete updateData.phase_started_at;
+                                                                    delete updateData.phase_duration_sec;
+                                                                    delete updateData.paused_remaining_sec;
+                                                                }
+                                                                const retryRes = await fetch(`${supabaseUrl}/rest/v1/${currentTable}?id=eq.${suitKey}`, {
+                                                                    method: 'PATCH',
+                                                                    headers: {
+                                                                        'Content-Type': 'application/json',
+                                                                        'Authorization': `Bearer ${accessToken}`,
+                                                                        'apikey': supabaseKey,
+                                                                        'Prefer': 'return=minimal'
+                                                                    },
+                                                                    body: JSON.stringify(updateData)
+                                                                });
+                                                                if (!retryRes.ok) {
+                                                                    showToast(`START ERROR: ${await retryRes.text()}`, 'error');
+                                                                } else {
+                                                                    showToast(`${suit.toUpperCase()} PROTOCOL INITIATED (Whitelist Disabled)`, 'info');
+                                                                    setShowStartModal(false);
+                                                                }
                                                             } else {
-                                                                showToast(`${suit.toUpperCase()} PROTOCOL INITIATED (Whitelist Disabled)`, 'info');
+                                                                showToast(`${suit.toUpperCase()} PROTOCOL INITIATED.`, 'success');
                                                                 setShowStartModal(false);
                                                             }
-                                                        } else {
-                                                            showToast(`${suit.toUpperCase()} PROTOCOL INITIATED.`, 'success');
-                                                            setShowStartModal(false);
+                                                        } catch (err: any) {
+                                                            console.warn("=> STEP 7 ERROR (Network):", err);
+                                                            showToast(`START ERROR: ${err.message}`, 'error');
                                                         }
-                                                    } catch (err: any) {
-                                                        console.warn("=> STEP 7 ERROR (Network):", err);
-                                                        showToast(`START ERROR: ${err.message}`, 'error');
-                                                    }
-                                                }}
-                                                className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg bg-green-500 text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
-                                            >
-                                                INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
-                                            </button>
+                                                    }}
+                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg bg-green-500 text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
+                                                >
+                                                    INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </motion.div>
-                        </div>
-                    )
-                    }
-                </AnimatePresence >
+                                </motion.div>
+                            </div>
+                        )
+                        }
+                    </AnimatePresence>
+                </AnimatePresence>
             </main >
             {/* HEADLESS GAME LOOPS (To ensure timers run even if Master is not on Game Page) */}
             {/* SPADES: DISABLED (Moved to Peer-to-Peer Host in SpadesGame.tsx) */}
@@ -3620,7 +3725,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             }
 
             {/* Game Settings Modal */}
-            <AnimatePresence>
+            <AnimatePresence mode="wait">
                 {showGameSettings && (
                     <GameSettingsModal onClose={() => setShowGameSettings(false)} />
                 )}
@@ -3815,6 +3920,69 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     onClose={() => setShowAdminCard(false)}
                 />
             )}
+
+            {/* Eliminated Players Modal */}
+            {showEliminatedModal && (() => {
+                const suitColors: Record<string, { shape: string; color: string; border: string; bg: string; shadow: string; hoverBorder: string; textLight: string }> = {
+                    clubs: { shape: '♣', color: 'green', border: 'border-green-500/30', bg: 'bg-green-500/5', shadow: 'shadow-green-500/10', hoverBorder: 'hover:border-green-500/20', textLight: 'text-green-400' },
+                    spades: { shape: '♠', color: 'blue', border: 'border-blue-500/30', bg: 'bg-blue-500/5', shadow: 'shadow-blue-500/10', hoverBorder: 'hover:border-blue-500/20', textLight: 'text-blue-400' },
+                    diamonds: { shape: '♦', color: 'purple', border: 'border-purple-500/30', bg: 'bg-purple-500/5', shadow: 'shadow-purple-500/10', hoverBorder: 'hover:border-purple-500/20', textLight: 'text-purple-400' },
+                    hearts: { shape: '♥', color: 'red', border: 'border-red-500/30', bg: 'bg-red-500/5', shadow: 'shadow-red-500/10', hoverBorder: 'hover:border-red-500/20', textLight: 'text-red-400' },
+                };
+                const s = suitColors[showEliminatedModal] || suitColors.hearts;
+                return (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowEliminatedModal(null)}>
+                        <motion.div
+                            initial={sectionFloat.initial}
+                            animate={sectionFloat.animate}
+                            exit={sectionFloat.exit}
+                            transition={sectionFloat.transition}
+                            className={`bg-[#0a0a0f] ${s.border} rounded-xl w-[95vw] max-w-md shadow-2xl ${s.shadow}`}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className={`flex items-center justify-between px-5 py-3.5 border-b border-white/10 ${s.bg} rounded-t-xl`}>
+                                <div className="flex items-center gap-2.5">
+                                    <span className={`text-xl font-bold ${s.textLight}`}>{s.shape}</span>
+                                    <span className={`text-sm font-bold ${s.textLight} uppercase tracking-widest`}>{showEliminatedModal.toUpperCase()} — Eliminated</span>
+                                </div>
+                                <button onClick={() => setShowEliminatedModal(null)} className="text-gray-500 hover:text-white transition-colors text-lg leading-none">&times;</button>
+                            </div>
+                            <div className="p-5 max-h-[50vh] overflow-y-auto admin-scrollbar">
+                                {getEliminatedPlayers().length === 0 ? (
+                                    <div className="text-center text-gray-600 py-10 text-xs uppercase tracking-[0.3em] font-mono">No eliminated players</div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {getEliminatedPlayers().map((player: any, idx: number) => (
+                                            <div key={getPlayerElementKey(player, idx, 'eliminated')} className={`flex items-center gap-3 p-3 bg-white/[0.03] border border-white/[0.06] rounded-lg ${s.hoverBorder} transition-all`}>
+                                                <div className={`w-8 h-8 rounded-full ${s.bg} border ${s.border} flex items-center justify-center ${s.textLight} text-[10px] font-bold font-mono shrink-0`}>
+                                                    {(idx + 1).toString().padStart(2, '0')}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-bold text-white truncate">{player.username || player.id || 'UNKNOWN'}</div>
+                                                    <div className="text-[9px] text-gray-600 font-mono truncate">{player.id || '—'}</div>
+                                                </div>
+                                                <div className={`text-[9px] font-mono ${s.textLight}/70 uppercase shrink-0`}>
+                                                    {player.eliminated_at ? new Date(player.eliminated_at).toLocaleTimeString() : 'ELIMINATED'}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex justify-between items-center px-5 py-3.5 border-t border-white/10 bg-white/[0.02] rounded-b-xl">
+                                <span className="text-[10px] text-gray-600 font-mono uppercase">Total: {getEliminatedPlayers().length} player(s)</span>
+                                <button
+                                    onClick={() => setShowEliminatedModal(null)}
+                                    className="px-5 py-2 bg-white/5 border border-white/10 rounded text-xs font-bold uppercase tracking-widest text-gray-400 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                );
+            })()}
+
         </div >
     );
 };
