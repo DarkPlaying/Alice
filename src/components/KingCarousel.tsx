@@ -141,6 +141,12 @@ export function KingCarousel({ className }: KingCarouselProps) {
                             />
                         </motion.div>
                     </AnimatePresence>
+                    
+                    {/* Red Scanning Lines Overlay */}
+                    <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 overflow-hidden">
+                        <div className="w-full h-6 bg-[#ff0050]/40 blur-[2px] animate-scanline mix-blend-overlay"></div>
+                        <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(255,0,80,0.2)_50%)] bg-[length:100%_4px] mix-blend-overlay"></div>
+                    </div>
                 </motion.div>
 
                 {/* Info Card (Right - Overlapping) */}
