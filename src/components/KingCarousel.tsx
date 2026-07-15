@@ -144,7 +144,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                     
                     {/* Red Scanning Laser Overlay */}
                     <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 overflow-hidden rounded-2xl">
-                        <div className="absolute top-0 w-full h-0.5 bg-[#ff0050] shadow-[0_0_15px_rgba(255,0,80,0.8),0_0_5px_rgba(255,0,80,1)] animate-scanline"></div>
+                        <div className="absolute top-0 w-full h-0.5 bg-[#ff0050] shadow-[0_0_15px_rgba(255,0,80,0.8),0_0_5px_rgba(255,0,80,1)] animate-laser-scan"></div>
                     </div>
                 </motion.div>
 

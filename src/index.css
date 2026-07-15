@@ -358,3 +358,4 @@
 .animate-slow-shimmer {
     animation: slow-shimmer 6s linear infinite;
 }
+@keyframes laser-scan {\n    0% { transform: translateY(-10px); }\n    100% { transform: translateY(510px); }\n}\n\n.animate-laser-scan {\n    animation: laser-scan 4s linear infinite;\n}\n
