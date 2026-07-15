@@ -45,8 +45,8 @@ export default {
                     '100%': { transform: 'translate(0)' },
                 },
                 scanline: {
-                    '0%': { transform: 'translateY(-100%)' },
-                    '100%': { transform: 'translateY(1000%)' }
+                    '0%': { transform: 'translateY(-10px)' },
+                    '100%': { transform: 'translateY(510px)' }
                 },
             },
         },
