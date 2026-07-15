@@ -123,7 +123,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                     style={{ transition: 'transform 0.1s ease-out' }}
                 >
 
-                    <div className="absolute inset-0 bg-black/20 z-10"></div>
+                    <div className="absolute inset-0 bg-black/20 z-10 transition-opacity duration-300 group-hover:opacity-0"></div>
                     <AnimatePresence mode='wait'>
                         <motion.div
                             key={currentKing.imageUrl}
@@ -136,7 +136,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                             <img
                                 src={currentKing.imageUrl}
                                 alt={currentKing.name}
-                                className='w-full h-full object-cover'
+                                className='w-full h-full object-cover transition-all duration-300 group-hover:brightness-125'
                                 loading="eager"
                             />
                         </motion.div>
@@ -144,7 +144,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                     
                     {/* Red Scanning Laser Overlay */}
                     <div className="absolute inset-0 z-20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 overflow-hidden rounded-2xl">
-                        <div className="absolute top-0 w-full h-0.5 bg-[#ff0050] shadow-[0_0_15px_rgba(255,0,80,0.8),0_0_5px_rgba(255,0,80,1)] animate-laser-scan"></div>
+                        <div className="absolute top-0 w-full h-0.5 bg-[#ff0050] animate-laser-scan"></div>
                     </div>
                 </motion.div>
 
