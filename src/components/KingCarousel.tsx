@@ -123,7 +123,6 @@ export function KingCarousel({ className }: KingCarouselProps) {
                     style={{ transition: 'transform 0.1s ease-out' }}
                 >
 
-                    <div className="absolute inset-0 bg-black/20 z-10 transition-opacity duration-300 group-hover:opacity-0"></div>
                     <AnimatePresence mode='wait'>
                         <motion.div
                             key={currentKing.imageUrl}
@@ -136,7 +135,7 @@ export function KingCarousel({ className }: KingCarouselProps) {
                             <img
                                 src={currentKing.imageUrl}
                                 alt={currentKing.name}
-                                className='w-full h-full object-cover transition-all duration-300 group-hover:brightness-125'
+                                className='w-full h-full object-cover transition-all duration-300 group-hover:brightness-110'
                                 loading="eager"
                             />
                         </motion.div>
