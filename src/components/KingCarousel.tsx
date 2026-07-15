@@ -105,7 +105,6 @@ export function KingCarousel({ className }: KingCarouselProps) {
                 {/* Card Image (Left) with 3D Tilt */}
                 <motion.div
                     className='w-[340px] h-[500px] rounded-2xl overflow-hidden flex-shrink-0 relative z-0 border border-white/10 group'
-                    whileHover={{ scale: 1.02 }}
                     onMouseMove={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
                         const x = e.clientX - rect.left;
@@ -116,10 +115,10 @@ export function KingCarousel({ className }: KingCarouselProps) {
                         // Tilt
                         const rotateX = ((y - centerY) / 20) * -1;
                         const rotateY = (x - centerX) / 20;
-                        e.currentTarget.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+                        e.currentTarget.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`;
                     }}
                     onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg)`;
+                        e.currentTarget.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)`;
                     }}
                     style={{ transition: 'transform 0.1s ease-out' }}
                 >
