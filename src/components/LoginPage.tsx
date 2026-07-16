@@ -42,6 +42,18 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
         setError(false);
 
         try {
+            if (username === 'demo' && password === 'demo') {
+                const demoUser = {
+                    id: 'demo-user',
+                    username: 'demo',
+                    role: 'demo',
+                    uid: 'demo-user',
+                    email: 'demo@borderland.com'
+                };
+                if (onLogin) onLogin(demoUser);
+                return;
+            }
+
             const sanitizedUsername = username.trim().toLowerCase().replace(/\s+/g, '');
             let email = sanitizedUsername;
 
@@ -234,7 +246,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50 flex items-center gap-4">
                 <button
                     onClick={() => navigate('/home')}
-                    className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
+                    className="flex items-center gap-2 bg-black hover:bg-black-500/20 border border-red-500/30 text-red-400 hover:text-red-300 px-4 py-1.5 rounded-full text-[12px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
                 >
                     <span className="group-hover:-translate-x-1 transition-transform">←</span>
                     Go Back
@@ -344,7 +356,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             {/* Login Container */}
             <motion.div
                 animate={controls}
-                className="relative z-30 w-full max-w-md p-8 bg-red backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
+                className="relative z-30 w-full max-w-md p-8 bg-[#0a0a0f] md:bg-black/50 md:backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
             >
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-wider">

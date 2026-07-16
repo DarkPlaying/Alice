@@ -624,7 +624,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 <div className="absolute inset-0 bg-red-500/20 translate-y-[100%] group-hover:translate-y-0 transition-transform"></div>
                             </button>
                         </motion.div>
-                    ) : showRules ? (
+                    ) : (showRules && userInfo?.role !== 'demo') ? (
                         <motion.div
                             key="rules-screen"
                             initial={{ opacity: 0 }}
@@ -749,7 +749,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 Acknowledge
                             </button>
                         </motion.div>
-                    ) : waitingForGM ? (
+                    ) : (waitingForGM && userInfo?.role !== 'demo') ? (
                         <motion.div
                             key="waiting-screen"
                             initial={{ opacity: 0 }}

@@ -39,7 +39,45 @@ interface Message {
 
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q'];
 
+const DemoClubsGame = ({ onComplete }: { onComplete: (score: number) => void }) => {
+    const [gameState, setGameState] = useState<'playing' | 'won'>('playing');
+
+    if (gameState === 'won') {
+        return (
+            <div className="absolute inset-0 bg-[#050508] flex flex-col items-center justify-center font-sans z-[100]">
+                <h1 className="text-5xl text-green-500 font-bold mb-6 font-mono tracking-widest uppercase shadow-[0_0_30px_rgba(34,197,94,0.3)]">GAME CLEAR</h1>
+                <p className="text-white/60 font-mono mb-8 uppercase tracking-widest">Demo Round Complete.</p>
+                <button onClick={() => window.location.href = '/home'} className="px-8 py-3 bg-white text-black font-bold uppercase tracking-widest hover:bg-gray-200">
+                    Exit Arena
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="absolute inset-0 bg-[#050508] flex flex-col font-sans p-8 items-center justify-center z-[100]">
+            <h1 className="text-3xl text-white font-bold mb-8 tracking-widest font-mono">CLUBS ARENA: DEMO ROUND</h1>
+            <p className="text-white/60 mb-8 font-mono text-center">You are in demo mode.<br/>Select any card to simulate a winning move.</p>
+            <div className="flex gap-6 w-full max-w-2xl justify-center">
+                {['A', 'K', 'Q'].map((rank, i) => (
+                    <div 
+                        key={i} 
+                        onClick={() => setGameState('won')}
+                        className="w-32 h-48 bg-[#0a0a0f] border-2 border-white/20 rounded-xl cursor-pointer hover:border-red-500/80 hover:shadow-[0_0_30px_rgba(255,0,0,0.4)] transition-all flex items-center justify-center group"
+                    >
+                        <span className="text-white/40 group-hover:text-red-500 font-mono text-4xl font-black">{rank}♣</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGameProps) => {
+    if (user?.role === 'demo') {
+        return <DemoClubsGame onComplete={onComplete} />;
+    }
+
     const [isChatOpen, setIsChatOpen] = useState(false);
     const isMaster = user?.role?.toLowerCase() === 'master' || user?.role?.toLowerCase() === 'admin';
 
