@@ -254,16 +254,16 @@ export const PlayerCardModal = ({ user, onClose, currentGameScore }: PlayerCardM
                             </div>
                         </div>
 
-                        <div className="space-y-2 pt-4 border-t border-white/5">
+                        <div className="space-y-2 pt-2 border-t border-white/5">
                             <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">Performance Metrics</label>
                             <div className="grid grid-cols-3 gap-3 items-end">
-                                <div className="bg-yellow-500/10 rounded py-2 px-3 border border-yellow-500/20 flex flex-col items-center justify-end h-20">
+                                <div className="bg-yellow-500/10 rounded py-2 px-2 mt-2 border border-yellow-500/20 flex flex-col items-center justify-end h-20">
                                     <div className="text-2xl font-bold text-yellow-500 mb-1">{points}</div>
                                     <div className="text-[9px] text-yellow-600/60 uppercase tracking-wider font-bold">Points</div>
                                 </div>
                                 <div className="bg-green-500/10 rounded py-2 px-3 border border-green-500/20 flex flex-col items-center justify-end h-20">
                                     <div className="text-2xl font-bold text-green-500 mb-1">{wins}</div>
-                                    <div className="text-[9px] text-green-600/60 uppercase tracking-wider font-bold">Games Cleared</div>
+                                    <div className="text-[9px] text-green-600/60 uppercase tracking-wider font-bold">Cleared</div>
                                 </div>
                                 <div className={`rounded py-2 px-3 border flex flex-col items-center justify-end h-20 ${gradeBg}`}>
                                     <div className={`text-2xl font-bold mb-1 ${gradeColor}`}>{grade}</div>

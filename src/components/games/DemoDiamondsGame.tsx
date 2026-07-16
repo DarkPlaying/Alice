@@ -255,9 +255,17 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
             <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
 
             {/* Header / HUD */}
-            <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-md border-b border-purple-500/20 px-4 py-3 sm:px-8 sm:py-4">
+            <header className="fixed top-0 left-0 right-0 z-[150] bg-black border-b border-purple-500/20 px-4 py-3 sm:px-8 sm:py-4">
                 <div className="max-w-7xl mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        {/* Exit */}
+                        <button
+                            onClick={() => window.location.href = '/home/card'}
+                            className="flex items-center justify-center w-8 h-8 rounded-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all flex-shrink-0"
+                            title="Exit game"
+                        >
+                            <X size={14} />
+                        </button>
                         <div className="hidden sm:flex flex-col border-r border-white/10 pr-4">
                             <span className="text-[10px] font-black text-white/40 tracking-[0.4em] uppercase leading-none mb-1">NETWORK</span>
                             <span className="text-xs font-black text-purple-500 uppercase tracking-widest leading-none">BORDERLAND</span>
@@ -378,7 +386,7 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
             </AnimatePresence>
 
             {/* MAIN STAGE */}
-            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-32 sm:pt-40 pb-56 relative z-10 flex flex-col items-center">
+            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-[100px] sm:pt-[110px] pb-56 relative z-10 flex flex-col items-center">
                 {/* PHASE INDICATOR */}
                 <div className="mb-4 text-center px-4">
                     <motion.div key={phase} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="space-y-2">

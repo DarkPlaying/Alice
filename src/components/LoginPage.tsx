@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, useAnimation } from 'framer-motion';
-import { User, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { motion, useAnimation, AnimatePresence } from 'framer-motion';
+import { User, Lock, ArrowRight, AlertCircle, ShieldAlert, Play, X } from 'lucide-react';
 import clsx from 'clsx';
 import { supabase, supabaseUrl, supabaseKey } from '../supabaseClient';
 import { useNavigate } from 'react-router-dom';
@@ -18,6 +18,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
     const isRegistering = false;
     const [error, setError] = useState<string | false>(false);
     const [isFocused, setIsFocused] = useState(false);
+    const [showDemoModal, setShowDemoModal] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
 
@@ -435,6 +436,18 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                         <div className="absolute inset-0 bg-white/20 translate-x-[-120%] group-hover:translate-x-[100%] transition-transform duration-700 skew-x-12" />
                     </motion.button>
 
+                    {/* Demo Simulation Access Button */}
+                    <div className="flex items-center justify-center pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowDemoModal(true)}
+                            className="w-full text-xs text-yellow-500 hover:text-yellow-400 font-mono tracking-wider uppercase border border-yellow-500/30 hover:border-yellow-500/60 bg-yellow-500/5 px-4 py-3 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            <ShieldAlert size={14} className="animate-pulse" />
+                            DEMO SIMULATION ACCESS
+                        </button>
+                    </div>
+
                     <div className="text-center mt-4">
                         <p className="text-gray-500 font-mono text-[10px] tracking-wider uppercase select-none">
                             Identity registration locked. Contact a System Architect for credentials.
@@ -442,6 +455,82 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                     </div>
                 </form>
             </motion.div>
+
+            {/* Demo Credentials Overlay */}
+            <AnimatePresence>
+                {showDemoModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
+                        onClick={() => setShowDemoModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.9, y: 20 }}
+                            className="bg-[#0c0c12] border border-yellow-500/30 p-6 rounded-2xl max-w-sm w-full shadow-2xl relative"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <button
+                                onClick={() => setShowDemoModal(false)}
+                                className="absolute top-4 right-4 text-white/40 hover:text-white transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+
+                            <div className="flex flex-col items-center text-center space-y-4">
+                                <div className="w-12 h-12 rounded-full bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center text-yellow-500">
+                                    <ShieldAlert size={24} className="animate-pulse" />
+                                </div>
+
+                                <div className="space-y-1">
+                                    <h3 className="text-lg font-oswald font-black text-yellow-500 uppercase tracking-wider">
+                                        DEMO SIMULATION ACTIVE
+                                    </h3>
+                                    <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
+                                        System Credentials Provided Below
+                                    </p>
+                                </div>
+
+                                <div className="w-full bg-white/5 border border-white/10 rounded-xl p-4 space-y-2 text-left font-mono text-xs">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-white/40 uppercase">Username:</span>
+                                        <span className="text-yellow-400 font-bold">demo</span>
+                                    </div>
+                                    <div className="flex justify-between items-center border-t border-white/5 pt-2">
+                                        <span className="text-white/40 uppercase">Password:</span>
+                                        <span className="text-yellow-400 font-bold">demo</span>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={async () => {
+                                        setUsername('demo');
+                                        setPassword('demo');
+                                        setShowDemoModal(false);
+                                        // Trigger auto login simulation directly
+                                        const demoUser = {
+                                            id: 'demo-user',
+                                            username: 'demo',
+                                            role: 'demo',
+                                            uid: 'demo-user',
+                                            email: 'demo@borderland.com'
+                                        };
+                                        localStorage.setItem('demo-user-session', JSON.stringify(demoUser));
+                                        if (onLogin) onLogin(demoUser);
+                                    }}
+                                    className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 text-black font-bold uppercase tracking-widest rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                    <Play size={14} className="fill-current" />
+                                    Auto-fill &amp; Enter
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

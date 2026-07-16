@@ -11,10 +11,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timer, AlertTriangle, ShieldCheck, Info, Scan, User, X } from 'lucide-react';
+import { Timer, AlertTriangle, ShieldCheck, Info, Scan, User, X, LogOut } from 'lucide-react';
 import { generateDeck, selectCardByType, buildHint } from '../../game/spades/hints';
 import { scoreCard } from '../../game/spades/scoring';
 import type { Card, PlayerState } from '../../game/spades/types';
+import { PlayerCardModal } from '../PlayerCardModal';
 
 type DemoPhase = 'briefing' | 'shuffle' | 'hint' | 'bidding' | 'reveal' | 'completed';
 
@@ -59,6 +60,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
     const [winnerId, setWinnerId] = useState<string | null>(null);
     const [showRulesModal, setShowRulesModal] = useState(false);
     const [showPointsModal, setShowPointsModal] = useState(false);
+    const [showPlayerCard, setShowPlayerCard] = useState(false);
     const [deckRef] = useState(() => generateDeck());
     const remainingDeckRef = useRef<Card[]>([...deckRef]);
     const phaseTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -228,18 +230,28 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
     // ── Shared HUD & Modals ────────────────────────────────────────────────
     const renderHUD = () => (
-        <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-md border-b border-white/10 px-4 py-3 sm:px-8 sm:py-4">
+        <header className="fixed top-0 left-0 right-0 z-[150] bg-black border-b border-white/10 px-4 py-3 sm:px-8 sm:py-4">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
-                <div className="flex flex-col">
-                    <h2 className="text-[10px] sm:text-xs font-cinzel font-black text-blue-500 tracking-[0.3em] uppercase leading-none mb-1">
-                        SPADES TRIAL — DEMO
-                    </h2>
-                    <h1 className="text-sm sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
-                        SURVIVAL AUCTION
-                    </h1>
+                <div className="flex items-center gap-3">
+                    {/* Exit button */}
+                    <button
+                        onClick={() => window.location.href = '/home/card'}
+                        className="flex items-center justify-center w-8 h-8 rounded-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all"
+                        title="Exit game"
+                    >
+                        <X size={14} />
+                    </button>
+                    <div className="flex flex-col">
+                        <h2 className="text-[10px] sm:text-xs font-cinzel font-black text-blue-500 tracking-[0.3em] uppercase leading-none mb-1">
+                            SPADES TRIAL — DEMO
+                        </h2>
+                        <h1 className="text-sm sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
+                            SURVIVAL AUCTION
+                        </h1>
+                    </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
+                    <div className="hidden sm:block px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
                         DEMO MODE
                     </div>
                     <button
@@ -256,10 +268,18 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                         <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">SCORE</span>
                         <Scan size={18} className="sm:hidden" />
                     </button>
+                    {/* Profile button */}
+                    <button
+                        onClick={() => setShowPlayerCard(true)}
+                        className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-white/5 hover:bg-white/15 transition-colors"
+                        title="Player Profile"
+                    >
+                        <User size={14} className="text-gray-300" />
+                    </button>
                 </div>
             </div>
 
-            {/* Sub-Header */}
+            {/* Sub-Header stats */}
             <div className="max-w-7xl mx-auto mt-3 pt-3 border-t border-white/5 flex items-center justify-around sm:justify-end sm:gap-8">
                 <div className="flex flex-col items-center sm:items-end">
                     <p className="text-[7px] sm:text-[9px] text-slate-500 font-mono uppercase tracking-[0.2em]">ROUND</p>
@@ -295,7 +315,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.8, ease: 'easeOut' }}
-                    className="fixed inset-0 z-50 flex flex-col items-center justify-start pt-16 sm:pt-20 gap-6 sm:gap-10 bg-black/95 overflow-y-auto pb-12"
+                    className="fixed inset-0 z-[200] flex flex-col items-center justify-start pt-16 sm:pt-20 gap-6 sm:gap-10 bg-black/97 overflow-y-auto pb-12"
                 >
                     {/* Demo Badge */}
                     <div className="mt-4 px-4 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
@@ -518,33 +538,17 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
             {renderHUD()}
 
-            {/* Scoring Sidebar (Desktop) */}
-            <div className="fixed left-8 top-1/2 -translate-y-1/2 hidden lg:block w-64 p-5 bg-black/40 border border-slate-800 rounded-lg backdrop-blur-sm z-50">
-                <h3 className="text-slate-500 font-mono text-[10px] uppercase tracking-widest mb-3 border-b border-slate-800 pb-2 flex items-center gap-2">
-                    <AlertTriangle size={12} /> Scoring Rules
-                </h3>
-                <ul className="space-y-3 text-xs font-mono text-slate-300">
-                    {[['Red (Non-Face)', '+600', 'text-green-400'], ['Black (Non-Face)', '-100', 'text-red-400'], ['Black Face', '+1000', 'text-yellow-400'], ['Red Face', '-500', 'text-red-500'], ['0 Cards Penalty', '-500', 'text-red-500']].map(([label, val, cls]) => (
-                        <li key={label} className="flex justify-between items-center">
-                            <span>{label}</span>
-                            <span className={`${cls} font-bold tabular-nums`}>{val}</span>
-                        </li>
-                    ))}
-                </ul>
-                {/* Bot Status */}
-                <div className="mt-6 pt-4 border-t border-slate-800">
-                    <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-2">TABLE 1</p>
-                    {Object.values(players).map(p => (
-                        <div key={p.id} className={`flex justify-between items-center p-2 mb-1 rounded text-[11px] font-mono ${p.id === myId ? 'bg-blue-500/20 border border-blue-500/30 text-blue-300' : 'bg-white/5 text-slate-400'}`}>
-                            <span className="uppercase truncate">{p.displayName}</span>
-                            <span className="font-bold">{p.score}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
+            {/* PlayerCardModal */}
+            {showPlayerCard && (
+                <PlayerCardModal
+                    user={user ?? { username: 'DEMO', id: 'demo-user', visa_points: myScore, wins: 0 }}
+                    onClose={() => setShowPlayerCard(false)}
+                    currentGameScore={myScore}
+                />
+            )}
 
-            {/* Main Content */}
-            <main className="relative z-10 container mx-auto px-4 pt-32 sm:pt-36 pb-40 flex-1 flex flex-col">
+            {/* Main Content — pt clears the two-row fixed header (~120px) */}
+            <main className="relative z-10 container mx-auto px-4 pt-[120px] sm:pt-[128px] pb-40 flex-1 flex flex-col">
                 <AnimatePresence mode="wait">
                     {/* Briefing */}
                     {phase === 'briefing' && (
@@ -569,7 +573,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                     </h3>
                                     <p className="mb-2">Win cards through strategic bidding. In this demo, you play 1 round.</p>
                                     <p className="text-blue-300">
-                                        <strong>NOTE:</strong> Your opponent (DEMO-BOT) always bids exactly 100.
+                                        Make your strategic wagers and try to survive.
                                     </p>
                                 </div>
                                 <div className="p-4 bg-red-900/10 border-l-2 border-red-500">
@@ -696,9 +700,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                     </div>
                                 </div>
 
-                                <div className="mt-4 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded text-[10px] font-mono text-yellow-400/60 uppercase tracking-wider text-center">
-                                    💡 DEMO: Bot always bids 100. Bid &gt; 100 to secure the card.
-                                </div>
+
                             </div>
                         </motion.div>
                     )}
