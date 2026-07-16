@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { PlayerCardModal } from './PlayerCardModal';
-import { Card } from '@/components/ui/card';
 
 const cards = [
     {
@@ -160,17 +159,20 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                         }}
                         className="relative cursor-pointer"
                     >
-                        <Card
-                            className="w-full aspect-[5/7] relative group rounded-[1.2rem] shadow-2xl transition-all duration-500 hover:scale-[1.05]"
+                        <div
+                            className="w-full aspect-[5/7] relative group rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
+                            style={{
+                                boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
+                            }}
                         >
-                            <div className="absolute inset-0 z-0">
-                                <img
-                                    src={card.image}
-                                    alt={card.type}
-                                    className="w-full h-full object-cover opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90 group-hover:opacity-60 transition-opacity duration-500" />
-                            </div>
+                            {/* Full-bleed Image */}
+                            <img
+                                src={card.image}
+                                alt={card.type}
+                                className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
+                            />
+                            {/* Gradient overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90 group-hover:opacity-60 transition-opacity duration-500" />
 
                             <div className="absolute inset-0 z-10 p-5 flex flex-col justify-end pointer-events-none">
                                 <div className="space-y-3 transform group-hover:-translate-y-1 transition-transform duration-500">
@@ -193,7 +195,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
                             {/* Scanline */}
                             <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
-                        </Card>
+                        </div>
 
                         {/* Status light */}
                         <div className="mt-2.5 flex justify-center">

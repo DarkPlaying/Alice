@@ -356,7 +356,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             {/* Login Container */}
             <motion.div
                 animate={controls}
-                className="relative z-30 w-full max-w-md p-8 bg-[#0a0a0f] md:bg-black/50 md:backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
+                className="relative z-30 w-full max-w-md p-8 bg-[#0a0a0f]/80 backdrop-blur-sm md:bg-black/60 md:backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)]"
             >
                 <div className="mb-8 text-center">
                     <h1 className="text-4xl font-display font-bold text-white mb-2 tracking-wider">
