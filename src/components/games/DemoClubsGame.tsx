@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timer, Shield, CheckCircle2, X, FileText, User } from 'lucide-react';
+import { Timer, Shield, CheckCircle2, X, FileText, User, RotateCcw } from 'lucide-react';
 import { ClubsPointsTable } from './ClubsPointsTable';
 
 type DemoPhase = 'briefing' | 'setup_phase1' | 'selection_reveal' | 'playing' | 'card_reveal' | 'result';
@@ -267,9 +267,9 @@ export const DemoClubsGame: React.FC<DemoClubsGameProps> = ({ user }) => {
                 )}
             </AnimatePresence>
 
-            {/* Shuffling Screen */}
+            {/* Shuffling Screen — demo never enters shuffle phase, kept for completeness */}
             <AnimatePresence>
-                {phase === 'shuffle' && (
+                {(false as boolean) && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center">
                         <div className="text-center space-y-4">
                             <RotateCcw size={80} className="text-green-500 animate-spin mx-auto" />
