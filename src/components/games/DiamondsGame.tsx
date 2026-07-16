@@ -28,10 +28,15 @@ import { Swords, Skull, Timer, CheckCircle2, AlertTriangle, X, Activity, Scan, I
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { PlayerCardModal } from '../PlayerCardModal';
+import { DemoDiamondsGame } from './DemoDiamondsGame';
 
 const GAME_ID = 'diamonds_king';
 
 export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ user, onClose }) => {
+    if (user?.role === 'demo') {
+        return <DemoDiamondsGame user={user} onClose={onClose} />;
+    }
+
     const [gameState, setGameState] = useState<DiamondsGameState | null>(null);
     const [myHand, setMyHand] = useState<DiamondsCard[]>([]);
     const [mySlots, setMySlots] = useState<(DiamondsCard | null)[]>([null, null, null, null, null]);

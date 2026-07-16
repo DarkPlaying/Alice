@@ -100,7 +100,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
             {/* ── Top Right: Profile + Logout ── */}
             {isLoggedIn && (
-                <div className="fixed top-3 right-3 sm:top-6 sm:right-8 z-50 flex items-center gap-1 sm:gap-2" style={{ maxWidth: 'calc(100vw - 120px)' }}>
+                <div className="fixed top-3 right-6 sm:top-6 sm:right-8 z-50 flex items-center gap-1 sm:gap-2" style={{ maxWidth: 'calc(100vw - 120px)' }}>
                     {/* Profile — icon only on mobile */}
                     <button
                         onClick={() => setShowPlayerCard(true)}
