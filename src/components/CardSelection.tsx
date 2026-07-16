@@ -63,7 +63,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
             <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50 flex items-center gap-4">
                 <button
                     onClick={onBack}
-                    className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group"
+                    className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
                 >
                     <span className="group-hover:-translate-x-1 transition-transform">←</span>
                     Go Back
@@ -97,12 +97,12 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                 <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black" />
             </div>
 
-            {/* Top Right Logout */}
+            {/* Top Right: Profile + Logout */}
             {isLoggedIn && (
-                <div className="fixed top-4 right-4 sm:top-6 sm:right-8 z-50 flex items-center gap-4">
+                <div className="fixed top-4 right-4 sm:top-6 sm:right-8 z-50 flex items-center gap-2">
                     <button
                         onClick={() => setShowPlayerCard(true)}
-                        className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                        className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
                     >
                         <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
                         <span className="text-[10px] font-mono tracking-widest text-gray-300 uppercase">
@@ -111,7 +111,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                     </button>
                     <button
                         onClick={onLogoutClick}
-                        className="bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-4 py-1.5 rounded text-[10px] font-mono tracking-widest uppercase transition-all"
+                        className="bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-3 py-1.5 rounded text-[10px] font-mono tracking-widest uppercase transition-all"
                     >
                         Logout
                     </button>
