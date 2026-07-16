@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { PlayerCardModal } from './PlayerCardModal';
+import { LogOut, User } from 'lucide-react';
 
 const cards = [
     {
@@ -58,15 +59,16 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
     const [showPlayerCard, setShowPlayerCard] = useState(false);
 
     return (
-        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-24 pb-8 px-6 lg:pt-16 lg:pb-6 lg:px-8 relative font-sans">
-            {/* Top Left Navigation */}
-            <div className="fixed top-4 left-4 sm:top-6 sm:left-6 z-50 flex items-center gap-4">
+        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-20 pb-4 lg:pt-16 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans">
+
+            {/* ── Top Left: Back Button ── */}
+            <div className="fixed top-4 left-3 sm:top-6 sm:left-6 z-50">
                 <button
                     onClick={onBack}
-                    className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
+                    className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 px-3 py-1.5 rounded-full text-[10px] font-mono tracking-widest uppercase transition-all group cursor-pointer"
                 >
                     <span className="group-hover:-translate-x-1 transition-transform">←</span>
-                    Go Back
+                    <span className="hidden xs:inline sm:inline">Go Back</span>
                 </button>
             </div>
 
@@ -80,7 +82,6 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
             {/* Background */}
             <div className="absolute inset-0 z-0">
                 <div className="absolute inset-0 bg-[url('/hero-bg.webp')] bg-cover bg-center opacity-10 blur-3xl scale-125" />
-                {/* Red Checkered Overlay */}
                 <div
                     className="absolute inset-0 opacity-10"
                     style={{
@@ -97,23 +98,29 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                 <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black" />
             </div>
 
-            {/* Top Right: Profile + Logout */}
+            {/* ── Top Right: Profile + Logout ── */}
             {isLoggedIn && (
-                <div className="fixed top-4 right-4 sm:top-6 sm:right-8 z-50 flex items-center gap-2">
+                <div className="fixed top-3 right-3 sm:top-6 sm:right-8 z-50 flex items-center gap-1.5 sm:gap-2">
+                    {/* Profile — icon on mobile, text+icon on sm+ */}
                     <button
                         onClick={() => setShowPlayerCard(true)}
-                        className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                        className="flex items-center gap-1.5 px-2 py-1.5 sm:px-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                        title="Player Profile"
                     >
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                        <span className="text-[10px] font-mono tracking-widest text-gray-300 uppercase">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0"></div>
+                        <span className="hidden sm:inline text-[10px] font-mono tracking-widest text-gray-300 uppercase">
                             {userInfo?.username || 'PLAYER'}
                         </span>
+                        <User size={13} className="sm:hidden text-gray-400" />
                     </button>
+                    {/* Logout — icon on mobile, text on sm+ */}
                     <button
                         onClick={onLogoutClick}
-                        className="bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-3 py-1.5 rounded text-[10px] font-mono tracking-widest uppercase transition-all"
+                        className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-2 py-1.5 sm:px-3 rounded transition-all"
+                        title="Logout"
                     >
-                        Logout
+                        <LogOut size={13} className="sm:hidden flex-shrink-0" />
+                        <span className="hidden sm:inline text-[10px] font-mono tracking-widest uppercase">Logout</span>
                     </button>
                 </div>
             )}
@@ -122,7 +129,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
             <motion.div
                 initial={{ opacity: 0, y: -30 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="relative z-10 flex flex-col items-center mb-8 lg:mb-10 text-center"
+                className="relative z-10 flex flex-col items-center mb-5 lg:mb-10 text-center"
             >
                 <p className="text-white/40 text-[9px] tracking-[0.5em] mb-1 select-none">今際の国のアリス</p>
                 <div className="flex flex-col items-center gap-0 leading-none mb-3">
@@ -135,16 +142,16 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                 </div>
 
                 <div className="flex items-center gap-4 mt-1">
-                    <div className="h-px w-16 sm:w-36 md:w-48 bg-[#ff0050]" />
+                    <div className="h-px w-12 sm:w-36 md:w-48 bg-[#ff0050]" />
                     <p className="text-[#ff0050] font-cinzel tracking-[0.4em] text-[9px] uppercase font-bold whitespace-nowrap">
                         Specialty Selection
                     </p>
-                    <div className="h-px w-16 sm:w-36 md:w-48 bg-[#ff0050]" />
+                    <div className="h-px w-12 sm:w-36 md:w-48 bg-[#ff0050]" />
                 </div>
             </motion.div>
 
-            {/* Playing Card Grid — larger */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-10 w-full max-w-xl sm:max-w-3xl lg:max-w-6xl relative z-10 px-4">
+            {/* Playing Card Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 lg:gap-10 w-full max-w-sm sm:max-w-3xl lg:max-w-6xl relative z-10">
                 {cards.map((card, index) => (
                     <motion.div
                         key={card.type}
@@ -154,13 +161,12 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                         onMouseEnter={() => setHoveredIndex(index)}
                         onMouseLeave={() => setHoveredIndex(null)}
                         onClick={() => {
-                            console.log("Card Selection Triggered:", card.type);
                             onCardSelect(card.type);
                         }}
                         className="relative cursor-pointer"
                     >
                         <div
-                            className="w-full aspect-[5/7] relative group rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
+                            className="w-full aspect-[5/7] relative group rounded-[1rem] sm:rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
                             style={{
                                 boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
                             }}
@@ -172,24 +178,27 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                                 className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
                             />
                             {/* Gradient overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90 group-hover:opacity-60 transition-opacity duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent opacity-90 group-hover:opacity-70 transition-opacity duration-500" />
 
-                            <div className="absolute inset-0 z-10 p-5 flex flex-col justify-end pointer-events-none">
-                                <div className="space-y-3 transform group-hover:-translate-y-1 transition-transform duration-500">
+                            {/* Card Info */}
+                            <div className="absolute inset-0 z-10 p-3 sm:p-5 flex flex-col justify-end pointer-events-none">
+                                <div className="space-y-1 sm:space-y-2 transform group-hover:-translate-y-1 transition-transform duration-500">
                                     <div className="h-px w-full bg-white/10" />
-                                    <div className="space-y-0.5">
-                                        <h3 className="text-xl md:text-2xl font-cinzel text-white uppercase tracking-wider drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] font-bold whitespace-nowrap">
+                                    <div>
+                                        <h3 className="text-sm sm:text-xl md:text-2xl font-cinzel text-white uppercase tracking-wide drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] font-bold leading-tight">
                                             {card.type.slice(0, -1)}
                                         </h3>
-                                        <p className="text-[10px] font-playfair text-white/50 group-hover:text-white/100 transition-colors uppercase tracking-widest">
-                                            {card.type.slice(0, -1)} Specialization
+                                        <p className="text-[9px] sm:text-[10px] font-mono text-white/50 group-hover:text-white/90 transition-colors uppercase tracking-wider mt-0.5">
+                                            {card.type.slice(0, -1)} Spec.
                                         </p>
                                     </div>
-                                    <p className="text-[8px] font-playfair tracking-[0.2em] text-white/30 uppercase leading-relaxed group-hover:text-white/60 transition-colors">
-                                        Citizens of the Borderland<br />
-                                        Pattern: {card.type.slice(0, -1).toUpperCase()}<br />
-                                        Status: PENDING
-                                    </p>
+                                    <div className="hidden sm:block">
+                                        <p className="text-[8px] font-mono tracking-[0.15em] text-white/30 uppercase leading-relaxed group-hover:text-white/60 transition-colors">
+                                            Citizens of the Borderland<br />
+                                            Pattern: {card.type.slice(0, -1).toUpperCase()}<br />
+                                            Status: PENDING
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -198,7 +207,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                         </div>
 
                         {/* Status light */}
-                        <div className="mt-2.5 flex justify-center">
+                        <div className="mt-1.5 sm:mt-2.5 flex justify-center">
                             <motion.div
                                 animate={hoveredIndex === index && !window.matchMedia('(max-width: 768px)').matches ? {
                                     scale: [1, 1.3, 1],
@@ -212,16 +221,6 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                     </motion.div>
                 ))}
             </div>
-
-            {/* Footer */}
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 1 }}
-                className="mt-6 lg:mt-8 text-white/5 font-mono text-[7px] tracking-[1.5em] uppercase text-center"
-            >
-                Neural Synchronization Complete // Input Required
-            </motion.div>
         </div>
     );
 };
