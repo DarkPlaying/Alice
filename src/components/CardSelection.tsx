@@ -59,7 +59,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
     const [showPlayerCard, setShowPlayerCard] = useState(false);
 
     return (
-        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-20 pb-4 lg:pt-16 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans">
+        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-20 pb-4 lg:pt-16 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans overflow-x-hidden w-full">
 
             {/* ── Top Left: Back Button ── */}
             <div className="fixed top-4 left-3 sm:top-6 sm:left-6 z-50">
@@ -100,7 +100,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
             {/* ── Top Right: Profile + Logout ── */}
             {isLoggedIn && (
-                <div className="fixed top-3 right-10 sm:top-6 sm:right-8 z-50 flex items-center gap-1 sm:gap-2" style={{ maxWidth: 'calc(100vw - 120px)' }}>
+                <div className="fixed top-3 right-2 sm:top-6 sm:right-8 z-50 flex items-center gap-1 sm:gap-2">
                     {/* Profile — icon only on mobile */}
                     <button
                         onClick={() => setShowPlayerCard(true)}
