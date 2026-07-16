@@ -91,6 +91,40 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
 
             const finalUser = { ...userData, uid: data?.user?.id, email: email, id: data?.user?.id };
 
+            // 1. Log the entry in the system_logs table (Persistence)
+            const syncLoginLog = async () => {
+                try {
+                    // Delete previous login logs for this player to keep only the latest
+                    await supabase.from('system_logs')
+                        .delete()
+                        .eq('player_id', data?.user?.id)
+                        .eq('type', 'login');
+
+                    // Insert the new login log
+                    await supabase.from('system_logs').insert({
+                        message: `Player "${userData.username}" logged in to Arena LOBBY`,
+                        type: 'login',
+                        player_id: data?.user?.id,
+                        username: userData.username,
+                        created_at: new Date().toISOString()
+                    });
+                } catch (err) {
+                    console.warn("Login log sync failed:", err);
+                }
+            };
+            syncLoginLog();
+
+            // 2. Broadcast the signal immediately (Instant Real-time)
+            supabase.channel('admin_signals').subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    supabase.channel('admin_signals').send({
+                        type: 'broadcast',
+                        event: 'player_entry',
+                        payload: { message: `Player "${userData.username}" logged in to Arena LOBBY` }
+                    });
+                }
+            });
+
             if (userData.role === 'master' || userData.role === 'admin' || userData.username === 'admin') {
                 onAdminLogin(finalUser);
             } else {
@@ -324,7 +358,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 <form onSubmit={handleLogin} className="space-y-6">
                     {/* Username Field */}
                     <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400 group-focus-within:text-cyan-400 transition-colors">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400 group-focus-within:text-red-400 transition-colors">
                             <User size={20} />
                         </div>
                         <input
@@ -334,18 +368,18 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             className={clsx(
-                                "w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-300 font-mono",
-                                error && "border-red-500 text-red-100 placeholder-red-300 focus:border-red-500 focus:ring-red-500"
+                                "w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-white-400 focus:ring-1 focus:ring-white-400 transition-all duration-300 font-mono",
+                                error && "border-white-500 text-red-100 placeholder-red-300 focus:border-white-500 focus:ring-white-500"
                             )}
                             placeholder="USERNAME"
                         />
                         {/* Field Scanline Animation (optional polish) */}
-                        <div className="absolute bottom-0 left-0 h-[1px] w-0 bg-cyan-400 group-focus-within:w-full transition-all duration-500" />
+                        <div className="absolute bottom-0 left-0 h-[1px] w-0 bg-white-400 group-focus-within:w-full transition-all duration-500" />
                     </div>
 
                     {/* Password Field */}
                     <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400 group-focus-within:text-cyan-400 transition-colors">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400 group-focus-within:text-red-400 transition-colors">
                             <Lock size={20} />
                         </div>
                         <input
@@ -355,12 +389,12 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             className={clsx(
-                                "w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-300 font-mono",
-                                error && "border-red-500 text-red-100 placeholder-red-300 focus:border-red-500 focus:ring-red-500"
+                                "w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-white-400 focus:ring-1 focus:ring-white-400 transition-all duration-300 font-mono",
+                                error && "border-red-500 text-red-100 placeholder-red-300 focus:border-white-500 focus:ring-white-500"
                             )}
                             placeholder="PASSWORD"
                         />
-                        <div className="absolute bottom-0 left-0 h-[1px] w-0 bg-cyan-400 group-focus-within:w-full transition-all duration-500" />
+                        <div className="absolute bottom-0 left-0 h-[1px] w-0 bg-white-400 group-focus-within:w-full transition-all duration-500" />
                     </div>
 
                     {error && (

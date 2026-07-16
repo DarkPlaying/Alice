@@ -1,254 +1,147 @@
-import type React from "react"
-import { mergeProps } from "@base-ui/react/merge-props"
-import { useRender } from "@base-ui/react/use-render"
+'use client';
 
-import { cn } from "@/lib/utils"
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+import { cva, type VariantProps } from 'class-variance-authority';
 
-export function Card({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "relative flex flex-col rounded-2xl border border-white/8 bg-[#0e0e10] text-white shadow-[0_32px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden",
-      className
-    ),
-    "data-slot": "card",
+// Define CardContext
+type CardContextType = {
+  variant: 'default' | 'accent';
+};
+
+const CardContext = React.createContext<CardContextType>({
+  variant: 'default', // Default value
+});
+
+// Hook to use CardContext
+const useCardContext = () => {
+  const context = React.useContext(CardContext);
+  if (!context) {
+    throw new Error('useCardContext must be used within a Card component');
   }
+  return context;
+};
 
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// Variants
+const cardVariants = cva('flex flex-col items-stretch text-card-foreground rounded-xl', {
+  variants: {
+    variant: {
+      default: 'bg-card border border-border shadow-xs black/5',
+      accent: 'bg-muted shadow-xs p-1',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
+
+const cardHeaderVariants = cva('flex items-center justify-between flex-wrap px-5 min-h-14 gap-2.5', {
+  variants: {
+    variant: {
+      default: 'border-b border-border',
+      accent: '',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
+
+const cardContentVariants = cva('grow p-5', {
+  variants: {
+    variant: {
+      default: '',
+      accent: 'bg-card rounded-t-xl [&:last-child]:rounded-b-xl',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
+
+const cardTableVariants = cva('grid grow', {
+  variants: {
+    variant: {
+      default: '',
+      accent: 'bg-card rounded-xl',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
+
+const cardFooterVariants = cva('flex items-center px-5 min-h-14', {
+  variants: {
+    variant: {
+      default: 'border-t border-border',
+      accent: 'bg-card rounded-b-xl mt-[2px]',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
+
+// Card Component
+function Card({
+  className,
+  variant = 'default',
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof cardVariants>) {
+  return (
+    <CardContext.Provider value={{ variant: variant || 'default' }}>
+      <div data-slot="card" className={cn(cardVariants({ variant }), className)} {...props} />
+    </CardContext.Provider>
+  );
 }
 
-export function CardFrame({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "relative flex flex-col rounded-2xl border border-white/8 bg-[#0e0e10] text-white shadow-[0_32px_80px_rgba(0,0,0,0.7)] [--clip-bottom:-1rem] [--clip-top:-1rem] overflow-hidden",
-      className
-    ),
-    "data-slot": "card-frame",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// CardHeader Component
+function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const { variant } = useCardContext();
+  return <div data-slot="card-header" className={cn(cardHeaderVariants({ variant }), className)} {...props} />;
 }
 
-export function CardFrameHeader({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "grid auto-rows-min grid-rows-[auto_auto] items-start gap-x-4 px-6 py-4 has-data-[slot=card-frame-action]:grid-cols-[1fr_auto]",
-      className
-    ),
-    "data-slot": "card-frame-header",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// CardContent Component
+function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const { variant } = useCardContext();
+  return <div data-slot="card-content" className={cn(cardContentVariants({ variant }), className)} {...props} />;
 }
 
-export function CardFrameTitle({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn("self-center text-sm font-semibold text-white", className),
-    "data-slot": "card-frame-title",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// CardTable Component
+function CardTable({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const { variant } = useCardContext();
+  return <div data-slot="card-table" className={cn(cardTableVariants({ variant }), className)} {...props} />;
 }
 
-export function CardFrameDescription({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn("self-center text-sm text-gray-400", className),
-    "data-slot": "card-frame-description",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// CardFooter Component
+function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  const { variant } = useCardContext();
+  return <div data-slot="card-footer" className={cn(cardFooterVariants({ variant }), className)} {...props} />;
 }
 
-export function CardFrameAction({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "col-start-2 inline-flex self-center justify-self-end",
-      className
-    ),
-    "data-slot": "card-frame-action",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+// Other Components
+function CardHeading({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div data-slot="card-heading" className={cn('space-y-1', className)} {...props} />;
 }
 
-export function CardFrameFooter({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn("px-6 py-4 border-t border-white/8", className),
-    "data-slot": "card-frame-footer",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+function CardToolbar({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div data-slot="card-toolbar" className={cn('flex items-center gap-2.5', className)} {...props} />;
 }
 
-export function CardHeader({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 p-6 has-data-[slot=card-action]:grid-cols-[1fr_auto]",
-      className
-    ),
-    "data-slot": "card-header",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h3
+      data-slot="card-title"
+      className={cn('text-base font-semibold leading-none tracking-tight', className)}
+      {...props}
+    />
+  );
 }
 
-export function CardTitle({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn("text-lg leading-none font-bold tracking-tight text-white", className),
-    "data-slot": "card-title",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
+function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div data-slot="card-description" className={cn('text-sm text-muted-foreground', className)} {...props} />;
 }
 
-export function CardDescription({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn("text-sm text-gray-400 leading-relaxed", className),
-    "data-slot": "card-description",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
-}
-
-export function CardAction({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "col-start-2 row-span-2 row-start-1 inline-flex self-start justify-self-end",
-      className
-    ),
-    "data-slot": "card-action",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
-}
-
-export function CardPanel({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "flex-1 p-6",
-      className
-    ),
-    "data-slot": "card-panel",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
-}
-
-export function CardFooter({
-  className,
-  render,
-  ...props
-}: useRender.ComponentProps<"div">): React.ReactElement {
-  const defaultProps = {
-    className: cn(
-      "flex items-center gap-3 p-6 border-t border-white/8",
-      className
-    ),
-    "data-slot": "card-footer",
-  }
-
-  return useRender({
-    defaultTagName: "div",
-    props: mergeProps<"div">(defaultProps, props),
-    render,
-  })
-}
-
-export { CardPanel as CardContent }
-
-export default Card
+// Exports
+export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardHeading, CardTable, CardTitle, CardToolbar };

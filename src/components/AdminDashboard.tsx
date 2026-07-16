@@ -2,12 +2,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3 } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
 import { PlayerCardModal } from './PlayerCardModal';
+import { MiniChart } from './ui/mini-chart';
+import { PieChart } from './ui/pie-chart';
+import { Line, LineChart, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
@@ -60,6 +63,99 @@ interface AdminDashboardProps {
 
 export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const navigate = useNavigate();
+
+    // Platform data for line chart (sample data)
+    const platformData = [
+        { date: '2024-04-01', orders: 222, response: 150, revenue: 8.2, customers: 420 },
+        { date: '2024-04-02', orders: 97, response: 180, revenue: 4.5, customers: 290 },
+        { date: '2024-04-03', orders: 167, response: 120, revenue: 6.8, customers: 380 },
+        { date: '2024-04-04', orders: 242, response: 260, revenue: 9.1, customers: 520 },
+        { date: '2024-04-05', orders: 301, response: 340, revenue: 11.2, customers: 620 },
+        { date: '2024-04-06', orders: 59, response: 110, revenue: 2.8, customers: 180 },
+        { date: '2024-04-07', orders: 261, response: 190, revenue: 9.8, customers: 510 },
+        { date: '2024-04-08', orders: 327, response: 350, revenue: 12.1, customers: 650 },
+        { date: '2024-04-09', orders: 89, response: 150, revenue: 3.8, customers: 220 },
+        { date: '2024-04-10', orders: 195, response: 165, revenue: 7.2, customers: 390 },
+        { date: '2024-04-11', orders: 224, response: 170, revenue: 8.5, customers: 450 },
+        { date: '2024-04-12', orders: 387, response: 290, revenue: 13.8, customers: 710 },
+        { date: '2024-04-13', orders: 215, response: 250, revenue: 8.2, customers: 430 },
+        { date: '2024-04-14', orders: 75, response: 130, revenue: 3.1, customers: 190 },
+        { date: '2024-04-15', orders: 122, response: 180, revenue: 5.1, customers: 300 },
+        { date: '2024-04-16', orders: 197, response: 160, revenue: 7.5, customers: 390 },
+        { date: '2024-04-17', orders: 473, response: 380, revenue: 17.2, customers: 890 },
+        { date: '2024-04-18', orders: 338, response: 400, revenue: 12.9, customers: 670 },
+    ];
+
+    // Generate line chart data from profiles (visa points over time by creation date)
+    const generateLineChartData = () => {
+        const allPlayers = players.filter(p => p.role === 'player' && p.created_at);
+        const dailyStats: Record<string, { visa_points: number; wins: number; losses: number; count: number }> = {};
+
+        allPlayers.forEach(p => {
+            const date = new Date(p.created_at).toISOString().split('T')[0];
+            if (!dailyStats[date]) {
+                dailyStats[date] = { visa_points: 0, wins: 0, losses: 0, count: 0 };
+            }
+            dailyStats[date].visa_points += p.visa_points ?? 0;
+            dailyStats[date].wins += p.wins ?? 0;
+            dailyStats[date].losses += p.losses ?? 0;
+            dailyStats[date].count += 1;
+        });
+
+        return Object.entries(dailyStats)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .slice(-14) // Last 14 days
+            .map(([date, stats]) => ({
+                date,
+                visa_points: Math.round(stats.visa_points / stats.count),
+                wins: stats.wins,
+                losses: stats.losses,
+                players: stats.count,
+            }));
+    };
+
+    // Game-specific default view modes
+    const getViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' => {
+        switch (suitId) {
+            case 'spades': return 'line';
+            case 'clubs': return 'chat';
+            case 'diamonds': return 'pie';
+            case 'hearts': return 'bar';
+            default: return 'chat';
+        }
+    };
+
+    // Track view mode overrides per suit
+    const [viewModeOverrides, setViewModeOverrides] = useState<Record<string, 'chat' | 'bar' | 'pie' | 'line'>>({});
+    const setViewMode = (suitId: string, mode: 'chat' | 'bar' | 'pie' | 'line') => {
+        setViewModeOverrides(prev => ({ ...prev, [suitId]: mode }));
+    };
+    const getEffectiveViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' => {
+        return viewModeOverrides[suitId] || getViewMode(suitId);
+    };
+    const navigateToView = (view: typeof activeView) => {
+        if (['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView)) {
+            setViewModeOverrides(prev => {
+                const next = { ...prev };
+                delete next[activeView];
+                return next;
+            });
+        }
+        setActiveView(view);
+    };
+
+    // Player chart navigation (7 players per page)
+    const [chartPlayerPage, setChartPlayerPage] = useState<Record<string, number>>({});
+    const PLAYERS_PER_CHART_PAGE = 7;
+
+    const getChartPlayerPage = (suitId: string) => chartPlayerPage[suitId] || 0;
+    const setChartPlayerPageFn = (suitId: string, page: number) => {
+        setChartPlayerPage(prev => ({ ...prev, [suitId]: page }));
+    };
+
+    // Selected pie segment info per suit
+    const [selectedPieInfo, setSelectedPieInfo] = useState<Record<string, { label: string; value: number; color: string; total: number } | null>>({});
+
     const [secondsLeft, setSecondsLeft] = useState(2712); // 45:12
     const [jitter, setJitter] = useState(0);
     const [networkPing, setNetworkPing] = useState<number | null>(null);
@@ -67,12 +163,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [adminSettings, setAdminSettings] = useState<any>(null);
     const [showAdminCard, setShowAdminCard] = useState(false);
     const [systemLogs, setSystemLogs] = useState<string[]>([
-        `[${new Date(Date.now() - 60000).toLocaleTimeString()}] CRITICAL: Arena Hearts security handshake established`,
-        `[${new Date(Date.now() - 50000).toLocaleTimeString()}] Laser grid calibration sequence: OK`,
-        `[${new Date(Date.now() - 40000).toLocaleTimeString()}] VISA validation engine active`,
-        `[${new Date(Date.now() - 30000).toLocaleTimeString()}] WARNING: Player 492 pulse elevated`,
-        `[${new Date(Date.now() - 20000).toLocaleTimeString()}] System check complete. Grid stable.`,
-        `[${new Date(Date.now() - 10000).toLocaleTimeString()}] Arena Spades participant count synced`
+        `[${new Date(Date.now() - 90000).toLocaleTimeString()}] CRITICAL: Arena Hearts security handshake established`,
+        `[${new Date(Date.now() - 80000).toLocaleTimeString()}] Laser grid calibration sequence: OK`,
+        `[${new Date(Date.now() - 70000).toLocaleTimeString()}] VISA validation engine active`,
+        `[${new Date(Date.now() - 60000).toLocaleTimeString()}] WARNING: Player 492 pulse elevated`,
+        `[${new Date(Date.now() - 50000).toLocaleTimeString()}] System check complete. Grid stable.`,
+        `[${new Date(Date.now() - 40000).toLocaleTimeString()}] Arena Spades participant count synced`,
+        `[${new Date(Date.now() - 30000).toLocaleTimeString()}] Bio-metric override authorized for Sector 7`,
+        `[${new Date(Date.now() - 20000).toLocaleTimeString()}] Network latency within operational limits (12ms)`,
+        `[${new Date(Date.now() - 10000).toLocaleTimeString()}] Admin session heartbeat: DETECTED`,
+        `[${new Date().toLocaleTimeString()}] Ready for deployment. All systems NOMINAL.`
     ]);
     const [activeView, setActiveView] = useState<'dashboard' | 'players' | 'masters' | 'spades' | 'clubs' | 'diamonds' | 'hearts'>('dashboard');
     const [roundMonitorPage, setRoundMonitorPage] = useState<Record<string, number>>({});
@@ -95,11 +195,87 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         transition: { duration: 0.24, ease: 'easeOut' as const },
     } as const;
 
+    const suitHexColor = (id: string) =>
+        id === 'clubs' ? '#22c55e' : id === 'spades' ? '#3b82f6' : id === 'diamonds' ? '#a855f7' : '#ef4444';
+
     const sectionRise = {
         initial: { opacity: 0, y: 20 },
         animate: { opacity: 1, y: 0 },
         transition: { duration: 0.28, ease: 'easeOut' as const },
     } as const;
+
+    // Real-time System Logs for player activity
+    useEffect(() => {
+        const fetchInitialLogs = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('system_logs')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(30);
+
+                if (error) {
+                    console.error("[ADMIN] Log Fetch Error:", error);
+                    return;
+                }
+
+                if (data && data.length > 0) {
+                    const dbLogs = data.map(log => `[${new Date(log.created_at).toLocaleTimeString()}] ${log.message}`);
+                    setSystemLogs(prev => {
+                        // Merge and keep total count under 50
+                        const combined = [...dbLogs, ...prev];
+                        return Array.from(new Set(combined)).slice(0, 50);
+                    });
+                }
+            } catch (err) {
+                console.warn("[ADMIN] Could not reach system_logs table.");
+            }
+        };
+
+        fetchInitialLogs();
+
+        // 1. Database Table Listener
+        const dbChannel = supabase.channel('system_logs_db')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_logs' }, (payload) => {
+                const newLog = payload.new as any;
+                const time = new Date(newLog.created_at).toLocaleTimeString();
+                const msg = `[${time}] ${newLog.message}`;
+                setSystemLogs(prev => [msg, ...prev].slice(0, 50));
+            })
+            .subscribe();
+
+        // 2. Direct Broadcast Fallback (Instant, doesn't wait for DB replication)
+        const broadcastChannel = supabase.channel('admin_signals')
+            .on('broadcast', { event: 'player_entry' }, (payload) => {
+                const time = new Date().toLocaleTimeString();
+                const msg = `[${time}] ${payload.payload.message}`;
+                setSystemLogs(prev => [msg, ...prev].slice(0, 50));
+            })
+            .subscribe();
+
+        // 3. Profiles Listener (Wins/Losses)
+        const profileChannel = supabase.channel('profile_updates')
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload) => {
+                const newData = payload.new as any;
+                const oldData = payload.old as any;
+                if (!newData.username) return;
+
+                const time = new Date().toLocaleTimeString();
+                let msg = "";
+                if (newData.visa_points !== oldData.visa_points) msg = `[${time}] Player "${newData.username}" visa updated: ${newData.visa_points}`;
+                else if (newData.wins !== oldData.wins) msg = `[${time}] Player "${newData.username}" RECORDED A VICTORY`;
+                else if (newData.losses !== oldData.losses) msg = `[${time}] Player "${newData.username}" recorded a casualty (LOSS)`;
+
+                if (msg) setSystemLogs(prev => [msg, ...prev].slice(0, 50));
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(dbChannel);
+            supabase.removeChannel(broadcastChannel);
+            supabase.removeChannel(profileChannel);
+        };
+    }, []);
 
     const sectionFloat = {
         initial: { opacity: 0, scale: 0.96, y: 10 },
@@ -215,22 +391,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     // Generate live logins logs by others in real-time
 
 
-
-    // Generate live logins logs by others in real-time
-    useEffect(() => {
-        if (!players || players.length === 0) return;
-        const interval = setInterval(() => {
-            const playerCandidates = players.filter(p => p.role === 'player' && p.visa_points !== null && p.visa_points !== undefined && p.visa_points >= 0);
-            if (playerCandidates.length === 0) return;
-            const randomPlayer = playerCandidates[Math.floor(Math.random() * playerCandidates.length)];
-            const timeStr = new Date().toLocaleTimeString();
-            const arenas = ['SPADES', 'CLUBS', 'DIAMONDS', 'HEARTS', 'LOBBY'];
-            const randomArena = arenas[Math.floor(Math.random() * arenas.length)];
-            const newLog = `[${timeStr}] Player "${randomPlayer.username}" logged in to Arena ${randomArena}`;
-            setSystemLogs(prev => [newLog, ...prev.slice(0, 49)]);
-        }, 6000);
-        return () => clearInterval(interval);
-    }, [players]);
 
     const handleEmergencyPurgeToggle = async () => {
         try {
@@ -1756,7 +1916,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     ].map((item, itemIdx) => (
                         <motion.button
                             key={`nav-${getStableKey(item.id, String(itemIdx))}`}
-                            onClick={() => { setActiveView(item.id as any); setSelectedPlayers([]); setIsSidebarOpen(false); }}
+                            onClick={() => { navigateToView(item.id as any); setSelectedPlayers([]); setIsSidebarOpen(false); }}
                             title={item.label}
                             whileTap={{ scale: 0.97 }}
                             className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} px-4 py-3 rounded text-base tracking-wider border transition-colors duration-200 ${activeView === item.id ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}` : 'text-gray-400 hover:bg-white/5 hover:text-white border-transparent'}`}
@@ -1774,7 +1934,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {suits.map((suit, i) => (
                             <motion.button
                                 key={getStableKey(suit.id, `suit-${i}`)}
-                                onClick={() => { setActiveView(suit.id as any); setIsSidebarOpen(false); }}
+                                onClick={() => { navigateToView(suit.id as any); setIsSidebarOpen(false); }}
                                 whileHover={isSidebarCollapsed ? {} : { x: 4 }}
                                 whileTap={{ scale: 0.97 }}
                                 title={`${suit.name} — ${suit.type}`}
@@ -1815,7 +1975,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         title={adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}
                         className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'} gap-2 px-2 py-2.5 sm:px-3 sm:py-3 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer`}
                     >
-                        <Settings size={18} className="text-gray-400 shrink-0" />
+                        <User size={18} className="text-gray-400 shrink-0" />
                         {!isSidebarCollapsed && (
                             <>
                                 <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}</span>
@@ -1888,8 +2048,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'clubs' && (
                             <div className="flex items-center gap-4 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`text-xl font-bold ${clubsGameStatus.is_active ? 'text-green-500' : 'text-gray-500'}`}>♣</span>
-                                    {clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    <span className="text-xl font-bold text-green-500">♣</span>
+                                    <span className={clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'text-yellow-400' : 'text-green-500') : 'text-green-500'}>
+                                        {clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    </span>
                                 </span>
                                 <span className="text-gray-600">|</span>
                                 <span className="text-cyan-400">ROUND {clubsGameStatus.current_round}/6</span>
@@ -1900,8 +2062,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'spades' && (
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`text-xl font-bold ${spadesGameStatus.is_active ? 'text-blue-500' : 'text-gray-500'}`}>♠</span>
-                                    {spadesGameStatus.is_active ? (spadesGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    <span className="text-xl font-bold text-blue-500">♠</span>
+                                    <span className={spadesGameStatus.is_active ? (spadesGameStatus.is_paused ? 'text-yellow-400' : 'text-blue-500') : 'text-blue-500'}>
+                                        {spadesGameStatus.is_active ? (spadesGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    </span>
                                 </span>
                                 <span className="text-gray-600">|</span>
                                 <span className="text-blue-400 uppercase">{spadesTimerDisplay}</span>
@@ -1910,8 +2074,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'diamonds' && (
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`text-xl font-bold ${diamondsGameStatus.is_active ? 'text-purple-500' : 'text-gray-500'}`}>♦</span>
-                                    {diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    <span className="text-xl font-bold text-purple-500">♦</span>
+                                    <span className={diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'text-yellow-400' : 'text-purple-500') : 'text-purple-500'}>
+                                        {diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    </span>
                                 </span>
                                 <span className="text-gray-600">|</span>
                                 <span className="text-purple-400">ROUND {diamondsGameStatus.current_round}/5</span>
@@ -1920,8 +2086,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         {activeView === 'hearts' && (
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
-                                    <span className={`text-xl font-bold ${heartsGameStatus.is_active ? 'text-red-500' : 'text-gray-500'}`}>♥</span>
-                                    {heartsGameStatus.is_active ? (heartsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    <span className="text-xl font-bold text-red-500">♥</span>
+                                    <span className={heartsGameStatus.is_active ? (heartsGameStatus.is_paused ? 'text-yellow-400' : 'text-red-500') : 'text-red-500'}>
+                                        {heartsGameStatus.is_active ? (heartsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    </span>
                                 </span>
                             </div>
                         )}
@@ -1929,8 +2097,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                         <div className="flex items-center flex-wrap justify-center sm:justify-end gap-1.5 sm:gap-2 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-4 w-full sm:w-auto">
                             <span className="flex items-center gap-1.5 text-[8px] sm:text-[12px] lg:text-[13px] font-mono">
                                 <span className={`w-2 h-2 rounded-full animate-pulse ${networkPing === null ? 'bg-gray-500' :
-                                    networkPing < 100 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' :
-                                        networkPing < 300 ? 'bg-yellow-500 shadow-[0_0_8px_#eab308]' :
+                                    networkPing < 300 ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' :
+                                        networkPing < 700 ? 'bg-yellow-500 shadow-[0_0_8px_#eab308]' :
                                             'bg-red-500 shadow-[0_0_8px_#ef4444]'
                                     }`} />
                                 {networkPing !== null ? `${networkPing}ms` : '...'}
@@ -2000,9 +2168,9 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
                                 {/* Four Arena Status Grid */}
                                 <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col">
-                                    <div className="flex items-center gap-2 mb-6 text-green-400">
+                                    <div className="flex items-center gap-2 mb-6 text-cyan-400">
                                         <Grid size={18} />
-                                        <h2 className="font-bold tracking-widest uppercase">ARENA STATUS GRID</h2>
+                                        <h2 className="font-bold tracking-widest uppercase">GAME PROTOCOL STATUS</h2>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
                                         {[
@@ -2084,7 +2252,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             <span className="text-[9px] text-gray-500 tracking-widest uppercase">{arena.type} · {arena.difficulty}</span>
                                                         </div>
                                                     </div>
-                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-mono tracking-widest ${arena.active ? (arena.gameState === 'PAUSED' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20') : 'bg-gray-800 text-gray-500'}`}>
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-mono tracking-widest ${arena.active ? (arena.gameState === 'PAUSED' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20') : 'border'}`} style={!arena.active ? { color: suitHexColor(arena.suit.toLowerCase()), borderColor: `${suitHexColor(arena.suit.toLowerCase())}40` } : undefined}>
                                                         {arena.gameState}
                                                     </span>
                                                 </div>
@@ -2127,21 +2295,35 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         <Database size={18} />
                                         <h2 className="font-bold tracking-widest">SYSTEM LOGS</h2>
                                     </div>
-                                    <div className="space-y-2 font-mono text-xs max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
-                                        {systemLogs.map((log, i) => {
-                                            const timeMatch = log.match(/^\[(.*?)\]/);
-                                            const time = timeMatch ? timeMatch[1] : '';
-                                            const message = log.replace(/^\[.*?\]\s*/, '');
-                                            const isWarning = /warning|critical/i.test(log);
-                                            return (
-                                                <div key={getStableKey(`${time}-${message.slice(0, 50)}`, `system-log-${i}`)} className="flex gap-2 border-b border-white/5 pb-2">
-                                                    <span className="text-gray-500">[{time}]</span>
-                                                    <span className={isWarning ? 'text-red-400' : 'text-green-400'}>
-                                                        {message}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
+                                    <div className="max-h-[450px] overflow-y-auto pr-2 admin-scrollbar">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead className="sticky top-0 bg-[#0a0a0a] z-10">
+                                                <tr className="border-b border-white/10">
+                                                    <th className="py-2 px-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest w-24">Timestamp</th>
+                                                    <th className="py-2 px-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Protocol Signal / Message</th>
+                                                    <th className="py-2 px-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest w-16 text-right">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-white/5 font-mono text-[10px]">
+                                                {systemLogs.map((log, i) => {
+                                                    const timeMatch = log.match(/^\[(.*?)\]/);
+                                                    const time = timeMatch ? timeMatch[1] : '';
+                                                    const message = log.replace(/^\[.*?\]\s*/, '');
+                                                    const isWarning = /warning|critical/i.test(log);
+                                                    return (
+                                                        <tr key={getStableKey(`${time}-${message.slice(0, 50)}`, `system-log-${i}`)} className="group hover:bg-white/[0.02] transition-colors">
+                                                            <td className="py-2 px-1 text-gray-500">[{time}]</td>
+                                                            <td className={`py-2 px-1 ${isWarning ? 'text-red-400' : 'text-green-400'}`}>
+                                                                {message}
+                                                            </td>
+                                                            <td className="py-2 px-1 text-right">
+                                                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${isWarning ? 'bg-red-500 animate-pulse' : 'bg-green-500 opacity-50'}`} />
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -2364,7 +2546,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black text-green-500 uppercase leading-none tracking-wider">
+                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? '#eab308' : '#22c55e') : '#22c55e' }}>
                                                                 {(() => {
                                                                     const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
                                                                     if (p === 'setup_phase1') return 'SETUP';
@@ -2509,7 +2691,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black text-blue-500 uppercase leading-none tracking-wider">
+                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: spadesGameStatus?.system_start ? (spadesGameStatus?.is_paused ? '#eab308' : '#3b82f6') : '#3b82f6' }}>
                                                                 {spadesGameStatus?.is_active && spadesGameStatus?.phase ? spadesGameStatus.phase.replace('_', ' ') : 'IDLE'}
                                                             </div>
                                                         </div>
@@ -2647,7 +2829,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-lg sm:text-xl font-display font-black text-purple-400 uppercase leading-none tracking-wider">
+                                                            <div className="text-lg sm:text-xl font-display font-black uppercase leading-none tracking-wider" style={{ color: diamondsGameStatus?.system_start ? (diamondsGameStatus?.is_paused ? '#eab308' : '#a855f7') : '#a855f7' }}>
                                                                 {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
                                                             </div>
                                                         </div>
@@ -2740,7 +2922,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black text-red-500 uppercase leading-none tracking-wider">
+                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? '#eab308' : '#ef4444') : '#ef4444' }}>
                                                                 {heartsGameStatus.phase || 'IDLE'}
                                                             </div>
                                                         </div>
@@ -2945,7 +3127,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         {/* Right: Communication Intelligence (Chat) */}
                                         <div className="flex-1 w-full space-y-6 min-w-0">
                                             <div className="flex justify-between items-center mb-6">
-                                                <h3 className={`text-sm font-bold tracking-widest uppercase flex items-center gap-2 ${suit.id === 'hearts' ? 'text-red-500' : 'text-green-400'}`}>
+                                                <h3 className="text-sm font-bold tracking-widest uppercase flex items-center gap-2" style={{ color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444' }}>
                                                     <Radio size={16} className="animate-pulse" /> COM INTELLIGENCE
                                                     {(suit.id === 'clubs' ? clubsFilterUserId : null) && (
                                                         <button
@@ -2956,6 +3138,23 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         </button>
                                                     )}
                                                 </h3>
+                                                <button
+                                                    onClick={() => {
+                                                        const current = getEffectiveViewMode(suit.id);
+                                                        const modes = suit.id === 'clubs' ? ['chat', 'bar', 'pie', 'line'] : ['bar', 'pie', 'line'];
+                                                        const idx = modes.indexOf(current);
+                                                        const next = modes[(idx + 1) % modes.length] as 'chat' | 'bar' | 'pie' | 'line';
+                                                        setViewMode(suit.id, next);
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-white/10"
+                                                    style={{
+                                                        borderColor: `${suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444'}40`,
+                                                        color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444',
+                                                    }}
+                                                >
+                                                    {getEffectiveViewMode(suit.id) === 'bar' ? <><PieChartIcon size={14} /> PIE</> : getEffectiveViewMode(suit.id) === 'pie' ? <><Activity size={14} /> LINE</> : <><BarChart3 size={14} /> CHARTS</>}
+                                                </button>
+
                                                 <div className="flex flex-col xl:flex-row items-end xl:items-center gap-3">
                                                     {/* Mode Switcher */}
                                                     {suit.id === 'clubs' && (
@@ -3021,9 +3220,18 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         )}
 
                                                         <div className="flex-1 sm:flex-none flex items-center bg-white/5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border border-white/10 shadow-inner whitespace-nowrap">
-                                                            <span className="text-[10px] sm:text-xs text-gray-500 font-mono font-bold uppercase tracking-widest mr-2">LOGS:</span>
+                                                            <span className="text-[10px] sm:text-xs text-gray-500 font-mono font-bold uppercase tracking-widest mr-2">BARS:</span>
                                                             <span className="text-white text-sm sm:text-lg font-black tracking-tighter">
-                                                                {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => !m.is_system).length}
+                                                                {(() => {
+                                                                    const mode = getEffectiveViewMode(suit.id);
+                                                                    const allPlayerProfiles = players.filter((p: any) => p.role === 'player');
+                                                                    const gamePlayers = allPlayerProfiles.filter((p: any) => p.game_type?.toLowerCase() === suit.id);
+                                                                    const displayPlayers = gamePlayers.length > 0 ? gamePlayers : allPlayerProfiles;
+                                                                    if (mode === 'pie') return displayPlayers.length;
+                                                                    if (mode === 'bar') return Math.min(PLAYERS_PER_CHART_PAGE, Math.max(0, displayPlayers.length - getChartPlayerPage(suit.id) * PLAYERS_PER_CHART_PAGE));
+                                                                    if (mode === 'line') return Math.min(PLAYERS_PER_CHART_PAGE, Math.max(0, allPlayerProfiles.filter((p: any) => (p.visa_points ?? 0) > 0).length - getChartPlayerPage(suit.id) * PLAYERS_PER_CHART_PAGE));
+                                                                    return 0;
+                                                                })()}
                                                             </span>
                                                         </div>
 
@@ -3037,128 +3245,349 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
 
-                                            <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden backdrop-blur-sm flex flex-col h-[400px] lg:h-[500px]">
-                                                {/* Search Bar */}
-                                                <div className="p-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">
-                                                    <Search size={14} className="text-gray-500" />
-                                                    <input
-                                                        type="text"
-                                                        value={suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery}
-                                                        onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : suit.id === 'hearts' ? setHeartsSearchQuery(e.target.value) : suit.id === 'spades' ? setSpadesSearchQuery(e.target.value) : setDiamondsSearchQuery(e.target.value)}
-                                                        placeholder="Search transcripts..."
-                                                        className="bg-transparent border-none outline-none text-sm font-mono text-white placeholder:text-white/10 w-full"
-                                                    />
-                                                </div>
+                                            {getEffectiveViewMode(suit.id) === 'chat' ? (
+                                                <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden backdrop-blur-sm flex flex-col h-[400px] lg:h-[500px]">
+                                                    {/* Search Bar */}
+                                                    <div className="p-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-3">
+                                                        <Search size={14} className="text-gray-500" />
+                                                        <input
+                                                            type="text"
+                                                            value={suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery}
+                                                            onChange={(e) => suit.id === 'clubs' ? setClubsSearchQuery(e.target.value) : suit.id === 'hearts' ? setHeartsSearchQuery(e.target.value) : suit.id === 'spades' ? setSpadesSearchQuery(e.target.value) : setDiamondsSearchQuery(e.target.value)}
+                                                            placeholder="Search transcripts..."
+                                                            className="bg-transparent border-none outline-none text-sm font-mono text-white placeholder:text-white/10 w-full"
+                                                        />
+                                                    </div>
 
-                                                <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
-                                                    {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
-                                                        const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
-                                                        const matchesSearch = !query ||
-                                                            m.content?.toLowerCase().includes(query.toLowerCase()) ||
-                                                            m.user_name?.toLowerCase().includes(query.toLowerCase());
-                                                        const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true; // Hearts doesn't have user filter
-                                                        const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true; // Hearts doesn't have comms mode
-                                                        return matchesSearch && matchesUser && matchesMode && !m.is_system;
-                                                    }).length === 0 ? (
-                                                        <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-600 font-mono text-xs uppercase tracking-[0.2em] text-center p-8">
-                                                            <Database size={32} className="opacity-20 mb-2" />
-                                                            <div className="space-y-1">
-                                                                <p>{(suit.id === 'clubs' ? clubsSearchQuery || clubsFilterUserId : heartsSearchQuery) ? 'No transcripts match criteria' : 'Awaiting Signal Broadcast...'}</p>
-                                                                {suit.id === 'clubs' && clubsFilterUserId && (
-                                                                    <button
-                                                                        onClick={() => setClubsFilterUserId(null)}
-                                                                        className="text-[10px] text-green-500 hover:text-green-400 font-black uppercase tracking-widest"
-                                                                    >
-                                                                        [ RESET USER FILTER ]
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        (suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 admin-scrollbar">
+                                                        {(suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
                                                             const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
                                                             const matchesSearch = !query ||
                                                                 m.content?.toLowerCase().includes(query.toLowerCase()) ||
                                                                 m.user_name?.toLowerCase().includes(query.toLowerCase());
-                                                            const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true;
-                                                            const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true;
+                                                            const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true; // Hearts doesn't have user filter
+                                                            const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true; // Hearts doesn't have comms mode
                                                             return matchesSearch && matchesUser && matchesMode && !m.is_system;
-                                                        }).map((msg, idx) => (
-                                                            <div key={getStableKey(msg.id, `${suit.id}-msg-${idx}-${msg.user_id || msg.user_name || String(msg.content || '').slice(0, 20)}`)} className="group border-b border-white/5 pb-3">
-                                                                <div className="flex justify-between items-start mb-1">
-                                                                    <div className="flex items-center gap-2">
-                                                                        {suit.id === 'clubs' ? (
-                                                                            <button
-                                                                                onClick={() => {
-                                                                                    const cleanName = msg.user_name?.trim();
-                                                                                    const cleanNameLower = cleanName?.toLowerCase();
-                                                                                    const mappedId = clubsIDMap[cleanName] || clubsIDMap[cleanNameLower]; // Lookup by name since IDMap is name-keyed
-
-                                                                                    if (msg.user_id) {
-                                                                                        // Set tracking with partial data + correct ID
-                                                                                        setTrackingPlayer({
-                                                                                            id: msg.user_id,
-                                                                                            name: msg.user_name || 'UNKNOWN',
-                                                                                            displayId: mappedId || 'UNKNOWN'
-                                                                                        });
-                                                                                        setClubsFilterUserId(msg.user_id);
-                                                                                    }
-                                                                                }}
-                                                                                className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.is_system
-                                                                                    ? 'bg-red-500 text-white'
-                                                                                    : (players.find(p => p.id === msg.user_id)?.role === 'master')
-                                                                                        ? 'text-yellow-500 hover:bg-yellow-500/10'
-                                                                                        : 'text-cyan-400 hover:bg-cyan-400/10'
-                                                                                    }`}
-                                                                            >
-                                                                                {(() => {
-                                                                                    const cleanName = msg.user_name?.trim();
-                                                                                    const cleanNameLower = cleanName?.toLowerCase();
-                                                                                    // Source: Supabase Profile Map (Matches Player View)
-                                                                                    const mapped = clubsIDMap[msg.user_id] || (cleanName ? clubsIDMap[cleanName] : undefined) || (cleanNameLower ? clubsIDMap[cleanNameLower] : undefined);
-
-                                                                                    const name = msg.user_name || 'UNKNOWN';
-
-                                                                                    if (mapped && name.includes(mapped)) return name;
-                                                                                    return mapped ? `${mapped} [${name}]` : name;
-                                                                                })()}
-                                                                            </button>
-                                                                        ) : (
-                                                                            <span className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.channel === 'master' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                                                                                {msg.user_name}
-                                                                            </span>
-                                                                        )}
-                                                                        <span className="text-xs text-gray-500 font-mono">
-                                                                            {new Date(msg.created_at).toLocaleTimeString()}
-                                                                        </span>
-                                                                    </div>
-                                                                    <button
-                                                                        onClick={() => handleDeleteMessage(msg.id, suit.id)}
-                                                                        className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-500 transition-all p-1"
-                                                                        title="Purge Transcript"
-                                                                    >
-                                                                        <Trash2 size={12} />
-                                                                    </button>
+                                                        }).length === 0 ? (
+                                                            <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-600 font-mono text-xs uppercase tracking-[0.2em] text-center p-8">
+                                                                <Database size={32} className="opacity-20 mb-2" />
+                                                                <div className="space-y-1">
+                                                                    <p>{(suit.id === 'clubs' ? clubsSearchQuery || clubsFilterUserId : heartsSearchQuery) ? 'No transcripts match criteria' : 'Awaiting Signal Broadcast...'}</p>
+                                                                    {suit.id === 'clubs' && clubsFilterUserId && (
+                                                                        <button
+                                                                            onClick={() => setClubsFilterUserId(null)}
+                                                                            className="text-[10px] text-green-500 hover:text-green-400 font-black uppercase tracking-widest"
+                                                                        >
+                                                                            [ RESET USER FILTER ]
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                                <p className={`text-base font-mono break-words leading-relaxed tracking-wide ${msg.is_system ? 'text-gray-500 italic text-sm' : 'text-gray-100'}`}>
-                                                                    {msg.content}
-                                                                </p>
                                                             </div>
-                                                        ))
-                                                    )}
+                                                        ) : (
+                                                            (suit.id === 'clubs' ? clubsMessages : suit.id === 'hearts' ? heartsMessages : suit.id === 'spades' ? spadesMessages : diamondsMessages).filter(m => {
+                                                                const query = suit.id === 'clubs' ? clubsSearchQuery : suit.id === 'hearts' ? heartsSearchQuery : suit.id === 'spades' ? spadesSearchQuery : diamondsSearchQuery;
+                                                                const matchesSearch = !query ||
+                                                                    m.content?.toLowerCase().includes(query.toLowerCase()) ||
+                                                                    m.user_name?.toLowerCase().includes(query.toLowerCase());
+                                                                const matchesUser = suit.id === 'clubs' ? (!clubsFilterUserId || m.user_id === clubsFilterUserId) : true;
+                                                                const matchesMode = suit.id === 'clubs' ? (clubsCommsMode === 'all' || m.channel === clubsCommsMode) : true;
+                                                                return matchesSearch && matchesUser && matchesMode && !m.is_system;
+                                                            }).map((msg, idx) => (
+                                                                <div key={getStableKey(msg.id, `${suit.id}-msg-${idx}-${msg.user_id || msg.user_name || String(msg.content || '').slice(0, 20)}`)} className="group border-b border-white/5 pb-3">
+                                                                    <div className="flex justify-between items-start mb-1">
+                                                                        <div className="flex items-center gap-2">
+                                                                            {suit.id === 'clubs' ? (
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const cleanName = msg.user_name?.trim();
+                                                                                        const cleanNameLower = cleanName?.toLowerCase();
+                                                                                        const mappedId = clubsIDMap[cleanName] || clubsIDMap[cleanNameLower]; // Lookup by name since IDMap is name-keyed
+
+                                                                                        if (msg.user_id) {
+                                                                                            // Set tracking with partial data + correct ID
+                                                                                            setTrackingPlayer({
+                                                                                                id: msg.user_id,
+                                                                                                name: msg.user_name || 'UNKNOWN',
+                                                                                                displayId: mappedId || 'UNKNOWN'
+                                                                                            });
+                                                                                            setClubsFilterUserId(msg.user_id);
+                                                                                        }
+                                                                                    }}
+                                                                                    className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.is_system
+                                                                                        ? 'bg-red-500 text-white'
+                                                                                        : (players.find(p => p.id === msg.user_id)?.role === 'master')
+                                                                                            ? 'text-yellow-500 hover:bg-yellow-500/10'
+                                                                                            : 'text-cyan-400 hover:bg-cyan-400/10'
+                                                                                        }`}
+                                                                                >
+                                                                                    {(() => {
+                                                                                        const cleanName = msg.user_name?.trim();
+                                                                                        const cleanNameLower = cleanName?.toLowerCase();
+                                                                                        // Source: Supabase Profile Map (Matches Player View)
+                                                                                        const mapped = clubsIDMap[msg.user_id] || (cleanName ? clubsIDMap[cleanName] : undefined) || (cleanNameLower ? clubsIDMap[cleanNameLower] : undefined);
+
+                                                                                        const name = msg.user_name || 'UNKNOWN';
+
+                                                                                        if (mapped && name.includes(mapped)) return name;
+                                                                                        return mapped ? `${mapped} [${name}]` : name;
+                                                                                    })()}
+                                                                                </button>
+                                                                            ) : (
+                                                                                <span className={`text-xs font-bold tracking-widest uppercase px-1.5 py-0.5 rounded ${msg.channel === 'master' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                                                                    {msg.user_name}
+                                                                                </span>
+                                                                            )}
+                                                                            <span className="text-xs text-gray-500 font-mono">
+                                                                                {new Date(msg.created_at).toLocaleTimeString()}
+                                                                            </span>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => handleDeleteMessage(msg.id, suit.id)}
+                                                                            className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-500 transition-all p-1"
+                                                                            title="Purge Transcript"
+                                                                        >
+                                                                            <Trash2 size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                    <p className={`text-base font-mono break-words leading-relaxed tracking-wide ${msg.is_system ? 'text-gray-500 italic text-sm' : 'text-gray-100'}`}>
+                                                                        {msg.content}
+                                                                    </p>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                    <div className="p-3 bg-white/5 border-t border-white/10 text-[9px] text-gray-500 font-mono flex justify-between">
+                                                        <span>ENCRYPTION: AES-256-GCM</span>
+                                                        <span>SIGNAL INTENSITY: 98%</span>
+                                                    </div>
                                                 </div>
-                                                <div className="p-3 bg-white/5 border-t border-white/10 text-[9px] text-gray-500 font-mono flex justify-between">
-                                                    <span>ENCRYPTION: AES-256-GCM</span>
-                                                    <span>SIGNAL INTENSITY: 98%</span>
+                                            ) : (
+                                                <div className="bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col h-[400px] lg:h-[500px] overflow-y-auto admin-scrollbar">
+                                                    {(() => {
+                                                        const suitColor = suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444';
+                                                        const suitGlow = suit.id === 'clubs' ? 'rgba(34,197,94,' : suit.id === 'spades' ? 'rgba(59,130,246,' : suit.id === 'diamonds' ? 'rgba(168,85,247,' : 'rgba(239,68,68,';
+
+                                                        // Filter profiles to this game's players (show all players if none assigned to this game)
+                                                        const allPlayerProfiles = players.filter(p => p.role === 'player');
+                                                        const gamePlayers = allPlayerProfiles.filter(p =>
+                                                            p.game_type?.toLowerCase() === suit.id
+                                                        );
+                                                        // If no players assigned to this game, show all players
+                                                        const displayPlayers = gamePlayers.length > 0 ? gamePlayers : allPlayerProfiles;
+                                                        const totalRegistered = allPlayerProfiles.length;
+                                                        const gameCount = displayPlayers.length;
+                                                        const maxVisa = totalRegistered > 0 ? Math.max(...allPlayerProfiles.filter(p => p.visa_points != null).map(p => p.visa_points as number), 1) : 1;
+
+                                                        // Bar chart: profiles stats
+                                                        const withWins = displayPlayers.filter(p => (p.wins ?? 0) > 0).length;
+                                                        const withLosses = displayPlayers.filter(p => (p.losses ?? 0) > 0).length;
+                                                        const avgVisa = gameCount > 0 ? Math.round(displayPlayers.reduce((a, p) => a + (p.visa_points ?? 0), 0) / gameCount) : 0;
+                                                        const avgWins = gameCount > 0 ? (displayPlayers.reduce((a, p) => a + (p.wins ?? 0), 0) / gameCount) : 0;
+                                                        const avgLosses = gameCount > 0 ? (displayPlayers.reduce((a, p) => a + (p.losses ?? 0), 0) / gameCount) : 0;
+
+                                                        // Pie outer: per-player segments (defined below)
+
+                                                        // Suit-specific color palettes
+                                                        const suitPalettes: Record<string, { outer: string[]; inner: string[]; glow: string }> = {
+                                                            clubs: {
+                                                                outer: ['#166534', '#15803d', '#22c55e', '#86efac'],
+                                                                inner: ['#166534', '#22c55e', '#4ade80'],
+                                                                glow: 'rgba(34,197,94,',
+                                                            },
+                                                            spades: {
+                                                                outer: ['#1e3a8a', '#1e40af', '#3b82f6', '#93c5fd'],
+                                                                inner: ['#1e3a8a', '#3b82f6', '#60a5fa'],
+                                                                glow: 'rgba(59,130,246,',
+                                                            },
+                                                            diamonds: {
+                                                                outer: ['#6b21a8', '#7e22ce', '#a855f7', '#d8b4fe'],
+                                                                inner: ['#6b21a8', '#a855f7', '#c084fc'],
+                                                                glow: 'rgba(168,85,247,',
+                                                            },
+                                                            hearts: {
+                                                                outer: ['#991b1b', '#dc2626', '#ef4444', '#fca5a5'],
+                                                                inner: ['#991b1b', '#ef4444', '#f87171'],
+                                                                glow: 'rgba(239,68,68,',
+                                                            },
+                                                        };
+                                                        const palette = suitPalettes[suit.id] || suitPalettes.clubs;
+
+                                                        // Pie outer: per-player, sized by visa_points, ordered by updated_at (most recent first)
+                                                        const piePlayers = [...displayPlayers]
+                                                            .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
+
+                                                        const pieSegments = piePlayers.map((p, i) => ({
+                                                            label: p.username || `Player ${i + 1}`,
+                                                            value: Math.max(1, p.visa_points ?? 0),
+                                                            color: palette.outer[i % palette.outer.length],
+                                                            glowColor: `${palette.glow}0.7)`,
+                                                        })).filter(s => s.value > 0);
+
+                                                        // Pie inner: total wins vs total losses across all players
+                                                        const totalWins = allPlayerProfiles.reduce((a, p) => a + (p.wins ?? 0), 0);
+                                                        const totalLosses = allPlayerProfiles.reduce((a, p) => a + (p.losses ?? 0), 0);
+
+                                                        const innerSegments = [
+                                                            { label: 'WINS', value: totalWins, color: palette.inner[0], glowColor: `${palette.glow}0.8)` },
+                                                            { label: 'LOSSES', value: totalLosses, color: palette.inner[1], glowColor: `${palette.glow}0.6)` },
+                                                        ].filter(s => s.value > 0);
+
+                                                        // Get all players sorted by visa_points (top) then created_at
+                                                        const allSortedPlayers = allPlayerProfiles
+                                                            .filter(p => (p.visa_points ?? 0) > 0)
+                                                            .sort((a, b) => (b.visa_points ?? 0) - (a.visa_points ?? 0));
+
+                                                        const totalPlayers = allSortedPlayers.length;
+                                                        const totalPages = Math.max(
+                                                            Math.ceil(totalPlayers / PLAYERS_PER_CHART_PAGE),
+                                                            Math.ceil(displayPlayers.length / PLAYERS_PER_CHART_PAGE)
+                                                        );
+                                                        const currentPage = getChartPlayerPage(suit.id);
+                                                        const paginatedPlayers = allSortedPlayers.slice(
+                                                            currentPage * PLAYERS_PER_CHART_PAGE,
+                                                            (currentPage + 1) * PLAYERS_PER_CHART_PAGE
+                                                        );
+
+                                                        // Line chart data - 7 players by rank
+                                                        const lineChartData = paginatedPlayers.map((p, index) => ({
+                                                            rank: currentPage * PLAYERS_PER_CHART_PAGE + index + 1,
+                                                            name: p.username || `Player ${index + 1}`,
+                                                            visa_points: p.visa_points ?? 0,
+                                                            wins: p.wins ?? 0,
+                                                            losses: p.losses ?? 0,
+                                                        }));
+
+                                                        // Bar chart data - per player, arranged by name, 7 per page (shows each player's updated_at)
+                                                        const barPlayers = [...displayPlayers]
+                                                            .sort((a, b) => (a.username || '').localeCompare(b.username || ''));
+
+                                                        const barTotalPages = Math.ceil(barPlayers.length / PLAYERS_PER_CHART_PAGE);
+                                                        const barStart = currentPage * PLAYERS_PER_CHART_PAGE;
+                                                        const barPagePlayers = barPlayers.slice(barStart, barStart + PLAYERS_PER_CHART_PAGE);
+
+                                                        const barData = barPagePlayers.map((p, i) => ({
+                                                            label: p.username || `Player ${i + 1}`,
+                                                            value: Math.max(0, p.visa_points ?? 0),
+                                                            color: palette.outer[(barStart + i) % palette.outer.length],
+                                                            updatedAt: p.updated_at ? new Date(p.updated_at).toLocaleString() : '—',
+                                                        }));
+
+                                                        // Player list for tooltip
+                                                        const playerNames = paginatedPlayers.map((p, i) => `#${currentPage * PLAYERS_PER_CHART_PAGE + i + 1} ${p.username || 'Unknown'}`).join(' | ');
+
+                                                        return (
+                                                            <div className="flex flex-col items-center justify-center h-full gap-4">
+                                                                <div className="w-full flex items-center justify-between mb-2 min-h-[48px]">
+                                                                    <h4 className="text-sm font-bold tracking-widest uppercase text-gray-400 flex items-center gap-2">
+                                                                        {getEffectiveViewMode(suit.id) === 'bar' ? <BarChart3 size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'pie' ? <PieChartIcon size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'line' ? <Activity size={16} className="text-gray-500" /> : <Radio size={16} className="text-gray-500" />}
+                                                                        PLAYER ANALYTICS
+                                                                    </h4>
+                                                                    {getEffectiveViewMode(suit.id) === 'pie' && selectedPieInfo[suit.id] && (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-2xl font-black" style={{ color: selectedPieInfo[suit.id]!.color }}>
+                                                                                {selectedPieInfo[suit.id]!.value}
+                                                                            </span>
+                                                                            <span className="text-xs font-mono text-gray-400 uppercase tracking-widest">
+                                                                                {selectedPieInfo[suit.id]!.label}
+                                                                            </span>
+                                                                            <span className="text-sm font-bold text-gray-500">
+                                                                                ({selectedPieInfo[suit.id]!.total > 0 ? ((selectedPieInfo[suit.id]!.value / selectedPieInfo[suit.id]!.total) * 100).toFixed(1) : 0}%)
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    {totalPages > 1 && getEffectiveViewMode(suit.id) !== 'pie' && (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <button
+                                                                                onClick={() => setChartPlayerPageFn(suit.id, Math.max(0, currentPage - 1))}
+                                                                                disabled={currentPage === 0}
+                                                                                className="p-1.5 bg-white/5 border border-white/10 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                                                title="Previous 7 Players"
+                                                                            >
+                                                                                <ChevronLeft size={14} className="text-gray-400" />
+                                                                            </button>
+                                                                            <span className="text-[10px] font-mono text-gray-500 px-2">
+                                                                                {currentPage + 1} / {totalPages}
+                                                                            </span>
+                                                                            <button
+                                                                                onClick={() => setChartPlayerPageFn(suit.id, Math.min(totalPages - 1, currentPage + 1))}
+                                                                                disabled={currentPage >= totalPages - 1}
+                                                                                className="p-1.5 bg-white/5 border border-white/10 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                                                title="Next 7 Players"
+                                                                            >
+                                                                                <ChevronRight size={14} className="text-gray-400" />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                {getEffectiveViewMode(suit.id) === 'bar' ? (
+                                                                    <div className="w-full">
+                                                                        <MiniChart data={barData} color={suitColor} glowColor={`${suitGlow}0.5)`} />
+                                                                    </div>
+                                                                ) : getEffectiveViewMode(suit.id) === 'pie' ? (
+                                                                    <PieChart segments={pieSegments} innerSegments={innerSegments} size={320} thickness={18} onSelect={(seg, total) => setSelectedPieInfo(prev => ({ ...prev, [suit.id]: seg ? { ...seg, total } : null }))} />
+                                                                ) : getEffectiveViewMode(suit.id) === 'line' ? (
+                                                                    <div className="w-full h-full max-h-[300px]">
+                                                                        <ResponsiveContainer width="100%" height="100%">
+                                                                            <LineChart data={lineChartData.length > 0 ? lineChartData : platformData as any} margin={{ top: 20, right: 20, left: 5, bottom: 20 }}>
+                                                                                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+                                                                                <XAxis
+                                                                                    dataKey="rank"
+                                                                                    axisLine={false}
+                                                                                    tickLine={false}
+                                                                                    tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                                                                                    tickMargin={10}
+                                                                                    tickFormatter={(value) => `#${value}`}
+                                                                                />
+                                                                                <YAxis
+                                                                                    axisLine={false}
+                                                                                    tickLine={false}
+                                                                                    tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                                                                                    tickMargin={10}
+                                                                                    tickCount={6}
+                                                                                />
+                                                                                <Tooltip
+                                                                                    contentStyle={{
+                                                                                        backgroundColor: '#1a1a1a',
+                                                                                        border: '1px solid #333',
+                                                                                        borderRadius: '8px',
+                                                                                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                                                                        color: '#fff',
+                                                                                    }}
+                                                                                    cursor={{ strokeDasharray: '3 3', stroke: '#666' }}
+                                                                                />
+                                                                                <Line
+                                                                                    type="monotone"
+                                                                                    dataKey="visa_points"
+                                                                                    stroke={suitColor}
+                                                                                    strokeWidth={2}
+                                                                                    dot={false}
+                                                                                    activeDot={{
+                                                                                        r: 6,
+                                                                                        fill: suitColor,
+                                                                                        stroke: 'white',
+                                                                                        strokeWidth: 2,
+                                                                                    }}
+                                                                                />
+                                                                            </LineChart>
+                                                                        </ResponsiveContainer>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                                                        <Radio size={32} className="opacity-20 mb-2" />
+                                                                        <p className="text-xs font-mono uppercase tracking-widest">Awaiting Signal...</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
                                     </div>
                                 </motion.div >
                             );
                         })
                     }
-
 
                     {/* START GAME WAITING LIST WINDOW */}
                     <AnimatePresence key="start-presence">
@@ -3924,74 +4353,78 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 )}
             </AnimatePresence>
 
-            {showAdminCard && adminSettings && (
-                <PlayerCardModal
-                    user={adminSettings}
-                    onClose={() => setShowAdminCard(false)}
-                />
-            )}
+            {
+                showAdminCard && adminSettings && (
+                    <PlayerCardModal
+                        user={adminSettings}
+                        onClose={() => setShowAdminCard(false)}
+                    />
+                )
+            }
 
             {/* Eliminated Players Modal */}
-            {showEliminatedModal && (() => {
-                const suitColors: Record<string, { shape: string; color: string; border: string; bg: string; shadow: string; hoverBorder: string; textLight: string }> = {
-                    clubs: { shape: '♣', color: 'green', border: 'border-green-500/30', bg: 'bg-green-500/5', shadow: 'shadow-green-500/10', hoverBorder: 'hover:border-green-500/20', textLight: 'text-green-400' },
-                    spades: { shape: '♠', color: 'blue', border: 'border-blue-500/30', bg: 'bg-blue-500/5', shadow: 'shadow-blue-500/10', hoverBorder: 'hover:border-blue-500/20', textLight: 'text-blue-400' },
-                    diamonds: { shape: '♦', color: 'purple', border: 'border-purple-500/30', bg: 'bg-purple-500/5', shadow: 'shadow-purple-500/10', hoverBorder: 'hover:border-purple-500/20', textLight: 'text-purple-400' },
-                    hearts: { shape: '♥', color: 'red', border: 'border-red-500/30', bg: 'bg-red-500/5', shadow: 'shadow-red-500/10', hoverBorder: 'hover:border-red-500/20', textLight: 'text-red-400' },
-                };
-                const s = suitColors[showEliminatedModal] || suitColors.hearts;
-                return (
-                    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowEliminatedModal(null)}>
-                        <motion.div
-                            initial={sectionFloat.initial}
-                            animate={sectionFloat.animate}
-                            exit={sectionFloat.exit}
-                            transition={sectionFloat.transition}
-                            className={`bg-[#0a0a0f] ${s.border} rounded-xl w-[95vw] max-w-md shadow-2xl ${s.shadow}`}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className={`flex items-center justify-between px-5 py-3.5 border-b border-white/10 ${s.bg} rounded-t-xl`}>
-                                <div className="flex items-center gap-2.5">
-                                    <span className={`text-xl font-bold ${s.textLight}`}>{s.shape}</span>
-                                    <span className={`text-sm font-bold ${s.textLight} uppercase tracking-widest`}>{showEliminatedModal.toUpperCase()} — Eliminated</span>
-                                </div>
-                                <button onClick={() => setShowEliminatedModal(null)} className="text-gray-500 hover:text-white transition-colors text-lg leading-none">&times;</button>
-                            </div>
-                            <div className="p-5 max-h-[50vh] overflow-y-auto admin-scrollbar">
-                                {getEliminatedPlayers().length === 0 ? (
-                                    <div className="text-center text-gray-600 py-10 text-xs uppercase tracking-[0.3em] font-mono">No eliminated players</div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {getEliminatedPlayers().map((player: any, idx: number) => (
-                                            <div key={getPlayerElementKey(player, idx, 'eliminated')} className={`flex items-center gap-3 p-3 bg-white/[0.03] border border-white/[0.06] rounded-lg ${s.hoverBorder} transition-all`}>
-                                                <div className={`w-8 h-8 rounded-full ${s.bg} border ${s.border} flex items-center justify-center ${s.textLight} text-[10px] font-bold font-mono shrink-0`}>
-                                                    {(idx + 1).toString().padStart(2, '0')}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-xs font-bold text-white truncate">{player.username || player.id || 'UNKNOWN'}</div>
-                                                    <div className="text-[9px] text-gray-600 font-mono truncate">{player.id || '—'}</div>
-                                                </div>
-                                                <div className={`text-[9px] font-mono ${s.textLight}/70 uppercase shrink-0`}>
-                                                    {player.eliminated_at ? new Date(player.eliminated_at).toLocaleTimeString() : 'ELIMINATED'}
-                                                </div>
-                                            </div>
-                                        ))}
+            {
+                showEliminatedModal && (() => {
+                    const suitColors: Record<string, { shape: string; color: string; border: string; bg: string; shadow: string; hoverBorder: string; textLight: string }> = {
+                        clubs: { shape: '♣', color: 'green', border: 'border-green-500/30', bg: 'bg-green-500/5', shadow: 'shadow-green-500/10', hoverBorder: 'hover:border-green-500/20', textLight: 'text-green-400' },
+                        spades: { shape: '♠', color: 'blue', border: 'border-blue-500/30', bg: 'bg-blue-500/5', shadow: 'shadow-blue-500/10', hoverBorder: 'hover:border-blue-500/20', textLight: 'text-blue-400' },
+                        diamonds: { shape: '♦', color: 'purple', border: 'border-purple-500/30', bg: 'bg-purple-500/5', shadow: 'shadow-purple-500/10', hoverBorder: 'hover:border-purple-500/20', textLight: 'text-purple-400' },
+                        hearts: { shape: '♥', color: 'red', border: 'border-red-500/30', bg: 'bg-red-500/5', shadow: 'shadow-red-500/10', hoverBorder: 'hover:border-red-500/20', textLight: 'text-red-400' },
+                    };
+                    const s = suitColors[showEliminatedModal] || suitColors.hearts;
+                    return (
+                        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowEliminatedModal(null)}>
+                            <motion.div
+                                initial={sectionFloat.initial}
+                                animate={sectionFloat.animate}
+                                exit={sectionFloat.exit}
+                                transition={sectionFloat.transition}
+                                className={`bg-[#0a0a0f] ${s.border} rounded-xl w-[95vw] max-w-md shadow-2xl ${s.shadow}`}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className={`flex items-center justify-between px-5 py-3.5 border-b border-white/10 ${s.bg} rounded-t-xl`}>
+                                    <div className="flex items-center gap-2.5">
+                                        <span className={`text-xl font-bold ${s.textLight}`}>{s.shape}</span>
+                                        <span className={`text-sm font-bold ${s.textLight} uppercase tracking-widest`}>{showEliminatedModal.toUpperCase()} — Eliminated</span>
                                     </div>
-                                )}
-                            </div>
-                            <div className="flex justify-between items-center px-5 py-3.5 border-t border-white/10 bg-white/[0.02] rounded-b-xl">
-                                <span className="text-[10px] text-gray-600 font-mono uppercase">Total: {getEliminatedPlayers().length} player(s)</span>
-                                <button
-                                    onClick={() => setShowEliminatedModal(null)}
-                                    className="px-5 py-2 bg-white/5 border border-white/10 rounded text-xs font-bold uppercase tracking-widest text-gray-400 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
-                                >
-                                    Close
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
-                );
-            })()}
+                                    <button onClick={() => setShowEliminatedModal(null)} className="text-gray-500 hover:text-white transition-colors text-lg leading-none">&times;</button>
+                                </div>
+                                <div className="p-5 max-h-[50vh] overflow-y-auto admin-scrollbar">
+                                    {getEliminatedPlayers().length === 0 ? (
+                                        <div className="text-center text-gray-600 py-10 text-xs uppercase tracking-[0.3em] font-mono">No eliminated players</div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {getEliminatedPlayers().map((player: any, idx: number) => (
+                                                <div key={getPlayerElementKey(player, idx, 'eliminated')} className={`flex items-center gap-3 p-3 bg-white/[0.03] border border-white/[0.06] rounded-lg ${s.hoverBorder} transition-all`}>
+                                                    <div className={`w-8 h-8 rounded-full ${s.bg} border ${s.border} flex items-center justify-center ${s.textLight} text-[10px] font-bold font-mono shrink-0`}>
+                                                        {(idx + 1).toString().padStart(2, '0')}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-xs font-bold text-white truncate">{player.username || player.id || 'UNKNOWN'}</div>
+                                                        <div className="text-[9px] text-gray-600 font-mono truncate">{player.id || '—'}</div>
+                                                    </div>
+                                                    <div className={`text-[9px] font-mono ${s.textLight}/70 uppercase shrink-0`}>
+                                                        {player.eliminated_at ? new Date(player.eliminated_at).toLocaleTimeString() : 'ELIMINATED'}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex justify-between items-center px-5 py-3.5 border-t border-white/10 bg-white/[0.02] rounded-b-xl">
+                                    <span className="text-[10px] text-gray-600 font-mono uppercase">Total: {getEliminatedPlayers().length} player(s)</span>
+                                    <button
+                                        onClick={() => setShowEliminatedModal(null)}
+                                        className="px-5 py-2 bg-white/5 border border-white/10 rounded text-xs font-bold uppercase tracking-widest text-gray-400 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    );
+                })()
+            }
 
         </div >
     );

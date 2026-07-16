@@ -114,6 +114,43 @@ function AppContent() {
             console.log("APP: User Login Success:", finalUser);
             setUser(finalUser);
             setIsAdmin(userData.role === 'admin' || userData.username === 'admin' || userData.role === 'master');
+
+            // Log re-entry on refresh
+            if (userData.username && userData.role === 'player') {
+              const time = new Date().toLocaleTimeString();
+              const message = `Player "${userData.username}" re-synchronized with Arena (REFRESH)`;
+              
+              // 1. Broadcast signal (Instant)
+              supabase.channel('admin_signals').send({
+                type: 'broadcast',
+                event: 'player_entry',
+                payload: { message }
+              }).then();
+
+              // 2. Clean up old logs for this player and persist new one
+              const syncLogs = async () => {
+                try {
+                  // Delete ALL previous login/refresh logs for this specific player to keep DB clean
+                  // We do this first to ensure no duplicates exist before we insert a fresh one
+                  await supabase.from('system_logs')
+                    .delete()
+                    .eq('player_id', session.user.id)
+                    .eq('type', 'login');
+
+                  // Insert the fresh log
+                  await supabase.from('system_logs').insert({
+                    message,
+                    type: 'login',
+                    player_id: session.user.id,
+                    username: userData.username,
+                    created_at: new Date().toISOString()
+                  });
+                } catch (err) {
+                  console.warn("Log sync failed:", err);
+                }
+              };
+              syncLogs();
+            }
           } else {
             console.error("DATA CORRUPTION: USER PROFILE MISSING", error);
             setIsLoggedIn(false);

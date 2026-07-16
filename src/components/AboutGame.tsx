@@ -93,7 +93,7 @@ export const AboutGame = () => {
                         <span className="absolute top-0 left-0 text-[#00ffff] opacity-0 group-hover:opacity-60 animate-glitch blur-[1px] mix-blend-screen -z-10 translate-x-1">BEYOND</span>
                     </h2>
 
-                    <div className="space-y-6 text-gray-400 font-mono text-sm md:text-base leading-relaxed max-w-md">
+                    <div className="space-y-6 text-gray-300 font-display text-base md:text-lg leading-relaxed max-w-md tracking-wide">
                         <p>
                             ALICE is an immersive survival game platform powered by <span className="text-white">React</span> and <span className="text-white">Supabase</span>. Inspired by the high-stakes world of Borderland, every game is a test of your will to survive.
                         </p>
