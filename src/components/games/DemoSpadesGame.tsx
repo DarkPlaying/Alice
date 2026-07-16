@@ -64,6 +64,8 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
     const phaseTimerRef = useRef<NodeJS.Timeout | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
     const bidSubmittedRef = useRef(false);
+    // Tracks the score at the START of the bidding phase so we can refund on re-bid
+    const bidRoundScoreRef = useRef(DEMO_START_SCORE);
 
     // ── Advance Phase ──────────────────────────────────────────────────────
     const advancePhase = useCallback((current: DemoPhase) => {
@@ -100,6 +102,10 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
             setMyBid(null);
             bidSubmittedRef.current = false;
             setBidError('');
+        }
+        if (phase === 'bidding') {
+            // Snapshot score at start of bidding phase for refund calculations
+            bidRoundScoreRef.current = myScore;
         }
     }, [phase]);
 
@@ -168,21 +174,32 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
             setBidError('Invalid bid amount');
             return;
         }
-        if (amount > myScore) {
-            setBidError('Bid exceeds your current score!');
+        // Available score = original score at start of bidding phase
+        const availableScore = bidRoundScoreRef.current;
+        if (amount > availableScore) {
+            setBidError(`Bid exceeds available score (${availableScore})!`);
             return;
         }
+        // Refund old bid then apply new bid
         setMyBid(amount);
-        setMyScore(prev => Math.max(0, prev - amount));
+        setMyScore(Math.max(0, availableScore - amount));
         setBidError('');
         bidSubmittedRef.current = true;
     };
 
+    const handleChangeBid = () => {
+        // Allow editing — reset the input to current bid value for convenience
+        setMyBidInput(myBid !== null ? String(myBid) : '');
+        setBidError('');
+    };
+
     const projectedScore = (() => {
         const n = parseInt(myBidInput);
-        if (isNaN(n)) return myScore;
-        return Math.max(0, myScore - n);
+        const base = bidRoundScoreRef.current;
+        if (isNaN(n) || n < 0) return base;
+        return Math.max(0, base - n);
     })();
+
 
     // ── Build "Players" for shared UI components ───────────────────────────
     const players: Record<string, DemoPlayer> = {
@@ -626,53 +643,59 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                 <label className="block text-xs font-mono text-slate-500 mb-4 uppercase tracking-widest">
                                     INPUT WAGER PARAMETER
                                 </label>
-                                {myBid !== null ? (
-                                    <div className="text-center py-6">
-                                        <p className="text-[10px] font-mono text-green-400 uppercase tracking-widest mb-2">BID LOCKED</p>
-                                        <p className="text-5xl font-black font-oswald text-green-400">{myBid}</p>
-                                        <p className="text-xs font-mono text-slate-500 mt-3 uppercase tracking-widest">
-                                            Hint: Bot always bids exactly 100. Bid higher to win!
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="flex gap-2 w-full mb-4">
-                                        <input
-                                            type="number"
-                                            autoFocus
-                                            placeholder="0000"
-                                            value={myBidInput}
-                                            onChange={e => {
-                                                setMyBidInput(e.target.value.replace(/^0+(?=\d)/, ''));
-                                                setBidError('');
-                                            }}
-                                            className="w-full bg-transparent border-b-2 border-slate-700 text-5xl font-black font-oswald text-center text-white focus:border-blue-500 focus:outline-none transition-colors py-4"
-                                        />
-                                        <button
-                                            onClick={handleSubmitBid}
-                                            className="px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border bg-blue-600 hover:bg-blue-500 text-white border-blue-500"
-                                        >
-                                            <span>SUBMIT</span>
-                                            <span className="text-[10px] opacity-70">WAGER</span>
-                                        </button>
+
+                                {/* Current Bid Status (shown after first submission) */}
+                                {myBid !== null && (
+                                    <div className="flex items-center justify-between mb-4 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                                            <span className="text-[10px] font-mono text-green-400 uppercase tracking-widest">Current Bid</span>
+                                        </div>
+                                        <span className="text-green-400 font-black font-oswald text-xl">{myBid}</span>
                                     </div>
                                 )}
+
+                                {/* Always-editable input */}
+                                <div className="flex gap-2 w-full mb-4">
+                                    <input
+                                        type="number"
+                                        autoFocus={myBid === null}
+                                        placeholder="0000"
+                                        value={myBidInput}
+                                        onChange={e => {
+                                            setMyBidInput(e.target.value.replace(/^0+(?=\d)/, ''));
+                                            setBidError('');
+                                        }}
+                                        className="w-full bg-transparent border-b-2 border-slate-700 text-5xl font-black font-oswald text-center text-white focus:border-blue-500 focus:outline-none transition-colors py-4"
+                                    />
+                                    <button
+                                        onClick={handleSubmitBid}
+                                        className={`px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border ${
+                                            myBid !== null && myBid === parseInt(myBidInput)
+                                                ? 'bg-green-500/20 text-green-400 border-green-500/50'
+                                                : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'
+                                        }`}
+                                    >
+                                        <span>{myBid !== null && myBid === parseInt(myBidInput) ? 'LOCKED' : myBid !== null ? 'UPDATE' : 'SUBMIT'}</span>
+                                        <span className="text-[10px] opacity-70">WAGER</span>
+                                    </button>
+                                </div>
                                 {bidError && (
                                     <div className="mb-4 px-3 py-2 bg-red-900/20 border border-red-500/30 text-red-400 text-xs rounded text-center">
                                         {bidError}
                                     </div>
                                 )}
-                                {myBid === null && (
-                                    <div className="space-y-2 text-sm font-mono">
-                                        <div className="flex justify-between p-2 bg-slate-900 rounded">
-                                            <span className="text-slate-500">CURRENT MERIT</span>
-                                            <span className="font-bold text-white">{myScore}</span>
-                                        </div>
-                                        <div className="flex justify-between p-2 bg-slate-900 rounded">
-                                            <span className="text-slate-500">PROJECTED YIELD</span>
-                                            <span className={`font-bold ${projectedScore >= 0 ? 'text-green-400' : 'text-red-400'}`}>{projectedScore}</span>
-                                        </div>
+                                <div className="space-y-2 text-sm font-mono">
+                                    <div className="flex justify-between p-2 bg-slate-900 rounded">
+                                        <span className="text-slate-500">AVAILABLE BALANCE</span>
+                                        <span className="font-bold text-white">{bidRoundScoreRef.current}</span>
                                     </div>
-                                )}
+                                    <div className="flex justify-between p-2 bg-slate-900 rounded">
+                                        <span className="text-slate-500">AFTER BID</span>
+                                        <span className={`font-bold ${projectedScore >= 0 ? 'text-green-400' : 'text-red-400'}`}>{projectedScore}</span>
+                                    </div>
+                                </div>
+
                                 <div className="mt-4 p-3 bg-yellow-500/5 border border-yellow-500/20 rounded text-[10px] font-mono text-yellow-400/60 uppercase tracking-wider text-center">
                                     💡 DEMO: Bot always bids 100. Bid &gt; 100 to secure the card.
                                 </div>
