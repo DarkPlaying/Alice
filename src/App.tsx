@@ -98,6 +98,21 @@ function AppContent() {
       setIsLoading(false);
     }, 5000);
 
+    const savedDemo = localStorage.getItem('demo-user-session');
+    if (savedDemo) {
+      try {
+        const demoUser = JSON.parse(savedDemo);
+        setIsLoggedIn(true);
+        setUser(demoUser);
+        setIsAdmin(false);
+        setIsLoading(false);
+        clearTimeout(fallbackTimer);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         try {
@@ -239,6 +254,7 @@ function AppContent() {
       // The custom lock function causes ANY Supabase Auth method (like signOut) to permanently hang the in-memory mutex.
       // We completely bypass it by clearing localStorage and doing a hard page reload to destroy the stuck mutex in memory!
       localStorage.removeItem('borderland-fresh-token-v2');
+      localStorage.removeItem('demo-user-session');
       window.location.href = '/login';
     } catch (error) {
       console.error("LOGOUT ERROR", error);

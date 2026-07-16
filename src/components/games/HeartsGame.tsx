@@ -23,6 +23,7 @@ import {
 } from '../../game/hearts';
 import { Eye, ShieldAlert, Send, Heart, User as UserIcon, RotateCcw, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DemoHeartsGame } from './DemoHeartsGame';
 
 const getPlayerDisplayName = (playerId: string | undefined, gameState: HeartsGameState | null) => {
     if (!playerId || !gameState || !gameState.participants) return 'Agent';
@@ -35,43 +36,9 @@ interface HeartsGameProps {
     user: any; // User object from auth
 }
 
-const DemoHeartsGame = () => {
-    const [gameState, setGameState] = useState<'playing' | 'won'>('playing');
-
-    if (gameState === 'won') {
-        return (
-            <div className="absolute inset-0 bg-[#050508] flex flex-col items-center justify-center font-sans z-[100]">
-                <h1 className="text-5xl text-green-500 font-bold mb-6 font-mono tracking-widest uppercase shadow-[0_0_30px_rgba(34,197,94,0.3)]">GAME CLEAR</h1>
-                <p className="text-white/60 font-mono mb-8 uppercase tracking-widest">Demo Round Complete.</p>
-                <button onClick={() => window.location.href = '/home'} className="px-8 py-3 bg-white text-black font-bold uppercase tracking-widest hover:bg-gray-200">
-                    Exit Arena
-                </button>
-            </div>
-        );
-    }
-
-    return (
-        <div className="absolute inset-0 bg-[#050508] flex flex-col font-sans p-8 items-center justify-center z-[100]">
-            <h1 className="text-3xl text-white font-bold mb-8 tracking-widest font-mono">HEARTS ARENA: DEMO ROUND</h1>
-            <p className="text-white/60 mb-8 font-mono text-center">You are in demo mode.<br/>Select any safe zone cell to survive.</p>
-            <div className="grid grid-cols-4 gap-2 w-full max-w-sm justify-center">
-                {Array.from({ length: 16 }).map((_, i) => (
-                    <div 
-                        key={i} 
-                        onClick={() => setGameState('won')}
-                        className="aspect-square bg-[#0a0a0f] border border-white/10 rounded cursor-pointer hover:border-red-500/80 hover:bg-red-500/20 transition-all flex items-center justify-center group"
-                    >
-                        <span className="text-white/10 group-hover:text-red-500 font-mono text-xl">{i+1}</span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-
 export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     if (user?.role === 'demo') {
-        return <DemoHeartsGame />;
+        return <DemoHeartsGame user={user} />;
     }
 
     // --- State ---
