@@ -100,27 +100,27 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
             {/* ── Top Right: Profile + Logout ── */}
             {isLoggedIn && (
-                <div className="fixed top-3 right-3 sm:top-6 sm:right-8 z-50 flex items-center gap-1.5 sm:gap-2">
-                    {/* Profile — icon on mobile, text+icon on sm+ */}
+                <div className="fixed top-3 right-3 sm:top-6 sm:right-8 z-50 flex items-center gap-1 sm:gap-2" style={{ maxWidth: 'calc(100vw - 120px)' }}>
+                    {/* Profile — icon only on mobile */}
                     <button
                         onClick={() => setShowPlayerCard(true)}
-                        className="flex items-center gap-1.5 px-2 py-1.5 sm:px-3 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                        className="flex items-center justify-center w-8 h-8 sm:w-auto sm:h-auto sm:px-3 sm:py-1.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
                         title="Player Profile"
                     >
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0"></div>
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse sm:mr-1.5 flex-shrink-0"></div>
                         <span className="hidden sm:inline text-[10px] font-mono tracking-widest text-gray-300 uppercase">
                             {userInfo?.username || 'PLAYER'}
                         </span>
                         <User size={13} className="sm:hidden text-gray-400" />
                     </button>
-                    {/* Logout — icon on mobile, text on sm+ */}
+                    {/* Logout — icon only on mobile */}
                     <button
                         onClick={onLogoutClick}
-                        className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-2 py-1.5 sm:px-3 rounded transition-all"
+                        className="flex items-center justify-center w-8 h-8 sm:w-auto sm:h-auto sm:px-3 sm:py-1.5 bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white rounded transition-all flex-shrink-0"
                         title="Logout"
                     >
-                        <LogOut size={13} className="sm:hidden flex-shrink-0" />
-                        <span className="hidden sm:inline text-[10px] font-mono tracking-widest uppercase">Logout</span>
+                        <LogOut size={13} />
+                        <span className="hidden sm:inline text-[10px] font-mono tracking-widest uppercase ml-1">Logout</span>
                     </button>
                 </div>
             )}

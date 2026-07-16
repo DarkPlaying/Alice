@@ -240,7 +240,7 @@ export const DemoClubsGame: React.FC<DemoClubsGameProps> = ({ user }) => {
     return (
         <div className="relative w-full h-full min-h-screen bg-[#050508] flex flex-col font-sans overflow-hidden text-white">
             {/* Rules Modal */}
-            {showPointsTable && <ClubsPointsTable onClose={() => setShowPointsTable(false)} />}
+            {showPointsTable && <ClubsPointsTable isOpen={showPointsTable} currentRound={round} onClose={() => setShowPointsTable(false)} />}
 
             {/* Briefing Overlay */}
             <AnimatePresence>
