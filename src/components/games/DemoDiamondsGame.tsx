@@ -13,7 +13,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Swords, Skull, Timer, CheckCircle2, AlertTriangle, X, Activity, Scan, Info, Shield, Syringe, Biohazard, User, ChevronRight } from 'lucide-react';
-import { getCardImagePath, DiamondsCard } from '../../game/diamonds';
+import { getCardImagePath } from '../../game/diamonds';
+import type { DiamondsCard } from '../../game/diamonds';
 
 type DemoPhase = 'briefing' | 'slotting' | 'evaluation' | 'picking' | 'result';
 
