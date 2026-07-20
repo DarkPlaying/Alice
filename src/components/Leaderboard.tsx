@@ -14,11 +14,12 @@ interface PlayerData {
 }
 
 const getPlayerGrade = (score: number) => {
-    if (score >= 2000) return { label: 'S', color: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/5 shadow-[0_0_8px_rgba(234,179,8,0.2)]' };
-    if (score >= 1500) return { label: 'A', color: 'text-[#ff0050] border-[#ff0050]/30 bg-[#ff0050]/5 shadow-[0_0_8px_rgba(255,0,80,0.2)]' };
-    if (score >= 1000) return { label: 'B', color: 'text-purple-400 border-purple-500/30 bg-purple-500/5 shadow-[0_0_8px_rgba(192,132,252,0.2)]' };
-    if (score >= 500) return { label: 'C', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_8px_rgba(34,211,238,0.2)]' };
-    return { label: 'D', color: 'text-gray-400 border-white/10 bg-white/5' };
+    if (score >= 3500) return { label: 'S', color: 'text-white border-white/40 bg-white/20 shadow-[0_0_20px_rgba(255,255,255,0.3)] font-black drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]' };
+    if (score >= 2000) return { label: 'A', color: 'text-[#00ffff] border-[#00ffff]/30 bg-[#00ffff]/10 shadow-[0_0_8px_rgba(0,255,255,0.2)]' };
+    if (score >= 1200) return { label: 'B', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10 shadow-[0_0_8px_rgba(192,132,252,0.2)]' };
+    if (score >= 800) return { label: 'C', color: 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10 shadow-[0_0_8px_rgba(234,179,8,0.2)]' };
+    if (score >= 500) return { label: 'D', color: 'text-orange-500 border-orange-500/30 bg-orange-500/10 shadow-[0_0_8px_rgba(249,115,22,0.2)]' };
+    return { label: 'E', color: 'text-red-400 border-red-400/30 bg-red-400/10 shadow-[0_0_8px_rgba(248,113,113,0.2)]' };
 };
 
 export const Leaderboard = () => {
