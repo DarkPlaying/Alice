@@ -164,6 +164,10 @@ export const PlayerCardModal = ({ user, onClose, currentGameScore }: PlayerCardM
 
     if (isDead) {
         grade = 'F';
+    } else if (points >= 3500) {
+        grade = 'S';
+        gradeColor = 'text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] font-black'; // Shiny white for S grade
+        gradeBg = 'bg-white/20 border-white/40 shadow-[0_0_20px_rgba(255,255,255,0.3)]';
     } else if (points >= 2000) {
         grade = 'A';
         gradeColor = 'text-[#00ffff]';
