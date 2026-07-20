@@ -54,9 +54,19 @@ interface CardSelectionProps {
     userInfo?: any;
 }
 
+import { useAssetLoader } from '../hooks/useAssetLoader';
+import { Loader } from './Loader';
+
 export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick, userInfo }: CardSelectionProps) => {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
     const [showPlayerCard, setShowPlayerCard] = useState(false);
+
+    const isLoaded = useAssetLoader([
+        '/Untitled design.png',
+        ...cards.map(c => c.image)
+    ]);
+
+    if (!isLoaded) return <Loader />;
 
     return (
         <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-10 pb-4 lg:pt-8 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans overflow-x-hidden w-full">

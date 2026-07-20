@@ -12,6 +12,8 @@ import { DiamondsGame } from './games/DiamondsGame';
 // import { GlowCard } from './ui/spotlight-card';
 import { PlayerCardModal } from './PlayerCardModal';
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
+import { useAssetLoader } from '../hooks/useAssetLoader';
+import { Loader } from './Loader';
 
 
 interface GameContainerProps {
@@ -40,6 +42,15 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         localStorage.setItem('skipVideos', String(val));
         setSkipVideosState(val);
     };
+
+    const cardImgSrc = type === 'Diamonds' ? '/suit_assets/diamond.png' :
+        type === 'Spades' ? '/suit_assets/spade.png' :
+            type === 'Clubs' ? '/suit_assets/clubs.png' :
+                type === 'Hearts' ? '/suit_assets/hearts.png' : undefined;
+
+    const isLoaded = useAssetLoader([
+        cardImgSrc || ''
+    ].filter(Boolean));
 
     useEffect(() => {
         console.log("GAMECONTAINER MOUNTED. UserInfo:", userInfo);
@@ -482,6 +493,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
     const theme = getTheme(type);
     const rules = getRules();
+
+    if (!isLoaded) return <Loader />;
 
     return (
         <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
@@ -949,6 +962,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                             src={`/${playingVideo}.mp4`}
                             autoPlay
                             playsInline
+                            muted
                             className="w-full h-full object-cover"
                             onEnded={() => {
                                 if (playingVideo === 'start') {
