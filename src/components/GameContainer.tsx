@@ -494,8 +494,6 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const theme = getTheme(type);
     const rules = getRules();
 
-    if (!isLoaded) return <Loader />;
-
     const videoRef = useRef<HTMLVideoElement>(null);
 
     useEffect(() => {
@@ -511,6 +509,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
             });
         }
     }, [playingVideo]);
+
+    if (!isLoaded) return <Loader />;
 
     return (
         <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
