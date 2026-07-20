@@ -146,7 +146,7 @@ function AppContent() {
             const finalUser = { ...userData, uid: session.user.id, email: session.user.email, id: session.user.id };
             console.log("APP: User Login Success:", finalUser);
             setUser(finalUser);
-            setIsAdmin(userData.role === 'admin' || userData.username === 'admin' || userData.role === 'master');
+            setIsAdmin(userData.role === 'admin' || userData.username === 'admin');
 
             // Log re-entry on refresh
             if (userData.username && userData.role === 'player') {
