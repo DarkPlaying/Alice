@@ -496,6 +496,22 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
     if (!isLoaded) return <Loader />;
 
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    useEffect(() => {
+        if (playingVideo && videoRef.current) {
+            videoRef.current.play().catch((err) => {
+                console.error("Video autoplay blocked or failed:", err);
+                // Fallback: if video fails to play, skip it
+                if (playingVideo === 'start') {
+                    setShowRules(false);
+                    setWaitingForGM(true);
+                }
+                setPlayingVideo(null);
+            });
+        }
+    }, [playingVideo]);
+
     return (
         <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
             {/* Base dark overlay for readability across all games */}
@@ -959,6 +975,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                         }}
                     >
                         <video
+                            ref={videoRef}
                             src={`/${playingVideo}.mp4`}
                             autoPlay
                             playsInline
