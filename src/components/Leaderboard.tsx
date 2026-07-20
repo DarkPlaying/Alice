@@ -146,85 +146,98 @@ export const Leaderboard = () => {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ duration: 0.8, delay: 0.3 }}
-                    className="bg-[#111] border border-white/10 rounded-lg overflow-hidden shadow-2xl"
+                    className="bg-[#111] border border-white/10 rounded-lg overflow-hidden shadow-2xl w-full"
                 >
-                    {/* Header */}
-                    <div className="grid grid-cols-12 bg-black/40 p-5 text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-white/5">
-                        <div className="col-span-1 md:col-span-1">Rank</div>
-                        <div className="col-span-3 md:col-span-3">Player</div>
-                        <div className="col-span-2 md:col-span-1 text-center">Grade</div>
-                        <div className="col-span-2 md:col-span-2 text-center">Clears</div>
-                        <div className="col-span-2 md:col-span-3 text-center hidden md:block">Suits Cleared</div>
-                        <div className="col-span-2 md:col-span-2 text-right">Visa / Score</div>
-                    </div>
+                    <div className="w-full overflow-x-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+                        <div className="min-w-[650px] md:min-w-0 w-full">
+                            {/* Header */}
+                            <div className="grid grid-cols-12 bg-black/40 p-4 md:p-5 text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-white/5">
+                                <div className="col-span-1">Rank</div>
+                                <div className="col-span-3">Player</div>
+                                <div className="col-span-2 text-center">Grade</div>
+                                <div className="col-span-2 text-center">Clears</div>
+                                <div className="col-span-2 text-center">Suits Cleared</div>
+                                <div className="col-span-2 text-right">Visa / Score</div>
+                            </div>
 
-                    <div className="divide-y divide-white/5 font-mono text-sm">
-                        {loading ? (
-                            <div className="p-20 flex flex-col items-center justify-center gap-4 text-gray-500">
-                                <Loader2 className="animate-spin" size={24} />
-                                <span className="text-[10px] tracking-[0.2em] uppercase">Synchronizing Rankings...</span>
-                            </div>
-                        ) : players.length === 0 ? (
-                            <div className="p-20 text-center text-gray-500 text-xs tracking-widest">
-                                NO DEPLOYMENT DATA FOUND
-                            </div>
-                        ) : (
-                            currentPlayers.map((row, index) => {
-                                const grade = getPlayerGrade(row.score);
-                                return (
-                                    <div key={row.nickname + row.id + index} className="grid grid-cols-12 p-5 hover:bg-white/[0.02] transition-colors items-center group">
-                                        <div className="col-span-1 md:col-span-1 text-gray-500 group-hover:text-white">
-                                            {row.rank === 1 && <Crown size={14} className="inline text-yellow-500 mr-1" />}
-                                            #{row.rank}
-                                        </div>
-                                        <div className="col-span-3 md:col-span-3 text-gray-300 font-bold group-hover:text-white flex items-center gap-2">
-                                            {row.nickname || row.id}
-                                            {row.rank === 1 && <span className="text-[9px] bg-yellow-500/10 text-yellow-500 px-1 py-0.5 rounded border border-yellow-500/20 whitespace-nowrap hidden lg:inline">TOP SURVIVOR</span>}
-                                        </div>
-                                        <div className="col-span-2 md:col-span-1 text-center flex justify-center">
-                                            <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${grade.color}`}>
-                                                {grade.label}
-                                            </span>
-                                        </div>
-                                        <div className="col-span-2 md:col-span-2 text-center text-gray-400">{row.clears}</div>
-                                        <div className="col-span-2 md:col-span-3 text-center hidden md:flex items-center justify-center gap-2 text-gray-500">
-                                            {getSuitsForRank(row.rank).map((s, i) => (
-                                                <span key={i} className={`
-                                                    ${s === '♥' ? 'text-red-500' : ''}
-                                                    ${s === '♦' ? 'text-cyan-400' : ''}
-                                                    ${s === '♣' ? 'text-green-400' : ''}
-                                                    ${s === '♠' ? 'text-purple-400' : ''}
-                                                `}>{s}</span>
-                                            ))}
-                                        </div>
-                                        <div className="col-span-2 md:col-span-2 text-right text-[#ff0050] font-bold">
-                                            {row.score}
-                                        </div>
+                            <div className="divide-y divide-white/5 font-mono text-xs md:text-sm">
+                                {loading ? (
+                                    <div className="p-20 flex flex-col items-center justify-center gap-4 text-gray-500">
+                                        <Loader2 className="animate-spin" size={24} />
+                                        <span className="text-[10px] tracking-[0.2em] uppercase">Synchronizing Rankings...</span>
                                     </div>
-                                );
-                            })
-                        )}
+                                ) : players.length === 0 ? (
+                                    <div className="p-20 text-center text-gray-500 text-xs tracking-widest">
+                                        NO DEPLOYMENT DATA FOUND
+                                    </div>
+                                ) : (
+                                    currentPlayers.map((row, index) => {
+                                        const grade = getPlayerGrade(row.score);
+                                        return (
+                                            <motion.div
+                                                key={row.nickname + row.id + index}
+                                                initial={{ opacity: 0, x: -15 }}
+                                                whileInView={{ opacity: 1, x: 0 }}
+                                                viewport={{ once: true }}
+                                                transition={{ duration: 0.4, delay: index * 0.05 }}
+                                                className="grid grid-cols-12 p-4 md:p-5 hover:bg-white/[0.02] transition-colors items-center group"
+                                            >
+                                                <div className="col-span-1 text-gray-500 group-hover:text-white flex items-center">
+                                                    {row.rank === 1 && <Crown size={12} className="inline text-yellow-500 mr-1 shrink-0" />}
+                                                    #{row.rank}
+                                                </div>
+                                                <div className="col-span-3 text-gray-300 font-bold group-hover:text-white flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
+                                                    <span className="truncate">{row.nickname || row.id}</span>
+                                                    {row.rank === 1 && <span className="text-[8px] bg-yellow-500/10 text-yellow-500 px-1 py-0.5 rounded border border-yellow-500/20 whitespace-nowrap shrink-0">TOP</span>}
+                                                </div>
+                                                <div className="col-span-2 text-center flex justify-center">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-black border ${grade.color}`}>
+                                                        {grade.label}
+                                                    </span>
+                                                </div>
+                                                <div className="col-span-2 text-center text-gray-400">{row.clears}</div>
+                                                <div className="col-span-2 text-center flex items-center justify-center gap-1 text-gray-500">
+                                                    {getSuitsForRank(row.rank).map((s, i) => (
+                                                        <span key={i} className={`
+                                                            ${s === '♥' ? 'text-red-500' : ''}
+                                                            ${s === '♦' ? 'text-cyan-400' : ''}
+                                                            ${s === '♣' ? 'text-green-400' : ''}
+                                                            ${s === '♠' ? 'text-purple-400' : ''}
+                                                        `}>{s}</span>
+                                                    ))}
+                                                </div>
+                                                <div className="col-span-2 text-right text-[#ff0050] font-bold">
+                                                    {row.score}
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Pagination Controls */}
                     {players.length > playersPerPage && (
-                        <div className="flex items-center justify-between p-5 bg-black/40 border-t border-white/5 font-mono text-xs">
+                        <div className="flex items-center justify-between p-3 md:p-5 bg-black/40 border-t border-white/5 font-mono text-[10px] md:text-xs gap-2">
                             <button
                                 disabled={currentPage === 1}
                                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                                className="px-4 py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer"
+                                className="px-2.5 py-1.5 md:px-4 md:py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer uppercase"
                             >
-                                PREVIOUS
+                                <span className="xs:hidden">◄</span>
+                                <span className="hidden xs:inline">PREVIOUS</span>
                             </button>
-                            <span className="text-gray-500 tracking-wider">
-                                PAGE {currentPage} OF {totalPages}
+                            <span className="text-gray-500 tracking-wider text-center">
+                                PAGE {currentPage} / {totalPages}
                             </span>
                             <button
                                 disabled={currentPage === totalPages}
                                 onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                                className="px-4 py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer"
+                                className="px-2.5 py-1.5 md:px-4 md:py-2 border border-white/10 hover:border-white/20 rounded disabled:opacity-30 disabled:pointer-events-none text-gray-400 hover:text-white transition-all cursor-pointer uppercase"
                             >
-                                NEXT
+                                <span className="hidden xs:inline">NEXT</span>
+                                <span className="xs:hidden">►</span>
                             </button>
                         </div>
                     )}

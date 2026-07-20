@@ -470,8 +470,8 @@ export const HeartsGame: React.FC<HeartsGameProps> = ({ user }) => {
     );
 
     return (
-        <div className="w-full h-full bg-[#050505] text-white font-sans overflow-y-auto relative selection:bg-rose-500/30">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-rose-900/20 via-[#0a0a0a] to-[#050505] pointer-events-none" />
+        <div className="w-full h-full bg-black text-white font-sans overflow-y-auto relative selection:bg-rose-500/30">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-rose-900/20 via-transparent to-transparent pointer-events-none" />
 
             {/* Header / HUD */}
             <header className="sticky top-0 left-0 right-0 z-[160] bg-black/60 backdrop-blur-xl border-b border-rose-500/20 px-4 py-3 sm:px-8 sm:py-4">

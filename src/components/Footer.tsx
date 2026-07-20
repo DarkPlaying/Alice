@@ -1,164 +1,51 @@
 "use client";
 
 import { Link } from "react-router-dom";
-
-const navigation = {
-  categories: [
-    {
-      id: "women",
-      name: "Women",
-
-      sections: [
-        {
-          id: "about",
-          name: "About",
-          items: [
-            { name: "About", href: "/about" },
-            { name: "Works", href: "/agency/works" },
-            { name: "Pricing", href: "/pricing" },
-          ],
-        },
-        {
-          id: "features",
-          name: "Features",
-          items: [
-            { name: "Products", href: "/products" },
-            { name: "Agency", href: "/agency" },
-            { name: "Dashboard", href: "/dashboard" },
-          ],
-        },
-        {
-          id: "products",
-          name: "Products",
-          items: [
-            { name: "DIcons", href: "/products/dicons" },
-            { name: "DShapes", href: "/products/dshapes" },
-            { name: "Graaadients", href: "/products/graaadients" },
-          ],
-        },
-        {
-          id: "designs",
-          name: "Designs",
-          items: [
-            { name: "Design", href: "/designs" },
-            { name: "Components", href: "/components" },
-            { name: "Blogs", href: "/blogs" },
-          ],
-        },
-        {
-          id: "other",
-          name: "Others",
-          items: [
-            { name: "Graphic", href: "/graphic" },
-            { name: "3D Icons", href: "/products/3dicons" },
-            { name: "Colors", href: "/products/colors/generate" },
-          ],
-        },
-        {
-          id: "company",
-          name: "Company",
-          items: [
-            { name: "Contact", href: "/contact" },
-            { name: "Terms", href: "/terms" },
-            { name: "Privacy", href: "/privacy" },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
-const Underline = `hover:-translate-y-1 border border-dotted rounded-xl p-2.5 transition-transform `;
+import { motion } from "framer-motion";
 
 export const Footer = () => {
   return (
-    <footer className="border-t border-white/10 bg-black text-gray-400 font-sans text-xs relative z-10 py-12 px-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12 px-6">
-        {/* Column 1: Brand & Desc */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xl font-cinzel font-bold tracking-widest text-white">BORDERLAND</span>
-            <span className="px-1.5 py-0.5 bg-red-950 text-red-500 border border-red-500/20 text-[9px] rounded uppercase font-semibold tracking-wider">
-              System Active
-            </span>
-          </div>
-          <p className="leading-relaxed text-gray-500 text-[11px]">
-            The ultimate trial arena. Survival is not guaranteed. Clear game arenas, secure card tricks, vote on secret roles, and navigate the psychological boundaries of trust and strategy to earn visa extensions.
-          </p>
-        </div>
+    <footer className="w-full bg-black text-white border-t border-red-950/40 relative overflow-hidden">
+      {/* Horizontal glowing laser pulse line at the very top */}
+      <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#ff0050] to-transparent shadow-[0_0_10px_#ff0050] animate-pulse" />
 
-        {/* Column 2: Navigation */}
-        <div className="space-y-4">
-          <h3 className="text-white font-semibold tracking-wider uppercase text-[11px]">Arena Links</h3>
-          <ul className="space-y-2 text-[11px]">
-            <li>
-              <Link to="/home" className="hover:text-white transition-colors cursor-pointer">
-                &gt; SYSTEM HOME
-              </Link>
-            </li>
-            <li>
-              <Link to="/home/card" className="hover:text-white transition-colors cursor-pointer">
-                &gt; CARD SELECTION
-              </Link>
-            </li>
-            <li>
-              <a href="/home#leaderboard" className="hover:text-white transition-colors cursor-pointer">
-                &gt; PLAYER LEADERBOARD
-              </a>
-            </li>
-            <li>
-              <a href="/home#protocol" className="hover:text-white transition-colors cursor-pointer">
-                &gt; SURVIVAL PROTOCOL
-              </a>
-            </li>
-          </ul>
-        </div>
+      {/* Atmospheric digital red scanner line moving slowly up and down */}
+      <motion.div
+        animate={{
+          y: [-10, 300, -10],
+          opacity: [0.05, 0.25, 0.05],
+        }}
+        transition={{
+          duration: 8,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+        className="absolute inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-[#ff0050] to-transparent shadow-[0_0_8px_#ff0050] pointer-events-none"
+      />
 
-        {/* Column 3: Overseer Status */}
-        <div className="space-y-4">
-          <h3 className="text-white font-semibold tracking-wider uppercase text-[11px]">System Monitor</h3>
-          <div className="space-y-1 text-gray-500 text-[11px]">
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span>OVERSEER CORE:</span>
-              <span className="text-cyan-400">BORDER_SYS_v4.2.0</span>
-            </div>
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span>VISA TRACKER:</span>
-              <span className="text-green-500">ONLINE</span>
-            </div>
-            <div className="flex justify-between border-b border-white/5 pb-1">
-              <span>LASER UPLINK:</span>
-              <span className="text-red-500">ARMED</span>
-            </div>
-            <div className="flex justify-between pb-1">
-              <span>INTEGRITY:</span>
-              <span className="text-white">98.2% NOMINAL</span>
-            </div>
-          </div>
+      <div className="max-w-7xl mx-auto px-6 py-16 flex flex-col items-center relative z-10">
+        <div className="flex items-center space-x-3 mb-6">
+          <span className="text-2xl sm:text-3xl font-cinzel font-black tracking-[0.25em] text-white hover:text-[#ff0050] transition-colors duration-300 select-none">
+            BORDERLAND <span className="text-[#ff0050]">♦♥♣♠</span>
+          </span>
         </div>
-
-        {/* Column 4: Danger Alert */}
-        <div className="space-y-4 text-right">
-          <h3 className="text-red-500 font-bold tracking-wider uppercase text-[11px] flex items-center gap-1.5 animate-pulse justify-end">
-            ⚠️ SYSTEM WARNING
-          </h3>
-          <p className="leading-relaxed text-[11px] text-red-400/80">
-            Failing to clear the game arenas and extend your Visa before expiration results in instant laser termination from the upper atmospheric satellite grid. Monitor your countdown constantly.
-          </p>
-        </div>
+        <p className="text-center max-w-xl text-sm font-normal leading-relaxed text-gray-400 font-mono text-xs sm:text-sm">
+          The ultimate survival trial arena. Clear dangerous game arenas, secure card tricks, vote on secret roles, and navigate the psychological boundaries of trust and strategy to extend your Visa. Survival is your only option.
+        </p>
       </div>
-
-      <div className="border-t border-white/5 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-gray-600 px-6">
-        <div>
-          © {new Date().getFullYear()} BORDERLAND PROTOCOL. ALL RIGHTS RESERVED.
-        </div>
-        <div className="flex items-center gap-4">
-          <Link
-            to="/admin"
-            className="px-3 py-1 bg-red-950/20 hover:bg-[#ff0050]/20 border border-red-500/20 hover:border-[#ff0050]/50 text-[#ff0050] font-mono text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer"
-          >
-            ACCESS ADMIN TERMINAL
-          </Link>
+      <div className="border-t border-red-950/30 bg-black/40 relative z-10">
+        <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-center text-sm font-normal text-gray-400 font-mono text-xs">
+          <div>
+            BORDERLAND PROTOCOL © {new Date().getFullYear()}. All rights reserved.
+          </div>
+          <div className="flex items-center gap-4">
+            <Link
+              to="/admin"
+              className="text-[#ff0050] hover:text-white transition-colors uppercase tracking-widest text-[10px] font-bold"
+            >
+              ACCESS ADMIN TERMINAL
+            </Link>
+          </div>
         </div>
       </div>
     </footer>

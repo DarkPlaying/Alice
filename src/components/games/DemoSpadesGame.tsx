@@ -91,7 +91,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
         if (phase === 'shuffle') {
             // Pick a positive (winning) card for demo — always pick a red non-face for nice +600 result
             const result = selectCardByType(remainingDeckRef.current, 'high') ||
-                           selectCardByType(remainingDeckRef.current, 'low');
+                selectCardByType(remainingDeckRef.current, 'low');
             if (result) {
                 remainingDeckRef.current = result.remainingDeck;
                 const card = result.card;
@@ -230,17 +230,59 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
     // ── Shared HUD & Modals ────────────────────────────────────────────────
     const renderHUD = () => (
-        <header className="fixed top-0 left-0 right-0 z-[150] bg-black border-b border-white/10 px-4 py-3 sm:px-8 sm:py-4">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    {/* Exit button */}
+        <header className="fixed top-0 left-0 right-0 z-[150] bg-black/80 backdrop-blur-md">
+            {/* Top Overlay — Trial Specialty */}
+            <div className="flex justify-between items-center px-4 py-3 sm:px-8 sm:py-4 border-b border-white/10">
+                <div className="flex items-center gap-3 sm:gap-6">
                     <button
                         onClick={() => window.location.href = '/home/card'}
-                        className="flex items-center justify-center w-8 h-8 rounded-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all"
+                        className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group hover:scale-105 active:scale-95"
                         title="Exit game"
                     >
-                        <X size={14} />
+                        <X size={14} className="sm:w-5 sm:h-5 group-hover:rotate-90 transition-transform" />
                     </button>
+                    <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                            <span className="h-1 w-1 sm:h-1.5 sm:w-1.5 rounded-full bg-blue-500 animate-pulse shadow-[0_0_10px_currentColor]" />
+                            <p className="text-blue-500 font-mono text-[8px] sm:text-[10px] uppercase font-bold tracking-[0.2em] sm:tracking-[0.4em]">
+                                TRIAL SPECIALTY // SPADES
+                            </p>
+                        </div>
+                        <h1 className="text-lg sm:text-3xl font-cinzel text-white uppercase tracking-wider drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] leading-tight">
+                            Borderland Trials
+                        </h1>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="hidden sm:block px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
+                        DEMO MODE
+                    </div>
+                    <button
+                        onClick={() => setShowPlayerCard(true)}
+                        className="flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+                    >
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                        <span className="text-[10px] font-mono tracking-widest text-gray-300 uppercase">
+                            {user?.username || 'PLAYER'}
+                        </span>
+                    </button>
+                    <button
+                        onClick={() => window.location.href = '/home/card'}
+                        className="bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-3 py-1 sm:px-4 sm:py-1.5 rounded text-[9px] sm:text-[10px] font-mono tracking-widest uppercase transition-all"
+                    >
+                        LOGOUT
+                    </button>
+                    <div className="flex items-center gap-2 text-right">
+                        <div className="hidden sm:block">
+                            <p className="text-[8px] sm:text-[10px] text-gray-500 font-mono uppercase tracking-wider">CURRENT STATE</p>
+                            <p className="text-sm sm:text-lg font-black font-oswald text-white uppercase">REGISTRATION</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {/* Game Header */}
+            <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3 sm:px-8 sm:py-4">
+                <div className="flex items-center gap-3">
                     <div className="flex flex-col">
                         <h2 className="text-[10px] sm:text-xs font-cinzel font-black text-blue-500 tracking-[0.3em] uppercase leading-none mb-1">
                             SPADES TRIAL — DEMO
@@ -250,9 +292,30 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                         </h1>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div className="hidden sm:block px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
-                        DEMO MODE
+                <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="flex items-center gap-1.5 sm:gap-2 text-center">
+                        <div className="flex flex-col items-center">
+                            <p className="text-[6px] sm:text-[9px] text-slate-500 font-mono uppercase tracking-[0.2em]">ROUND</p>
+                            <p className="text-xs sm:text-lg font-black font-oswald text-white">
+                                1<span className="text-slate-600 text-[8px] sm:text-sm">/1</span>
+                            </p>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="flex flex-col items-center">
+                            <p className="text-[6px] sm:text-[9px] text-slate-500 font-mono uppercase tracking-[0.2em]">TIMER</p>
+                            <div className="flex items-center gap-1">
+                                <Timer size={10} className="text-red-500 animate-pulse sm:w-4 sm:h-4" />
+                                <p className="text-xs sm:text-lg font-black font-oswald tabular-nums text-red-500">
+                                    {`${String(Math.floor(timeLeft / 60)).padStart(2, '0')}:${String(timeLeft % 60).padStart(2, '0')}`}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="flex flex-col items-center bg-blue-500/10 px-2 sm:px-3 py-0.5 sm:py-1 rounded border border-blue-500/20">
+                            <p className="text-[6px] sm:text-[9px] text-blue-400/70 font-mono uppercase tracking-[0.2em]">BALANCE</p>
+                            <p className="text-xs sm:text-lg font-black font-oswald text-blue-400">{myScore}</p>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
                     </div>
                     <button
                         onClick={() => setShowRulesModal(true)}
@@ -268,39 +331,6 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                         <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">SCORE</span>
                         <Scan size={18} className="sm:hidden" />
                     </button>
-                    {/* Profile button */}
-                    <button
-                        onClick={() => setShowPlayerCard(true)}
-                        className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-white/5 hover:bg-white/15 transition-colors"
-                        title="Player Profile"
-                    >
-                        <User size={14} className="text-gray-300" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Sub-Header stats */}
-            <div className="max-w-7xl mx-auto mt-3 pt-3 border-t border-white/5 flex items-center justify-around sm:justify-end sm:gap-8">
-                <div className="flex flex-col items-center sm:items-end">
-                    <p className="text-[7px] sm:text-[9px] text-slate-500 font-mono uppercase tracking-[0.2em]">ROUND</p>
-                    <p className="text-sm sm:text-xl font-black font-oswald text-white">
-                        1<span className="text-slate-600 text-[10px] sm:text-sm">/1</span>
-                    </p>
-                </div>
-                <div className="w-px h-6 bg-white/10 sm:hidden" />
-                <div className="flex flex-col items-center sm:items-end">
-                    <p className="text-[7px] sm:text-[9px] text-slate-500 font-mono uppercase tracking-[0.2em]">TIMER</p>
-                    <div className="flex items-center gap-1.5">
-                        <Timer size={12} className="text-red-500 animate-pulse sm:w-4 sm:h-4" />
-                        <p className="text-sm sm:text-xl font-black font-oswald tabular-nums text-red-500">
-                            {`${String(Math.floor(timeLeft / 60)).padStart(2, '0')}:${String(timeLeft % 60).padStart(2, '0')}`}
-                        </p>
-                    </div>
-                </div>
-                <div className="w-px h-6 bg-white/10 sm:hidden" />
-                <div className="flex flex-col items-center sm:items-end bg-blue-500/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded border border-blue-500/20">
-                    <p className="text-[7px] sm:text-[9px] text-blue-400/70 font-mono uppercase tracking-[0.2em]">BALANCE</p>
-                    <p className="text-sm sm:text-xl font-black font-oswald text-blue-400">{myScore}</p>
                 </div>
             </div>
         </header>
@@ -309,20 +339,20 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
     // ── Render: Completed ──────────────────────────────────────────────────
     if (phase === 'completed') {
         return (
-            <div className="relative h-screen bg-[#050505] text-white overflow-y-auto font-sans">
+            <div className="relative h-screen bg-black text-white overflow-y-auto font-sans">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-black to-black pointer-events-none" />
                 <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.8, ease: 'easeOut' }}
-                    className="fixed inset-0 z-[200] flex flex-col items-center justify-start pt-16 sm:pt-20 gap-6 sm:gap-10 bg-black/97 overflow-y-auto pb-12"
+                    className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-6 sm:gap-8 bg-black/97 overflow-y-auto pb-12"
                 >
                     {/* Demo Badge */}
-                    <div className="mt-4 px-4 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
+                    <div className="px-4 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
                         DEMO ROUND COMPLETE
                     </div>
 
-                    <div className="text-center flex flex-col gap-4">
+                    <div className="text-center flex flex-col gap-2">
                         <h1 className="text-2xl sm:text-5xl font-black font-cinzel text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] px-4">
                             SURVIVAL AUCTION COMPLETE
                         </h1>
@@ -333,81 +363,16 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                         </motion.div>
                     </div>
 
-                    {/* Score Card */}
-                    <motion.div
-                        initial={{ scale: 0.95, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ duration: 0.6, ease: 'easeOut' }}
-                        className="relative group w-full max-w-xl px-4 sm:px-0"
-                    >
-                        <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
-                            <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-80" />
-                            <div className="absolute -top-20 -left-20 w-60 h-60 rounded-full blur-[100px] bg-green-500/10 pointer-events-none" />
-                            
-                            <div className="flex-1 min-h-[100px] sm:min-h-[140px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
-                                <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">NET MERIT</p>
-                                <p className="text-3xl sm:text-6xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2">
-                                    {myScore}
-                                </p>
-                            </div>
+                    {/* Two-column: Left=Demo Limitation, Right=Stats */}
+                    <div className="w-full max-w-5xl px-4 sm:px-8 grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
 
-                            <div className="flex-1 flex flex-col p-4 sm:p-6 gap-3 justify-center relative bg-black/20">
-                                <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                                    <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
-                                    <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
-                                        SURVIVED
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">INTEL</span>
-                                    <span className="text-2xl sm:text-lg font-bold text-white font-display tracking-widest">{myCards.length}</span>
-                                </div>
-                                {myCards.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {myCards.map((c, i) => (
-                                            <div key={i} className="relative w-6 h-9 rounded-[2px] border border-white/10 overflow-hidden bg-black/40">
-                                                <img
-                                                    src={`/borderland_cards/${c.suit.charAt(0).toUpperCase() + c.suit.slice(1)}_${c.rank}.png`}
-                                                    className="w-full h-full object-cover"
-                                                    alt={`${c.rank} of ${c.suit}`}
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="absolute -inset-4 rounded-3xl blur-2xl opacity-20 bg-green-500 z-0" />
-                    </motion.div>
-
-                    {/* Bot Result */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.5 }}
-                        className="w-full max-w-xl px-4 sm:px-0"
-                    >
-                        <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
-                            <div>
-                                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
-                                <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
-                                <p className="text-xl font-black font-oswald text-white/60">{botScore}</p>
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    {/* Contact Admin CTA */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.7 }}
-                        className="w-full max-w-xl px-4 sm:px-0"
-                    >
-                        <div className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-2xl p-5 text-center shadow-[0_0_30px_rgba(255,0,80,0.1)]">
-                            {/* Top accent */}
+                        {/* Left — Demo Limitation */}
+                        <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.4 }}
+                            className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(255,0,80,0.1)] flex flex-col justify-between"
+                        >
                             <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-60" />
                             <p className="text-[10px] font-mono text-red-400/60 uppercase tracking-[0.4em] mb-2">DEMO LIMITATION</p>
                             <p className="text-white font-bold font-cinzel tracking-widest text-base mb-1">
@@ -418,18 +383,88 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                 The real Spades Trial has 5 rounds, real opponents,<br />
                                 and actual Visa Points at stake.
                             </p>
-                            <div className="flex items-center justify-center gap-3 flex-wrap">
-                                <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-full">
-                                    <span className="text-red-400 font-mono text-[11px] uppercase tracking-widest">
-                                        📡 Contact an Admin to unlock your player access
-                                    </span>
-                                </div>
+                            <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-full inline-block">
+                                <span className="text-red-400 font-mono text-[10px] uppercase tracking-widest">
+                                    📡 Contact an Admin to unlock your player access
+                                </span>
                             </div>
-                        </div>
-                    </motion.div>
+                        </motion.div>
 
-                    {/* Action Button */}
-                    <div className="w-full max-w-xs px-4 sm:px-0">
+                        {/* Right — Stats */}
+                        <div className="flex flex-col gap-4">
+                            {/* Score Card */}
+                            <motion.div
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.5 }}
+                                className="relative group w-full"
+                            >
+                                <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
+                                    <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-80" />
+                                    <div className="absolute -top-20 -left-20 w-60 h-60 rounded-full blur-[100px] bg-green-500/10 pointer-events-none" />
+                                    <div className="flex-1 min-h-[100px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
+                                        <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">NET MERIT</p>
+                                        <p className="text-3xl sm:text-5xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2">
+                                            {myScore}
+                                        </p>
+                                    </div>
+                                    <div className="flex-1 flex flex-col p-4 sm:p-6 gap-3 justify-center relative bg-black/20">
+                                        <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                            <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
+                                            <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
+                                                SURVIVED
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">INTEL</span>
+                                            <span className="text-2xl sm:text-lg font-bold text-white font-display tracking-widest">{myCards.length}</span>
+                                        </div>
+                                        {myCards.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {myCards.map((c, i) => (
+                                                    <div key={i} className="relative w-6 h-9 rounded-[2px] border border-white/10 overflow-hidden bg-black/40">
+                                                        <img
+                                                            src={`/borderland_cards/${c.suit.charAt(0).toUpperCase() + c.suit.slice(1)}_${c.rank}.png`}
+                                                            className="w-full h-full object-cover"
+                                                            alt={`${c.rank} of ${c.suit}`}
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="absolute -inset-4 rounded-3xl blur-2xl opacity-20 bg-green-500 z-0" />
+                            </motion.div>
+
+                            {/* Bot Result */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.6 }}
+                                className="w-full"
+                            >
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
+                                        <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
+                                        <p className="text-xl font-black font-oswald text-white/60">{botScore}</p>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        </div>
+                    </div>
+
+                    {/* Enter Another Arena — below both columns */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.7 }}
+                        className="w-full max-w-xs"
+                    >
                         <button
                             onClick={() => window.location.href = '/home/card'}
                             className="group relative w-full h-14 bg-green-600 hover:bg-green-500 border border-green-400/50 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
@@ -438,7 +473,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                 → Enter Another Arena
                             </span>
                         </button>
-                    </div>
+                    </motion.div>
                 </motion.div>
             </div>
         );
@@ -447,7 +482,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
     // ── Main Game Render ───────────────────────────────────────────────────
     return (
-        <div className="relative h-screen bg-[#050505] text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
+        <div className="relative h-screen bg-black text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
             {/* Background */}
             <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-black to-black pointer-events-none" />
 
@@ -547,8 +582,8 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                 />
             )}
 
-            {/* Main Content — pt clears the two-row fixed header (~120px) */}
-            <main className="relative z-10 container mx-auto px-4 pt-[120px] sm:pt-[128px] pb-40 flex-1 flex flex-col">
+            {/* Main Content */}
+            <main className="relative z-10 container mx-auto px-4 pt-[200px] sm:pt-[200px] pb-40 flex-1 flex flex-col">
                 <AnimatePresence mode="wait">
                     {/* Briefing */}
                     {phase === 'briefing' && (
@@ -557,28 +592,28 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
-                            className="bg-black/40 border border-blue-900/30 p-8 sm:p-12 max-w-3xl mx-auto backdrop-blur-sm rounded-lg mt-4 sm:mt-20 w-full shadow-2xl"
+                            className="bg-black/40 border border-blue-900/30 p-4 sm:p-6 max-w-xl mx-auto backdrop-blur-sm rounded-lg w-full shadow-2xl flex-1 flex flex-col justify-center"
                         >
-                            <h2 className="text-2xl sm:text-4xl font-black font-cinzel text-blue-500 mb-6 sm:mb-8 text-center tracking-[0.1em] sm:tracking-[0.2em] drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]">
+                            <h2 className="text-xl sm:text-2xl font-black font-cinzel text-blue-500 mb-4 text-center tracking-[0.1em] sm:tracking-[0.2em] drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]">
                                 PROTOCOL BRIEFING
                             </h2>
-                            <div className="space-y-6 text-sm font-mono text-slate-300 leading-relaxed">
-                                <div className="p-4 bg-yellow-500/10 border-l-2 border-yellow-500 mb-4">
-                                    <h3 className="text-white font-bold mb-2">TABLE ASSIGNMENT: {GROUP_ID}</h3>
+                            <div className="space-y-4 text-xs sm:text-sm font-mono text-slate-300 leading-relaxed">
+                                <div className="p-3 bg-yellow-500/10 border-l-2 border-yellow-500">
+                                    <h3 className="text-white font-bold mb-1">TABLE ASSIGNMENT: {GROUP_ID}</h3>
                                     <p>You have been paired with 1 other operative (DEMO-BOT).</p>
                                 </div>
-                                <div className="p-4 bg-blue-900/10 border-l-2 border-blue-500">
-                                    <h3 className="text-white font-bold flex items-center gap-2 mb-2">
-                                        <ShieldCheck size={16} /> OBJECTIVE
+                                <div className="p-3 bg-blue-900/10 border-l-2 border-blue-500">
+                                    <h3 className="text-white font-bold flex items-center gap-2 mb-1">
+                                        <ShieldCheck size={14} /> OBJECTIVE
                                     </h3>
-                                    <p className="mb-2">Win cards through strategic bidding. In this demo, you play 1 round.</p>
+                                    <p className="mb-1">Win cards through strategic bidding. In this demo, you play 1 round.</p>
                                     <p className="text-blue-300">
                                         Make your strategic wagers and try to survive.
                                     </p>
                                 </div>
-                                <div className="p-4 bg-red-900/10 border-l-2 border-red-500">
-                                    <h3 className="text-white font-bold mb-2">SCORING</h3>
-                                    <ul className="space-y-1 text-xs">
+                                <div className="p-3 bg-red-900/10 border-l-2 border-red-500">
+                                    <h3 className="text-white font-bold mb-1">SCORING</h3>
+                                    <ul className="space-y-0.5 text-xs">
                                         <li>• Red cards (Non-Face): <span className="text-green-400">+600 points</span></li>
                                         <li>• Black cards (Non-Face): <span className="text-red-400">-100 points</span></li>
                                         <li>• Black Face Cards: <span className="text-yellow-400">+1000 points</span></li>
@@ -588,6 +623,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                 </div>
                             </div>
                         </motion.div>
+
                     )}
 
                     {/* Shuffle */}
@@ -597,7 +633,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 1.1 }}
-                            className="flex flex-col items-center justify-center space-y-12 mt-4 sm:mt-24"
+                            className="flex flex-1 flex-col items-center justify-center space-y-12"
                         >
                             <h2 className="text-xs sm:text-sm font-mono text-yellow-500 tracking-widest uppercase mb-2 animate-pulse">SYSTEM RECONFIGURATION</h2>
                             <h1 className="text-3xl sm:text-6xl font-black font-display text-white tracking-tighter drop-shadow-xl text-center px-4">
@@ -616,7 +652,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="flex flex-col items-center justify-center space-y-12 mt-4 sm:mt-24"
+                            className="flex flex-1 flex-col items-center justify-center space-y-12"
                         >
                             <div className="text-center">
                                 <h2 className="text-sm font-mono text-blue-400 tracking-widest uppercase mb-2">INCOMING DATA STREAM</h2>
@@ -638,7 +674,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="flex flex-col items-center justify-center space-y-12 mt-4 sm:mt-24"
+                            className="flex flex-1 flex-col items-center justify-center space-y-12"
                         >
                             <h2 className="text-xl sm:text-6xl font-black font-cinzel text-white tracking-widest drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] text-center px-4 uppercase">
                                 Survival Auction
@@ -674,11 +710,10 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                     />
                                     <button
                                         onClick={handleSubmitBid}
-                                        className={`px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border ${
-                                            myBid !== null && myBid === parseInt(myBidInput)
-                                                ? 'bg-green-500/20 text-green-400 border-green-500/50'
-                                                : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'
-                                        }`}
+                                        className={`px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border ${myBid !== null && myBid === parseInt(myBidInput)
+                                            ? 'bg-green-500/20 text-green-400 border-green-500/50'
+                                            : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'
+                                            }`}
                                     >
                                         <span>{myBid !== null && myBid === parseInt(myBidInput) ? 'LOCKED' : myBid !== null ? 'UPDATE' : 'SUBMIT'}</span>
                                         <span className="text-[10px] opacity-70">WAGER</span>
@@ -712,10 +747,10 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0 }}
-                            className="flex flex-col items-center justify-center space-y-10 mt-4 sm:mt-24"
+                            className="flex flex-1 flex-col items-center justify-center space-y-4"
                         >
-                            <h2 className="text-xs sm:text-sm font-mono text-blue-400 tracking-widest uppercase animate-pulse">AUCTION RESULT</h2>
-                            <h1 className="text-3xl sm:text-6xl font-black font-display text-white tracking-tighter px-4 text-center">
+                            <h2 className="text-[10px] sm:text-xs font-mono text-blue-400 tracking-widest uppercase animate-pulse">AUCTION RESULT</h2>
+                            <h1 className="text-xl sm:text-3xl font-black font-display text-white tracking-tighter px-4 text-center">
                                 CARD REVEALED
                             </h1>
 
@@ -724,7 +759,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                     initial={{ rotateY: 90, opacity: 0 }}
                                     animate={{ rotateY: 0, opacity: 1 }}
                                     transition={{ type: 'spring', duration: 0.8 }}
-                                    className="relative w-40 h-56 sm:w-52 sm:h-72 rounded-xl border-4 border-blue-500/30 overflow-hidden shadow-[0_0_40px_rgba(59,130,246,0.3)]"
+                                    className="relative w-28 h-40 sm:w-40 sm:h-56 rounded-lg border-2 border-blue-500/30 overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.3)]"
                                 >
                                     <img
                                         src={`/borderland_cards/${targetCard.suit.charAt(0).toUpperCase() + targetCard.suit.slice(1)}_${targetCard.rank}.png`}
@@ -739,38 +774,26 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: 0.5 }}
-                                    className={`text-center p-6 rounded-xl border ${winnerId === myId ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}
+                                    className={`text-center p-3 sm:p-4 rounded-lg border ${winnerId === myId ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}
                                 >
                                     {winnerId === myId ? (
                                         <>
-                                            <p className="text-green-400 font-black font-oswald text-2xl uppercase tracking-widest">YOU WIN THE CARD</p>
+                                            <p className="text-green-400 font-black font-oswald text-sm sm:text-lg uppercase tracking-widest">YOU WIN THE CARD</p>
                                             {targetCard && (
-                                                <p className={`text-sm font-mono mt-2 ${scoreCard(targetCard) >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                                <p className={`text-[10px] sm:text-xs font-mono mt-1 ${scoreCard(targetCard) >= 0 ? 'text-green-300' : 'text-red-300'}`}>
                                                     Score change: {scoreCard(targetCard) >= 0 ? '+' : ''}{scoreCard(targetCard)} points
                                                 </p>
                                             )}
                                         </>
                                     ) : (
                                         <>
-                                            <p className="text-red-400 font-black font-oswald text-2xl uppercase tracking-widest">BOT WINS THE CARD</p>
-                                            <p className="text-xs font-mono text-white/40 mt-2">You did not submit a bid.</p>
+                                            <p className="text-red-400 font-black font-oswald text-sm sm:text-lg uppercase tracking-widest">BOT WINS THE CARD</p>
+                                            <p className="text-[10px] font-mono text-white/40 mt-1">Bot bid: {DEMO_BOT_BID}</p>
                                         </>
                                     )}
                                 </motion.div>
                             )}
 
-                            {/* Bid Summary */}
-                            <div className="w-full max-w-sm bg-black/40 border border-white/10 rounded-xl p-4 space-y-3">
-                                <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest text-center mb-2">BID SUMMARY</p>
-                                {Object.values(players).map(p => (
-                                    <div key={p.id} className={`flex justify-between items-center p-2 rounded ${p.id === myId ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-white/5'}`}>
-                                        <span className="text-xs font-mono uppercase text-white/60">{p.displayName}</span>
-                                        <span className="font-bold font-oswald text-lg text-white">
-                                            {p.id === myId ? (myBid !== null ? myBid : '—') : DEMO_BOT_BID}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
                         </motion.div>
                     )}
                 </AnimatePresence>

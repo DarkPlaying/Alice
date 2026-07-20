@@ -32,10 +32,10 @@ const SeekingCard = ({ side, className, fixedCard }: { side: 'left' | 'right', c
                 y: [0, -10, 0]
             }}
             transition={{
-                x: { duration: 2.5, ease: "easeOut" },
-                rotate: { duration: 2.5, ease: "easeOut" },
-                opacity: { duration: 1.5 },
-                y: { duration: 4, repeat: Infinity, ease: "easeInOut", delay: 2.5 }
+                x: { duration: 1.8, ease: "easeOut" },
+                rotate: { duration: 1.8, ease: "easeOut" },
+                opacity: { duration: 1.4 },
+                y: { duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.8 }
             }}
         />
     );
@@ -47,12 +47,12 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
     const isElevated = isSystemArchitect || isGameMaster;
 
     return (
-        <section className="relative h-screen min-h-[800px] flex items-center justify-center overflow-hidden bg-[#050508]">
+        <section className="relative h-screen min-h-[600px] md:min-h-[800px] flex items-center justify-center overflow-hidden bg-[#050508]">
 
             {/* Background: Poster Image */}
             <div className="absolute inset-0 z-0">
                 <img
-                    src="/hero-poster.jpg"
+                    src="/hero-bg.webp"
                     alt="Alice in Borderland Background"
                     className="w-full h-full object-cover opacity-60"
                 />
@@ -64,24 +64,21 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                 <LaserGrid />
             </div>
 
-            {/* Intro Cards */}
-            <SeekingCard
-                side="left"
-                fixedCard="Spades_K.png"
-                className="absolute left-4 md:left-[14%] bottom-32 md:bottom-1/4 w-16 md:w-56 z-20 pointer-events-none opacity-80"
-            />
-            <SeekingCard
-                side="right"
-                fixedCard="Hearts_Q.png"
-                className="absolute right-4 md:right-[14%] top-32 md:top-1/3 w-16 md:w-56 z-20 pointer-events-none opacity-80"
-            />
+            {/* Intro Cards (Fully responsive, scaled by vw so they don't overlap text) */}
+
+            <div className="absolute left-4 bottom-[5%] sm:bottom-auto sm:left-[4%] md:left-[8%] lg:left-[12%] sm:top-[50%] lg:top-[55%] sm:-translate-y-1/2 w-[18vw] min-w-[60px] max-w-[90px] sm:w-[15vw] sm:min-w-[110px] md:w-[14vw] md:max-w-[190px] lg:w-[14vw] lg:max-w-[210px] z-20 pointer-events-none opacity-80 sm:opacity-60 md:opacity-85 lg:opacity-90">
+                <SeekingCard side="left" fixedCard="Spades_K.png" className="w-full h-auto drop-shadow-[0_10px_30px_rgba(0,0,0,0.8)]" />
+            </div>
+            <div className="absolute right-4 top-[25%] -translate-y-1/2 sm:top-[50%] lg:top-[55%] sm:right-[4%] md:right-[8%] lg:right-[12%] w-[18vw] min-w-[60px] max-w-[90px] sm:w-[15vw] sm:min-w-[110px] md:w-[14vw] md:max-w-[190px] lg:w-[14vw] lg:max-w-[210px] z-20 pointer-events-none opacity-80 sm:opacity-60 md:opacity-85 lg:opacity-90">
+                <SeekingCard side="right" fixedCard="Hearts_Q.png" className="w-full h-auto drop-shadow-[0_10px_30px_rgba(0,0,0,0.8)]" />
+            </div>
 
             {/* Main Title Sequence */}
-            <div className="relative z-30 max-w-7xl mx-auto px-6 flex flex-col items-center justify-center h-full text-center">
+            <div className="relative z-30 max-w-7xl mx-auto px-4 sm:px-6 flex flex-col items-center justify-center h-full text-center mt-8 sm:mt-0 -translate-y-2 sm:-translate-y-10 md:-translate-y-12 lg:-translate-y-14 landscape:translate-y-0 landscape:my-auto transition-transform duration-300">
 
                 {/* Japanese Subtitle: Serif White */}
                 <motion.p
-                    initial={{ opacity: 0, letterSpacing: "1em" }}
+                    initial={{ opacity: 0, letterSpacing: "0.6em" }}
                     animate={{ opacity: 1, letterSpacing: "0.5em" }}
                     transition={{ duration: 1.5, ease: "circOut" }}
                     className="text-white font-serif text-sm md:text-lg mb-4 animate-pulse drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
@@ -94,9 +91,9 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     <motion.div
                         initial={{ opacity: 0, y: -20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={`mb-4 px-6 py-1 border-y ${isElevated ? 'border-yellow-500/50 bg-yellow-500/10' : 'border-[#ff0050]/50 bg-[#ff0050]/10'}`}
+                        className={`mb-3 sm:mb-4 px-3 sm:px-6 py-0.5 sm:py-1 border-y ${isElevated ? 'border-yellow-500/50 bg-yellow-500/10' : 'border-[#ff0050]/50 bg-[#ff0050]/10'}`}
                     >
-                        <span className={`font-mono text-xs tracking-[0.5em] font-bold uppercase ${isElevated ? 'text-yellow-500' : 'text-[#ff0050]'}`}>
+                        <span className={`font-mono text-[10px] xs:text-[11px] sm:text-xs tracking-[0.18em] xs:tracking-[0.25em] sm:tracking-[0.5em] font-bold uppercase ${isElevated ? 'text-yellow-500' : 'text-[#ff0050]'}`}>
                             {isSystemArchitect ? "System Architect Authenticated" : isGameMaster ? "Game Master Authorization Active" : "Borderland Resident Authenticated"}
                         </span>
                     </motion.div>
@@ -107,7 +104,7 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     initial={{ scale: 1.2, filter: 'blur(10px)', opacity: 0 }}
                     animate={{ scale: 1, filter: 'blur(0px)', opacity: 1 }}
                     transition={{ duration: 1.2, ease: "easeOut" }}
-                    className="font-gothic text-[8rem] md:text-[15rem] leading-[0.8] text-white drop-shadow-[0_0_30px_rgba(255,0,80,0.5)] relative mb-2"
+                    className="font-gothic text-[8rem] sm:text-[9rem] md:text-[11rem] lg:text-[15rem] leading-[0.8] text-white drop-shadow-[0_0_30px_rgba(255,0,80,0.5)] relative mb-2"
                 >
                     <span className="font-bold" style={{ fontFamily: "'UnifrakturCook', cursive" }}>A</span>lice
                 </motion.h1>
@@ -117,7 +114,7 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 1, delay: 0.5 }}
-                    className="font-gothic text-3xl md:text-7xl text-white tracking-[0.1em] mt-2 mb-4 md:mb-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-nowrap"
+                    className="font-gothic text-3xl sm:text-3xl md:text-4xl lg:text-5xl text-white tracking-[0.1em] mt-2 mb-4 md:mb-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] whitespace-nowrap"
                 >
                     in Borderland
                 </motion.h2>
@@ -130,7 +127,7 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={onStart}
-                    className="group relative inline-flex items-center justify-center px-10 py-5 md:px-16 md:py-8 bg-transparent overflow-hidden mt-2 md:mt-8 mb-10"
+                    className="group relative inline-flex items-center justify-center w-[80vw] max-w-[320px] sm:w-auto sm:max-w-none py-4 sm:px-10 sm:py-5 md:px-14 md:py-6 lg:px-16 lg:py-7 bg-transparent overflow-hidden mt-2 sm:mt-4 md:mt-6 mb-6 cursor-pointer"
                 >
                     {/* Tech Background Shape */}
                     <div className={`absolute inset-0 w-full h-full bg-[#050508]/80 border ${isElevated ? 'border-yellow-500' : 'border-[#ff0050]'} transform skew-x-[-20deg] ${isElevated ? 'group-hover:bg-yellow-500' : 'group-hover:bg-[#ff0050]'} transition-all duration-300 shadow-[0_0_20px_rgba(255,0,80,0.3)] ${isElevated ? 'group-hover:shadow-[0_0_40px_rgba(234,179,8,0.6)]' : 'group-hover:shadow-[0_0_40px_rgba(255,0,80,0.6)]'}`}></div>
@@ -140,10 +137,30 @@ export const Hero = ({ onStart, userInfo }: HeroProps) => {
                     <div className="absolute bottom-1 right-4 w-2 h-2 bg-white rounded-full z-20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
 
                     {/* Button Text */}
-                    <span className=" relative z-10 font-cinzel font-bold text-lg md:text-2xl tracking-[0.2em] text-white flex items-center gap-4 group-hover:text-black transition-colors duration-300 uppercase">
-                        {isElevated ? (isSystemArchitect ? "Control The System" : "Manage The Games") : "Enter The Borderland"}
-                        <Play size={20} className="fill-current" />
-                    </span >
+                    <span
+                        className=" relative z-10 font-cinzel font-bold text-base xs:text-lg sm:text-base md:text-xl lg:text-2xl tracking-[0.12em] xs:tracking-[0.15em] sm:tracking-[0.2em] text-white flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 md:gap-4 group-hover:text-black transition-colors duration-300 uppercase text-center"
+                        style={{ paddingTop: '5px' }}
+                    >
+                        {isElevated ? (
+                            <span className="flex items-center justify-center gap-2">
+                                {isSystemArchitect ? "Control The System" : "Manage The Games"}
+                                <Play size={16} className="fill-current w-[14px] h-[14px] sm:w-[16px] sm:h-[16px] md:w-[20px] md:h-[20px] lg:w-[24px] lg:h-[24px]" />
+                            </span>
+                        ) : (
+                            <>
+                                <span className="sm:hidden flex flex-col items-center leading-tight">
+                                    <span>Enter The</span>
+                                    <span className="flex items-center gap-1.5 mt-0.5">
+                                        Borderland <Play size={18} className="fill-current" />
+                                    </span>
+                                </span>
+                                <span className="hidden sm:flex items-center gap-3 md:gap-4 whitespace-nowrap">
+                                    Enter The Borderland
+                                    <Play size={16} className="fill-current sm:w-[16px] sm:h-[16px] md:w-[20px] md:h-[20px] lg:w-[24px] lg:h-[24px]" />
+                                </span>
+                            </>
+                        )}
+                    </span>
                 </motion.button >
             </div>
         </section>

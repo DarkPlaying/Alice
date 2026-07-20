@@ -9,6 +9,7 @@ import { GameStatusGuard } from './components/GameStatusGuard';
 import { supabase } from './supabaseClient';
 import { Loader } from './components/Loader';
 import { WaitlistCard } from './components/ui/card-6';
+import { PixelCursorTrail } from './components/ui/pixel-trail';
 
 // Wrapper for authenticated routes with a warning overlay and 2s delay redirect to login
 function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: React.ReactNode; isLoggedIn: boolean; isAdmin: boolean; isLoading: boolean }) {
@@ -34,26 +35,36 @@ function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: R
         {/* Futuristic Laser grid background overlay */}
         <div className="absolute inset-0 opacity-20 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%]" />
         
-        <div className="relative z-10 p-8 border border-[#ff0050]/30 bg-black/80 rounded-2xl max-w-md w-full backdrop-blur-md shadow-[0_0_50px_rgba(255,0,80,0.15)] flex flex-col items-center gap-6">
-          <div className="w-16 h-16 rounded-full border-2 border-[#ff0050] flex items-center justify-center text-[#ff0050] text-3xl animate-pulse font-mono">
-            ⚠️
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-[#ff0050] font-display font-black tracking-widest text-lg uppercase">
+        <div className="relative w-full max-w-sm overflow-hidden rounded-xl border border-white/15 bg-[#0a0a10] shadow-[0_0_80px_rgba(0,0,0,0.9)] backdrop-blur-sm z-10 mx-auto">
+          {/* Inner content */}
+          <div className="px-8 pt-8 pb-8 flex flex-col items-center text-center">
+            
+            {/* Joker image */}
+            <img src="/suit_assets/joker.png" alt="System" className="w-12 h-12 object-contain mb-5 opacity-70" />
+
+            {/* Title */}
+            <h3 style={{ fontFamily: "'Cinzel', serif" }} className="text-base font-bold tracking-[0.15em] mb-3 leading-snug uppercase text-white">
               IDENTITY UNVERIFIED
-            </h2>
-            <p className="text-gray-400 font-mono text-xs tracking-wider leading-relaxed">
-              SURVIVAL PROTOCOL REQUIRES AUTHENTICATION.
+            </h3>
+
+            {/* Divider */}
+            <div className="w-12 h-px bg-white/10 mb-4" />
+
+            {/* Message */}
+            <p className="text-gray-400 text-[13px] leading-relaxed mb-6 whitespace-pre-line font-mono tracking-wide">
+              Activate authentication sequence.<br/>Survival depends on valid credentials.
             </p>
+
+            {/* Loading Bar Footer */}
+            <div className="w-full flex flex-col items-center gap-3">
+              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                <div className="h-full bg-white/80 animate-[loadProgress_2s_linear]" style={{ width: '100%' }} />
+              </div>
+              <p className="text-gray-500 font-mono text-[9px] tracking-[0.2em] uppercase animate-pulse">
+                Redirecting to Login Protocol...
+              </p>
+            </div>
           </div>
-          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-            <div className="h-full bg-[#ff0050] animate-[loadProgress_2s_linear]" style={{
-              width: '100%',
-            }} />
-          </div>
-          <p className="text-gray-500 font-mono text-[10px] tracking-[0.2em] uppercase animate-pulse">
-            Redirecting to Login Protocol...
-          </p>
         </div>
         <style dangerouslySetInnerHTML={{__html: `
           @keyframes loadProgress {
@@ -91,12 +102,19 @@ function AppContent() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const bootTime = Date.now();
     console.log("LOCAL STORAGE DUMP ON BOOT:", localStorage.getItem('borderland-fresh-token-v2'));
     
     // Fallback: forcefully remove loader after 5s if auth state change doesn't fire
     const fallbackTimer = setTimeout(() => {
       setIsLoading(false);
     }, 5000);
+
+    const finishLoading = () => {
+      const elapsed = Date.now() - bootTime;
+      const remaining = Math.max(0, 2000 - elapsed);
+      setTimeout(() => setIsLoading(false), remaining);
+    };
 
     const savedDemo = localStorage.getItem('demo-user-session');
     if (savedDemo) {
@@ -105,7 +123,7 @@ function AppContent() {
         setIsLoggedIn(true);
         setUser(demoUser);
         setIsAdmin(false);
-        setIsLoading(false);
+        finishLoading();
         clearTimeout(fallbackTimer);
         return;
       } catch (e) {
@@ -184,7 +202,10 @@ function AppContent() {
         setIsAdmin(false);
       }
       clearTimeout(fallbackTimer);
-      setIsLoading(false);
+      
+      const elapsed = Date.now() - bootTime;
+      const remaining = Math.max(0, 2000 - elapsed);
+      setTimeout(() => setIsLoading(false), remaining);
     });
     return () => {
       clearTimeout(fallbackTimer);
@@ -416,9 +437,12 @@ function AppContent() {
 
 function App() {
   return (
-    <Router>
-      <AppContent />
-    </Router>
+    <>
+      <PixelCursorTrail />
+      <Router>
+        <AppContent />
+      </Router>
+    </>
   );
 }
 

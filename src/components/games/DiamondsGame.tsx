@@ -1315,7 +1315,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
 
     if (isLoading) return (
-        <div className="min-h-screen bg-[#050508] flex items-center justify-center">
+        <div className="min-h-screen bg-transparent flex items-center justify-center">
             <div className="flex flex-col items-center gap-4">
                 <div className="w-12 h-12 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
                 <p className="text-purple-500/50 font-mono text-sm tracking-widest animate-pulse">ESTABLISHING LINK...</p>
@@ -1325,7 +1325,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // --- RENDER ---
     return (
-        <div className="relative w-full min-h-screen bg-transparent flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
+        <div className="relative w-full min-h-screen bg-black flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
             {/* Background Texture - Using Hub atmosphere but keeping protocol noise */}
             <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 pointer-events-none"></div>

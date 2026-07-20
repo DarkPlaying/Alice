@@ -189,10 +189,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [promptValue, setPromptValue] = useState('');
 
     const sectionMotionDefaults = {
-        initial: { opacity: 0, y: 18 },
+        initial: { opacity: 0, y: 30 },
         animate: { opacity: 1, y: 0 },
-        exit: { opacity: 0, y: -10, transition: { duration: 0.05, ease: 'easeIn' as const } },
-        transition: { duration: 0.24, ease: 'easeOut' as const },
+        exit: { opacity: 0, y: -20, transition: { duration: 0.15, ease: 'easeIn' as const } },
+        transition: { duration: 0.4, ease: 'easeOut' as const },
     } as const;
 
     const suitHexColor = (id: string) =>
@@ -1822,10 +1822,39 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     };
 
     return (
-        <div className="min-h-[111.12vh] bg-[#050508] text-white font-sans block lg:flex relative overflow-hidden" style={{ zoom: 0.9 }}>
-            {/* Background Elements */}
-            <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,100,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,100,0.03)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
-            <div className="absolute inset-0 bg-radial-gradient(circle_at_center,transparent_0%,#050508_90%) pointer-events-none" />
+        <div className="min-h-[111.12vh] bg-black text-white font-sans block lg:flex relative overflow-hidden" style={{ zoom: 0.9 }}>
+            <AnimatePresence>
+                {['dashboard', 'players', 'masters'].includes(activeView) && (
+                    <motion.div
+                        key="admin-bg-image"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="absolute inset-0 pointer-events-none z-0"
+                    >
+                        <div className="absolute inset-0 bg-cover bg-center opacity-50" style={{ backgroundImage: "url('/admin bg.jpg')" }} />
+                        <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,100,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,100,0.03)_1px,transparent_1px)] bg-[size:40px_40px] mix-blend-overlay" />
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.8)_100%)]" />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            <AnimatePresence>
+                {['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView) && (
+                    <motion.div
+                        key="admin-bg-image"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="absolute inset-0 pointer-events-none z-0"
+                    >
+                        <div className="absolute inset-0 bg-cover bg-center opacity-20" style={{ backgroundImage: "url('/admin bg.jpg')" }} />
+                        <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,100,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,100,0.03)_1px,transparent_1px)] bg-[size:40px_40px] mix-blend-overlay" />
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.8)_100%)]" />
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Mobile Backdrop */}
             <AnimatePresence>
@@ -1869,7 +1898,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             </AnimatePresence>
             {/* LEft SIDEBAR */}
             <aside className={`
-                border-r border-white/10 bg-black/60 backdrop-blur-xl flex flex-col gap-8 h-[111.12vh] z-40 overflow-y-auto admin-scrollbar transition-all duration-300
+                border-r border-white/10 bg-transparent backdrop-blur-2xl flex flex-col gap-8 h-[111.12vh] z-40 overflow-y-auto admin-scrollbar transition-all duration-300
                 ${isSidebarCollapsed ? 'w-[72px] p-3' : 'w-80 p-6'}
                 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
                 fixed lg:sticky top-0 left-0 lg:left-auto
@@ -2017,22 +2046,22 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     </>
                                 ) : activeView === 'clubs' ? (
                                     <>
-                                        <span className="text-2xl text-cyan-400 font-bold">♣</span>
+                                        <span className="text-3xl text-green-400 font-bold">♣</span>
                                         CLUBS PROTOCOL
                                     </>
                                 ) : activeView === 'spades' ? (
                                     <>
-                                        <span className="text-2xl text-blue-400 font-bold">♠</span>
+                                        <span className="text-3xl text-blue-400 font-bold">♠</span>
                                         SPADES PROTOCOL
                                     </>
                                 ) : activeView === 'diamonds' ? (
                                     <>
-                                        <span className="text-2xl text-purple-400 font-bold">♦</span>
+                                        <span className="text-3xl text-purple-400 font-bold">♦</span>
                                         DIAMONDS PROTOCOL
                                     </>
                                 ) : activeView === 'hearts' ? (
                                     <>
-                                        <span className="text-2xl text-red-400 font-bold">♥</span>
+                                        <span className="text-4xl text-red-500 font-bold">♥</span>
                                         HEARTS PROTOCOL
                                     </>
                                 ) : (
@@ -2512,7 +2541,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
                     {/* Suits View */}
                     {
-                        ['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView) && suits.map(suit => {
+                        suits.map(suit => {
                             if (suit.id !== activeView) return null;
                             return (
                                 <motion.div
@@ -3598,7 +3627,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     animate={sectionFloat.animate}
                                     exit={sectionFloat.exit}
                                     transition={sectionFloat.transition}
-                                    className="w-full max-w-[95vw] sm:max-w-2xl bg-[#050508] border border-green-500/30 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh]"
+                                    className={`w-full max-w-[95vw] sm:max-w-2xl bg-[#050508]/90 backdrop-blur-xl border rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh] ${selectedSuitForModal === 'hearts' ? 'border-red-500/30' : selectedSuitForModal === 'spades' ? 'border-blue-500/30' : selectedSuitForModal === 'diamonds' ? 'border-purple-500/30' : 'border-green-500/30'}`}
                                 >
                                     {/* Header */}
                                     <div className="p-3 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
@@ -4113,7 +4142,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             showToast(`START ERROR: ${err.message}`, 'error');
                                                         }
                                                     }}
-                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg bg-green-500 text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-green-400 hover:scale-105 shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all flex items-center gap-2"
+                                                    className={`px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center gap-2 ${selectedSuitForModal === 'hearts' ? 'bg-red-500 hover:bg-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : selectedSuitForModal === 'spades' ? 'bg-blue-500 hover:bg-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : selectedSuitForModal === 'diamonds' ? 'bg-purple-500 hover:bg-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.3)]' : 'bg-green-500 hover:bg-green-400 shadow-[0_0_20px_rgba(34,197,94,0.3)]'}`}
                                                 >
                                                     INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
                                                 </button>

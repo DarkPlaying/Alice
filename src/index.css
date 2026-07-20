@@ -139,6 +139,11 @@
         scrollbar-color: #000000 rgba(255, 255, 255, 0.05);
     }
 
+    /* Force Custom Cursor on all elements except html */
+    body, body * {
+        cursor: inherit !important;
+    }
+
     *::-webkit-scrollbar {
         width: 10px;
         height: 10px;
@@ -373,3 +378,9 @@
 .animate-laser-scan {
     animation: laser-scan 4s linear infinite;
 }
+
+/* Marathon Bold Arrow - https://www.cursors-4u.com/cursor/marathon-bold-arrow */
+* {
+  cursor: url('https://cdn.cursors-4u.net/previews/normal-4d9d684a-32.webp') 32 32, auto !important;
+}
+/* End www.Cursors-4U.com Code */

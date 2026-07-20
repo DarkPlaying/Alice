@@ -116,9 +116,9 @@ export const FloatingCards = () => {
     return (
         <div className="absolute inset-0 w-full h-full pointer-events-none z-20 overflow-hidden">
             {/* --- LEFT SIDE --- */}
-            <div className="absolute top-0 left-0 md:left-6 w-24 md:w-48 h-full">
+            <div className="absolute top-0 left-0 sm:left-2 md:left-4 lg:left-6 w-16 sm:w-24 md:w-36 lg:w-48 h-full">
                 {/* Left Main */}
-                <div className="absolute left-0 top-0 w-10 md:w-20 flex flex-col gap-32 md:gap-40 pb-40">
+                <div className="absolute left-0 top-0 w-8 sm:w-10 md:w-12 lg:w-16 xl:w-20 flex flex-col gap-24 sm:gap-32 md:gap-40 pb-40">
                     {cardsLeftMain.map((card, i) => (
                         <div key={`lm-${i}`} className={i % 2 === 0 ? 'block' : 'hidden md:block'}>
                             <FadingCard
@@ -131,7 +131,7 @@ export const FloatingCards = () => {
                 </div>
 
                 {/* Left Inner */}
-                <div className="absolute left-12 md:left-24 top-24 w-12 md:w-24 hidden md:flex flex-col gap-32 md:gap-40 pb-40">
+                <div className="absolute left-10 sm:left-14 md:left-20 lg:left-24 top-24 w-10 sm:w-12 md:w-14 lg:w-18 xl:w-22 hidden md:flex flex-col gap-24 sm:gap-32 md:gap-40 pb-40">
                     {cardsLeftInner.map((card, i) => (
                         <FadingCard
                             key={`li-${i}`}
@@ -144,9 +144,9 @@ export const FloatingCards = () => {
             </div>
 
             {/* --- RIGHT SIDE --- */}
-            <div className="absolute top-0 right-0 md:right-6 w-24 md:w-48 h-full">
+            <div className="absolute top-0 right-0 sm:right-2 md:right-4 lg:right-6 w-16 sm:w-24 md:w-36 lg:w-48 h-full">
                 {/* Right Inner */}
-                <div className="absolute right-12 md:right-24 top-24 w-12 md:w-24 hidden md:flex flex-col gap-32 md:gap-40 pb-40">
+                <div className="absolute right-10 sm:right-14 md:right-20 lg:right-24 top-24 w-10 sm:w-12 md:w-14 lg:w-18 xl:w-22 hidden md:flex flex-col gap-24 sm:gap-32 md:gap-40 pb-40">
                     {cardsRightInner.map((card, i) => (
                         <FadingCard
                             key={`ri-${i}`}
@@ -158,7 +158,7 @@ export const FloatingCards = () => {
                 </div>
 
                 {/* Right Main */}
-                <div className="absolute right-0 top-0 w-10 md:w-20 flex flex-col gap-32 md:gap-40 pb-40">
+                <div className="absolute right-0 top-0 w-8 sm:w-10 md:w-12 lg:w-16 xl:w-20 flex flex-col gap-24 sm:gap-32 md:gap-40 pb-40">
                     {cardsRightMain.map((card, i) => (
                         <div key={`rm-${i}`} className={i % 2 !== 0 ? 'block' : 'hidden md:block'}>
                             <FadingCard

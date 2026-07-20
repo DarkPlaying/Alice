@@ -728,7 +728,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
     // --- Render: Idle ---
     if (phase === 'idle') {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen bg-black/90 text-white font-mono">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white font-mono">
                 <Loader2 className="animate-spin text-blue-500 mb-4" size={48} />
                 <h2 className="text-xl font-bold tracking-[0.2em] animate-pulse text-center px-4">
                     CONNECTING TO NEURAL LINK...
@@ -761,7 +761,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
 
     // --- Main Game UI ---
     return (
-        <div className="relative h-screen bg-[#050505] text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
+        <div className="relative h-screen bg-black text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
             {/* Background */}
             <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518544806314-5f87afc71c1b?q=80&w=2560&auto=format&fit=crop')] opacity-[0.03] bg-cover bg-center pointer-events-none mix-blend-screen" />
             <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-black to-black pointer-events-none" />

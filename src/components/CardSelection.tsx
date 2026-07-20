@@ -12,7 +12,7 @@ const cards = [
         color: '#3b82f6',
         glow: 'rgba(59, 130, 246, 0.4)',
         symbol: '♠',
-        image: '/suit_assets/spade.png',
+        image: '/Game Wallpaper/spade.png',
     },
     {
         type: 'Hearts',
@@ -22,7 +22,7 @@ const cards = [
         color: '#ef4444',
         glow: 'rgba(239, 68, 68, 0.4)',
         symbol: '♥',
-        image: '/suit_assets/hearts.png',
+        image: '/Game Wallpaper/hearts.png',
     },
     {
         type: 'Clubs',
@@ -32,17 +32,17 @@ const cards = [
         color: '#22c55e',
         glow: 'rgba(34, 197, 94, 0.4)',
         symbol: '♣',
-        image: '/suit_assets/clubs.png',
+        image: '/Game Wallpaper/clubs.png',
     },
     {
         type: 'Diamonds',
         title: 'INTELLIGENCE',
         nickname: 'THE FIXER',
         description: 'Games of wit. Logical thinking and strategy are key.',
-        color: '#eab308',
-        glow: 'rgba(234, 179, 8, 0.4)',
+        color: '#a855f7',
+        glow: 'rgba(168, 85, 247, 0.4)',
         symbol: '♦',
-        image: '/suit_assets/diamond.png',
+        image: '/Game Wallpaper/diamond.png',
     }
 ];
 
@@ -59,7 +59,7 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
     const [showPlayerCard, setShowPlayerCard] = useState(false);
 
     return (
-        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-20 pb-4 lg:pt-16 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans overflow-x-hidden w-full">
+        <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#050508] flex flex-col items-center justify-start lg:justify-center pt-10 pb-4 lg:pt-8 lg:pb-6 px-4 sm:px-6 lg:px-8 relative font-sans overflow-x-hidden w-full">
 
             {/* ── Top Left: Back Button ── */}
             <div className="fixed top-4 left-3 sm:top-6 sm:left-6 z-50">
@@ -81,21 +81,11 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
 
             {/* Background */}
             <div className="absolute inset-0 z-0">
-                <div className="absolute inset-0 bg-[url('/hero-bg.webp')] bg-cover bg-center opacity-10 blur-3xl scale-125" />
-                <div
-                    className="absolute inset-0 opacity-10"
-                    style={{
-                        backgroundImage: `
-                            linear-gradient(45deg, #ff0050 25%, transparent 25%), 
-                            linear-gradient(-45deg, #ff0050 25%, transparent 25%), 
-                            linear-gradient(45deg, transparent 75%, #ff0050 75%), 
-                            linear-gradient(-45deg, transparent 75%, #ff0050 75%)
-                        `,
-                        backgroundSize: '80px 80px',
-                        backgroundPosition: '0 0, 0 40px, 40px 40px, 40px 0'
-                    }}
+                <div 
+                    className="absolute inset-0 bg-cover bg-center opacity-60" 
+                    style={{ backgroundImage: "url('/Untitled design.png')" }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-black" />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#050508] via-transparent to-[#050508]" />
             </div>
 
             {/* ── Top Right: Profile + Logout ── */}
@@ -132,14 +122,19 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                 className="relative z-10 flex flex-col items-center mb-5 lg:mb-10 text-center"
             >
                 <p className="text-white/40 text-[9px] tracking-[0.5em] mb-1 select-none">今際の国のアリス</p>
-                <div className="flex flex-col items-center gap-0 leading-none mb-3">
-                    <h1 className="text-5xl md:text-7xl lg:text-7xl font-gothic text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+                <motion.div 
+                    initial={{ opacity: 0, filter: "blur(10px)" }}
+                    animate={{ opacity: 1, filter: "blur(0px)" }}
+                    transition={{ duration: 2, ease: "easeOut", delay: 0.2 }}
+                    className="flex flex-col items-center gap-0 leading-none mb-4"
+                >
+                    <h1 className="text-7xl md:text-8xl lg:text-9xl font-gothic text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
                         <span className="font-bold" style={{ fontFamily: "'UnifrakturCook', cursive" }}>A</span>lice
                     </h1>
-                    <h2 className="text-2xl md:text-3xl lg:text-3xl font-gothic text-white/80 -mt-2 drop-shadow-[0_10px_20px_rgba(0,0,0,0.4)]">
+                    <h2 className="text-3xl md:text-4xl lg:text-5xl font-gothic text-white/80 -mt-2 lg:-mt-4 drop-shadow-[0_10px_20px_rgba(0,0,0,0.4)]">
                         in Borderland
                     </h2>
-                </div>
+                </motion.div>
 
                 <div className="flex items-center gap-4 mt-1">
                     <div className="h-px w-12 sm:w-36 md:w-48 bg-[#ff0050]" />
@@ -155,9 +150,9 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                 {cards.map((card, index) => (
                     <motion.div
                         key={card.type}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: index * 0.1 }}
+                        initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        transition={{ duration: 1.2, ease: "easeOut", delay: index * 0.15 }}
                         onMouseEnter={() => setHoveredIndex(index)}
                         onMouseLeave={() => setHoveredIndex(null)}
                         onClick={() => {
@@ -165,46 +160,29 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
                         }}
                         className="relative cursor-pointer"
                     >
-                        <div
-                            className="w-full aspect-[5/7] relative group rounded-[1rem] sm:rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
-                            style={{
-                                boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
-                            }}
+                        <motion.div
+                            animate={{ y: [0, -12, 0] }}
+                            transition={{ duration: 1.5, ease: "easeInOut", delay: index * 0.4 }}
                         >
-                            {/* Full-bleed Image */}
-                            <img
-                                src={card.image}
-                                alt={card.type}
-                                className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
-                            />
-                            {/* Gradient overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent opacity-90 group-hover:opacity-70 transition-opacity duration-500" />
+                            <div
+                                className="w-full aspect-[5/7] relative group rounded-[1rem] sm:rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
+                                style={{
+                                    boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
+                                }}
+                            >
+                                {/* Full-bleed Image */}
+                                <img
+                                    src={card.image}
+                                    alt={card.type}
+                                    className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
+                                />
+                                {/* Gradient overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-50 group-hover:opacity-30 transition-opacity duration-500" />
 
-                            {/* Card Info */}
-                            <div className="absolute inset-0 z-10 p-3 sm:p-5 flex flex-col justify-end pointer-events-none">
-                                <div className="space-y-1 sm:space-y-2 transform group-hover:-translate-y-1 transition-transform duration-500">
-                                    <div className="h-px w-full bg-white/10" />
-                                    <div>
-                                        <h3 className="text-sm sm:text-xl md:text-2xl font-cinzel text-white uppercase tracking-wide drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] font-bold leading-tight">
-                                            {card.type.slice(0, -1)}
-                                        </h3>
-                                        <p className="text-[9px] sm:text-[10px] font-mono text-white/50 group-hover:text-white/90 transition-colors uppercase tracking-wider mt-0.5">
-                                            {card.type.slice(0, -1)} Spec.
-                                        </p>
-                                    </div>
-                                    <div className="hidden sm:block">
-                                        <p className="text-[8px] font-mono tracking-[0.15em] text-white/30 uppercase leading-relaxed group-hover:text-white/60 transition-colors">
-                                            Citizens of the Borderland<br />
-                                            Pattern: {card.type.slice(0, -1).toUpperCase()}<br />
-                                            Status: PENDING
-                                        </p>
-                                    </div>
-                                </div>
+                                {/* Scanline */}
+                                <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
                             </div>
-
-                            {/* Scanline */}
-                            <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
-                        </div>
+                        </motion.div>
 
                         {/* Status light */}
                         <div className="mt-1.5 sm:mt-2.5 flex justify-center">

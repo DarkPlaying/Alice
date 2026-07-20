@@ -22,7 +22,7 @@ const DEMO_START_SCORE = 1000;
 const BOT_ID = 'demo-bot';
 
 const PHASE_DURATIONS: Record<DemoPhase, number> = {
-    briefing: 20,
+    briefing: 6,
     slotting: 60,
     evaluation: 10,
     picking: 30,
@@ -250,9 +250,7 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
     const slotDetails = getSlotDetails();
 
     return (
-        <div className="relative w-full min-h-screen bg-transparent flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
-            {/* Background Texture */}
-            <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
+        <div className="relative w-full min-h-screen bg-black flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
 
             {/* Header / HUD */}
             <header className="fixed top-0 left-0 right-0 z-[150] bg-black border-b border-purple-500/20 px-4 py-3 sm:px-8 sm:py-4">
@@ -405,24 +403,36 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                     </motion.div>
                 </div>
 
-                {/* briefing View */}
+                {/* Briefing View */}
                 {phase === 'briefing' && (
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-4xl space-y-8 pt-10 sm:pt-0">
-                        <div className="bg-[#0a0a0f]/80 backdrop-blur-md p-8 sm:p-12 rounded-[30px] border border-purple-500/30 text-center relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent" />
-                            <h1 className="text-3xl sm:text-6xl font-black font-cinzel text-white mb-6 uppercase tracking-widest">
-                                LOGIC <span className="text-purple-500">PROTOCOL</span>
-                            </h1>
-                            <p className="text-lg text-white/70 font-light mb-8 max-w-xl mx-auto leading-relaxed">
-                                Welcome, Agent. You are assigned to face <span className="text-purple-500 font-bold">DEMO-BOT</span>.
-                                Place standard and specialty cards to beat the bot's deployment.
-                            </p>
-                            <button
-                                onClick={() => advancePhase('briefing')}
-                                className="px-12 py-4 bg-purple-600 hover:bg-purple-500 text-black font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95"
-                            >
-                                START DEPLOYMENT
-                            </button>
+                    <motion.div
+                        key="briefing"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="bg-black/40 border border-purple-900/30 p-4 sm:p-6 max-w-xl mx-auto backdrop-blur-sm rounded-lg w-full shadow-2xl flex-1 flex flex-col justify-center mt-10"
+                    >
+                        <h2 className="text-xl sm:text-2xl font-black font-cinzel text-purple-500 mb-4 text-center tracking-[0.1em] sm:tracking-[0.2em] drop-shadow-[0_0_15px_rgba(168,85,247,0.5)]">
+                            PROTOCOL BRIEFING
+                        </h2>
+                        <div className="space-y-4 text-xs sm:text-sm font-mono text-slate-300 leading-relaxed">
+                            <div className="p-3 bg-yellow-500/10 border-l-2 border-yellow-500">
+                                <h3 className="text-white font-bold mb-1">TABLE ASSIGNMENT: DEMO-BOT</h3>
+                                <p>You have been assigned to face DEMO-BOT.</p>
+                            </div>
+                            <div className="p-3 bg-purple-900/10 border-l-2 border-purple-500">
+                                <h3 className="text-white font-bold flex items-center gap-2 mb-1">
+                                    <Shield size={14} /> OBJECTIVE
+                                </h3>
+                                <p className="mb-1">Place standard and specialty cards to beat the bot's deployment. In this demo, you play 1 round.</p>
+                            </div>
+                            <div className="p-3 bg-red-900/10 border-l-2 border-red-500">
+                                <h3 className="text-white font-bold mb-1">SCORING</h3>
+                                <ul className="space-y-0.5 text-xs">
+                                    <li>• Zombie (Red Face Card): <span className="text-red-400">BEATS ALL NUMBERS</span></li>
+                                    <li>• Shotgun (Black Face Card): <span className="text-orange-400">ELIMINATES TARGETS</span></li>
+                                </ul>
+                            </div>
                         </div>
                     </motion.div>
                 )}
@@ -610,18 +620,52 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                             </h2>
                         </div>
 
-                        {/* Score Card */}
-                        <div className="relative group w-full max-w-xl px-4 sm:px-0">
-                            <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
-                                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent opacity-80" />
-                                <div className="flex-1 min-h-[100px] sm:min-h-[140px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
-                                    <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">NET MERIT</p>
-                                    <p className="text-3xl sm:text-6xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2">
-                                        {myScore}
+                        {/* Left / Right Column Result Screen */}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-stretch justify-center w-full max-w-5xl gap-6 px-4 z-10">
+                            {/* Left Side: Contact Admin CTA */}
+                            <motion.div
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.2 }}
+                                className="w-full sm:w-1/2 flex flex-col justify-center"
+                            >
+                                <div className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-3xl p-8 text-center shadow-[0_0_30px_rgba(255,0,80,0.1)] h-full flex flex-col justify-center">
+                                    <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-60" />
+                                    <p className="text-xs font-mono text-red-400/60 uppercase tracking-[0.4em] mb-4">DEMO LIMITATION</p>
+                                    <p className="text-white font-bold font-cinzel tracking-widest text-xl sm:text-2xl mb-4">
+                                        WANT TO PLAY THE REAL GAME?
                                     </p>
+                                    <p className="text-white/50 font-mono text-sm leading-relaxed mb-8">
+                                        This was a 1-round demo simulation.<br />
+                                        The real Diamonds Trial has 5 rounds, real opponents,<br />
+                                        and actual Visa Points at stake.
+                                    </p>
+                                    <div className="flex items-center justify-center gap-3 flex-wrap">
+                                        <div className="px-6 py-3 bg-red-500/10 border border-red-500/30 rounded-full">
+                                            <span className="text-red-400 font-mono text-xs uppercase tracking-widest">
+                                                📡 Contact an Admin to unlock your player access
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="flex-1 flex flex-col p-4 sm:p-6 gap-3 justify-center relative bg-black/20">
-                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                            </motion.div>
+
+                            {/* Right Side Stack: Stats & Score */}
+                            <motion.div
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.4 }}
+                                className="w-full sm:w-1/2 flex flex-col gap-4 relative"
+                            >
+                                {/* Net Merit */}
+                                <div className="w-full flex flex-col items-center justify-center relative p-6 sm:p-8 rounded-2xl bg-zinc-950/80 border border-white/10 shadow-2xl backdrop-blur-xl">
+                                    <p className="text-zinc-500 font-mono text-[10px] sm:text-xs uppercase tracking-[0.4em] mb-2 relative z-10">NET MERIT</p>
+                                    <p className="text-5xl sm:text-7xl font-black font-oswald text-white relative z-10">{myScore}</p>
+                                </div>
+                                
+                                {/* Condition */}
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-4">
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-3">
                                         <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
                                         <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
                                             SURVIVED
@@ -634,44 +678,21 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                                         </span>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
 
-                        {/* Bot result */}
-                        <div className="w-full max-w-xl px-4 sm:px-0">
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
-                                <div>
-                                    <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
-                                    <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
-                                    <p className="text-xl font-black font-oswald text-white/60">{botScore}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Contact Admin CTA */}
-                        <div className="w-full max-w-xl px-4 sm:px-0">
-                            <div className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-2xl p-5 text-center shadow-[0_0_30px_rgba(255,0,80,0.1)]">
-                                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-60" />
-                                <p className="text-[10px] font-mono text-red-400/60 uppercase tracking-[0.4em] mb-2">DEMO LIMITATION</p>
-                                <p className="text-white font-bold font-cinzel tracking-widest text-base mb-1">
-                                    WANT TO PLAY THE REAL GAME?
-                                </p>
-                                <p className="text-white/50 font-mono text-xs leading-relaxed mb-4">
-                                    This was a 1-round demo simulation.<br />
-                                    The real Diamonds Trial has 5 rounds, real opponents,<br />
-                                    and actual Visa Points at stake.
-                                </p>
-                                <div className="flex items-center justify-center gap-3 flex-wrap">
-                                    <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-full">
-                                        <span className="text-red-400 font-mono text-[11px] uppercase tracking-widest">
-                                            📡 Contact an Admin to unlock your player access
-                                        </span>
+                                {/* Bot Result */}
+                                <div className="w-full">
+                                    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
+                                            <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
+                                            <p className="text-xl font-black font-oswald text-white/60">{botScore}</p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            </motion.div>
                         </div>
 
                         {/* Action Button */}

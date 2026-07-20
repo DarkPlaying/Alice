@@ -204,91 +204,226 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
 
     // ── HUD render ─────────────────────────────────────────────────────────
     const renderHUD = () => (
-        <header className="sticky top-0 left-0 right-0 z-[160] bg-black border-b border-rose-500/20 px-4 py-3 sm:px-8 sm:py-4">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-                <div className="flex items-center gap-3">
+        <header className="fixed top-0 left-0 right-0 z-[160] bg-black/80 backdrop-blur-md">
+            {/* Top Overlay — Trial Specialty */}
+            <div className="flex justify-between items-center px-4 py-3 sm:px-8 sm:py-4 border-b border-rose-500/10">
+                <div className="flex items-center gap-3 sm:gap-6">
                     <button
                         onClick={() => window.location.href = '/home/card'}
-                        className="flex items-center justify-center w-8 h-8 rounded-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all"
+                        className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group hover:scale-105 active:scale-95"
                         title="Exit game"
                     >
-                        <X size={14} />
+                        <X size={14} className="sm:w-5 sm:h-5 group-hover:rotate-90 transition-transform" />
                     </button>
-                    <div className="flex flex-col">
-                        <h2 className="text-[10px] sm:text-xs font-cinzel font-black text-rose-500 tracking-[0.3em] uppercase leading-none mb-1">
-                            HEARTS TRIAL — DEMO
-                        </h2>
-                        <h1 className="text-sm sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
-                            IDENTITY CRISIS
+                    <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                            <span className="h-1 w-1 sm:h-1.5 sm:w-1.5 rounded-full bg-rose-500 animate-pulse shadow-[0_0_10px_currentColor]" />
+                            <p className="text-rose-500 font-mono text-[8px] sm:text-[10px] uppercase font-bold tracking-[0.2em] sm:tracking-[0.4em]">
+                                TRIAL SPECIALTY // HEARTS
+                            </p>
+                        </div>
+                        <h1 className="text-lg sm:text-3xl font-cinzel text-white uppercase tracking-wider drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] leading-tight">
+                            Borderland Trials
                         </h1>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 sm:gap-4">
                     <div className="hidden sm:block px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
                         DEMO MODE
                     </div>
                     <button
-                        onClick={() => setShowRulesModal(true)}
-                        className="p-2 sm:px-4 sm:py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded text-rose-500 transition-all active:scale-95"
+                        onClick={() => window.location.href = '/home/card'}
+                        className="bg-red-500/10 hover:bg-red-500 border border-red-500/50 text-red-500 hover:text-white px-3 py-1 sm:px-4 sm:py-1.5 rounded text-[9px] sm:text-[10px] font-mono tracking-widest uppercase transition-all"
                     >
-                        <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">RULES</span>
-                        <Info size={18} className="sm:hidden" />
+                        LOGOUT
                     </button>
-                    <button
-                        onClick={() => setShowPointsModal(true)}
-                        className="p-2 sm:px-4 sm:py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded text-blue-500 transition-all active:scale-95"
-                    >
-                        <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">SCORE</span>
-                        <Scan size={18} className="sm:hidden" />
-                    </button>
-                    <button
-                        onClick={() => setShowPlayerCard(true)}
-                        className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-white/5 hover:bg-white/15 transition-colors"
-                        title="Player Profile"
-                    >
-                        <User size={14} className="text-gray-300" />
-                    </button>
-                </div>
-            </div>
-
-            <div className="max-w-7xl mx-auto mt-3 pt-3 border-t border-white/5 flex items-center justify-around sm:justify-end sm:gap-8">
-                <div className="flex flex-col items-center sm:items-end">
-                    <p className="text-[7px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">PHASE</p>
-                    <p className="text-sm sm:text-lg font-black font-oswald text-rose-500 uppercase leading-none">
-                        {phase}
-                    </p>
-                </div>
-                <div className="w-px h-6 bg-white/10 sm:hidden" />
-                <div className="flex flex-col items-center sm:items-end">
-                    <p className="text-[7px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">ROUND</p>
-                    <p className="text-sm sm:text-lg font-black font-oswald text-white leading-none">
-                        1<span className="text-rose-900 text-[10px] sm:text-sm">/1</span>
-                    </p>
-                </div>
-                <div className="w-px h-6 bg-white/10 sm:hidden" />
-                <div className="flex flex-col items-center sm:items-end">
-                    <p className="text-[7px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">TIMER</p>
-                    <div className="flex items-center gap-1.5 leading-none">
-                        <RotateCcw size={12} className={`text-rose-500 sm:w-4 sm:h-4 ${timeLeft < 10 ? 'animate-spin' : ''}`} />
-                        <p className={`text-sm sm:text-lg font-black font-oswald tabular-nums ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-rose-500'}`}>
-                            {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
-                        </p>
+                    <div className="flex items-center gap-2 text-right">
+                        <div className="hidden sm:block">
+                            <p className="text-[8px] sm:text-[10px] text-gray-500 font-mono uppercase tracking-wider">CURRENT STATE</p>
+                            <p className="text-sm sm:text-lg font-black font-oswald text-white uppercase">REGISTRATION</p>
+                        </div>
                     </div>
                 </div>
-                <div className="w-px h-6 bg-white/10 sm:hidden" />
-                <div className="flex flex-col items-center sm:items-end bg-rose-500/10 px-3 py-1 sm:px-4 sm:py-1 rounded border border-rose-500/20">
-                    <p className="text-[7px] sm:text-[9px] text-rose-400/70 font-mono uppercase tracking-[0.2em]">SCORE</p>
-                    <p className="text-sm sm:text-lg font-black font-oswald text-rose-500">
-                        {myScore}
-                    </p>
+            </div>
+            {/* Game Header */}
+            <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3 sm:px-8 sm:py-4">
+                <div className="flex items-center gap-3">
+                    <div className="flex flex-col">
+                        <h2 className="text-[8px] sm:text-xs font-cinzel font-black text-rose-500 tracking-[0.3em] uppercase leading-none mb-1">
+                            HEARTS TRIAL — DEMO
+                        </h2>
+                        <h1 className="text-[11px] sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
+                            IDENTITY CRISIS
+                        </h1>
+                    </div>
+                </div>
+                <div className="flex items-center gap-1 sm:gap-3">
+                    <div className="flex items-center gap-1 sm:gap-2 text-center">
+                        <div className="flex flex-col items-center">
+                            <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">PHASE</p>
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500 uppercase leading-none">
+                                {phase}
+                            </p>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="flex flex-col items-center">
+                            <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">ROUND</p>
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-white leading-none">
+                                1<span className="text-rose-900 text-[7px] sm:text-sm">/1</span>
+                            </p>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="flex flex-col items-center">
+                            <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">TIMER</p>
+                            <div className="flex items-center gap-1 leading-none">
+                                <RotateCcw size={10} className={`text-rose-500 sm:w-4 sm:h-4 ${timeLeft < 10 ? 'animate-spin' : ''}`} />
+                                <p className={`text-[10px] sm:text-lg font-black font-oswald tabular-nums ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-rose-500'}`}>
+                                    {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="flex flex-col items-center bg-rose-500/10 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded border border-rose-500/20">
+                            <p className="text-[6px] sm:text-[9px] text-rose-400/70 font-mono uppercase tracking-[0.2em]">SCORE</p>
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500">
+                                {myScore}
+                            </p>
+                        </div>
+                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                    </div>
+                    <button
+                        onClick={() => setShowPlayerCard(true)}
+                        className="p-2 sm:px-3 sm:py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded text-rose-500 transition-all active:scale-95"
+                    >
+                        <User size={16} className="sm:w-5 sm:h-5" />
+                    </button>
                 </div>
             </div>
         </header>
     );
+        
+
+    // ── Early return for result/completed phase ─────────────────────────
+    if (phase === 'result') {
+        return (
+            <div className="relative h-screen bg-black text-white overflow-y-auto font-sans overscroll-y-auto">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-rose-900/20 via-[#0a0a0a] to-[#050505] pointer-events-none" />
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    className="fixed inset-0 z-[200] flex flex-col items-center justify-start pt-8 sm:justify-center sm:pt-0 gap-5 sm:gap-8 bg-black/97 overflow-y-auto pb-12"
+                >
+                    <div className="px-4 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
+                        DEMO ROUND COMPLETE
+                    </div>
+
+                    <div className="text-center flex flex-col gap-2">
+                        <h1 className="text-2xl sm:text-5xl font-black font-cinzel text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] px-4">
+                            CROSS REVEAL COMPLETE
+                        </h1>
+                        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3, duration: 0.6 }}>
+                            <h2 className="text-xs md:text-sm font-bold font-mono text-green-500 tracking-[0.4em] uppercase italic">
+                                VITALITY CHECK // PASSED
+                            </h2>
+                        </motion.div>
+                    </div>
+
+                    <div className="w-full max-w-5xl px-4 sm:px-8 grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+                        <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.4 }}
+                            className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(255,0,80,0.1)] flex flex-col justify-between"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-60" />
+                            <p className="text-[10px] font-mono text-red-400/60 uppercase tracking-[0.4em] mb-2">DEMO LIMITATION</p>
+                            <p className="text-white font-bold font-cinzel tracking-widest text-base mb-1">
+                                WANT TO PLAY THE REAL GAME?
+                            </p>
+                            <p className="text-white/50 font-mono text-xs leading-relaxed mb-4">
+                                This was a 1-round demo simulation.<br />
+                                The real Hearts Trial has 5 rounds, real opponents,<br />
+                                and actual Visa Points at stake.
+                            </p>
+                            <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-full inline-block">
+                                <span className="text-red-400 font-mono text-[10px] uppercase tracking-widest">
+                                    📡 Contact an Admin to unlock your player access
+                                </span>
+                            </div>
+                        </motion.div>
+
+                        <div className="flex flex-col gap-4">
+                            <motion.div
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.5 }}
+                                className="relative group w-full"
+                            >
+                                <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
+                                    <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-80" />
+                                    <div className="absolute -top-20 -left-20 w-60 h-60 rounded-full blur-[100px] bg-green-500/10 pointer-events-none" />
+                                    <div className="flex-1 min-h-[100px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
+                                        <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">NET MERIT</p>
+                                        <p className="text-3xl sm:text-5xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2">
+                                            {myScore}
+                                        </p>
+                                    </div>
+                                    <div className="flex-1 flex flex-col p-4 sm:p-6 gap-3 justify-center relative bg-black/20">
+                                        <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                            <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
+                                            <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
+                                                SURVIVED
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="absolute -inset-4 rounded-3xl blur-2xl opacity-20 bg-green-500 z-0" />
+                            </motion.div>
+
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.6 }}
+                                className="w-full"
+                            >
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
+                                        <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT (ELIMINATED)</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
+                                        <p className="text-xl font-black font-oswald text-white/60">{botScore}</p>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        </div>
+                    </div>
+
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.7 }}
+                        className="w-full max-w-xs"
+                    >
+                        <button
+                            onClick={() => window.location.href = '/home/card'}
+                            className="group relative w-full h-14 bg-green-600 hover:bg-green-500 border border-green-400/50 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
+                        >
+                            <span className="relative z-10 font-mono font-black tracking-[0.2em] uppercase text-white text-sm">
+                                → Enter Another Arena
+                            </span>
+                        </button>
+                    </motion.div>
+                </motion.div>
+            </div>
+        );
+    }
 
     // ── Main Content Render ────────────────────────────────────────────────
     return (
-        <div className="w-full h-full bg-[#050505] text-white font-sans overflow-y-auto relative selection:bg-rose-500/30 min-h-screen flex flex-col">
+        <div className="w-full h-full bg-[#050505] text-white font-sans overflow-y-auto relative selection:bg-rose-500/30 min-h-screen flex flex-col overscroll-y-auto">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-rose-900/20 via-[#0a0a0a] to-[#050505] pointer-events-none" />
 
             {/* PlayerCardModal */}
@@ -352,7 +487,7 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
             {renderHUD()}
 
             {/* MAIN STAGE */}
-            <div className="flex-1 flex items-start justify-center p-8 relative z-10 pt-8 sm:pt-8 pb-20">
+            <div className="flex-1 flex items-start justify-center p-8 relative z-10 pt-28 sm:pt-24 pb-20">
                 {phase === 'briefing' && (
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8 pt-10 sm:pt-0">
                         <div className="bg-black/60 backdrop-blur-md p-8 rounded-3xl border border-rose-500/30 text-center">
@@ -464,103 +599,11 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
                     </div>
                 )}
 
-                {phase === 'result' && (
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.8, ease: 'easeOut' }}
-                        className="fixed inset-0 z-[200] flex flex-col items-center justify-start pt-10 gap-6 sm:gap-10 bg-black overflow-y-auto pb-12"
-                    >
-                        <div className="mt-4 px-4 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full text-yellow-400 text-[10px] font-mono tracking-widest uppercase">
-                            DEMO ROUND COMPLETE
-                        </div>
 
-                        <div className="text-center flex flex-col gap-4">
-                            <h1 className="text-2xl sm:text-5xl font-black font-cinzel text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] px-4">
-                                CROSS REVEAL COMPLETE
-                            </h1>
-                            <h2 className="text-xs md:text-sm font-bold font-mono text-green-500 tracking-[0.4em] uppercase italic">
-                                VITALITY CHECK // PASSED
-                            </h2>
-                        </div>
-
-                        {/* Score Card */}
-                        <div className="relative group w-full max-w-xl px-4 sm:px-0">
-                            <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
-                                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-80" />
-
-                                <div className="flex-1 min-h-[100px] sm:min-h-[140px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
-                                    <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">NET MERIT</p>
-                                    <p className="text-3xl sm:text-6xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2">
-                                        {myScore}
-                                    </p>
-                                </div>
-
-                                <div className="flex-1 flex flex-col p-4 sm:p-6 gap-3 justify-center relative bg-black/20">
-                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                                        <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
-                                        <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
-                                            SURVIVED
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Bot Result */}
-                        <div className="w-full max-w-xl px-4 sm:px-0">
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
-                                <div>
-                                    <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">OPPONENT</p>
-                                    <p className="font-mono font-bold text-white/60 uppercase">DEMO-BOT (ELIMINATED)</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">FINAL SCORE</p>
-                                    <p className="text-xl font-black font-oswald text-red-500">{botScore}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Contact Admin CTA */}
-                        <div className="w-full max-w-xl px-4 sm:px-0">
-                            <div className="relative overflow-hidden bg-gradient-to-br from-red-950/60 to-black/80 border border-red-500/30 rounded-2xl p-5 text-center shadow-[0_0_30px_rgba(255,0,80,0.1)]">
-                                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-60" />
-                                <p className="text-[10px] font-mono text-red-400/60 uppercase tracking-[0.4em] mb-2">DEMO LIMITATION</p>
-                                <p className="text-white font-bold font-cinzel tracking-widest text-base mb-1">
-                                    WANT TO PLAY THE REAL GAME?
-                                </p>
-                                <p className="text-white/50 font-mono text-xs leading-relaxed mb-4">
-                                    This was a 1-round demo simulation.<br />
-                                    The real Hearts Trial has 5 rounds, real opponents,<br />
-                                    and actual Visa Points at stake.
-                                </p>
-                                <div className="flex items-center justify-center gap-3 flex-wrap">
-                                    <div className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-full">
-                                        <span className="text-red-400 font-mono text-[11px] uppercase tracking-widest">
-                                            📡 Contact an Admin to unlock your player access
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Action Button */}
-                        <div className="w-full max-w-xs px-4 sm:px-0">
-                            <button
-                                onClick={() => window.location.href = '/home/card'}
-                                className="group relative w-full h-14 bg-green-600 hover:bg-green-500 border border-green-400/50 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
-                            >
-                                <span className="relative z-10 font-mono font-black tracking-[0.2em] uppercase text-white text-sm">
-                                    → Enter Another Arena
-                                </span>
-                            </button>
-                        </div>
-                    </motion.div>
-                )}
         </div>
 
             {/* Chat UI */ }
-    {
+    {}
         phase !== 'briefing' && phase !== 'shuffle' && phase !== 'result' && (
             <>
                 <button
@@ -610,7 +653,7 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
                 </AnimatePresence>
             </>
         )
-    }
+    
         </div >
     );
 };

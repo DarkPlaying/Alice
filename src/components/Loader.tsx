@@ -4,6 +4,7 @@ import { Spade, Heart, Club, Diamond } from 'lucide-react';
 
 export function Loader() {
     const [currentSuit, setCurrentSuit] = useState(0);
+    const [progress, setProgress] = useState(0);
     const suits = [
         { Icon: Spade, color: 'text-red-500' },
         { Icon: Heart, color: 'text-[var(--color-squid-pink)]' },
@@ -15,7 +16,24 @@ export function Loader() {
         const interval = setInterval(() => {
             setCurrentSuit((prev) => (prev + 1) % suits.length);
         }, 200);
-        return () => clearInterval(interval);
+
+        const startTime = Date.now();
+        const duration = 2000; // 2 seconds
+
+        const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            let currentProgress = Math.floor((elapsed / duration) * 100);
+            if (currentProgress >= 100) {
+                currentProgress = 100;
+                clearInterval(progressInterval);
+            }
+            setProgress(currentProgress);
+        }, 30);
+
+        return () => {
+            clearInterval(interval);
+            clearInterval(progressInterval);
+        };
     }, []);
 
     const CurrentIcon = suits[currentSuit].Icon;
@@ -54,8 +72,8 @@ export function Loader() {
                 <div className="absolute inset-[-10px] border border-dashed border-red-500/30 rounded-full animate-[spin_4s_linear_infinite_reverse]" />
             </div>
 
-            {/* Loading Text */}
-            <div className="z-10 flex flex-col items-center space-y-2">
+            {/* Loading Text & Progress */}
+            <div className="z-10 flex flex-col items-center space-y-4 mt-8 w-64">
                 <motion.h2
                     className="text-2xl font-display tracking-[0.2em] text-white"
                     animate={{ opacity: [0.5, 1, 0.5] }}
@@ -64,16 +82,15 @@ export function Loader() {
                     INITIALIZING
                 </motion.h2>
 
-                <div className="flex space-x-1">
-                    {[...Array(3)].map((_, i) => (
-                        <motion.div
-                            key={i}
-                            className="w-2 h-2 bg-red-500/50 rounded-full"
-                            animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
-                            transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                        />
-                    ))}
+                <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                    <motion.div 
+                        className="h-full bg-red-500" 
+                        initial={{ width: "0%" }}
+                        animate={{ width: `${progress}%` }}
+                        transition={{ ease: "linear", duration: 0.15 }}
+                    />
                 </div>
+                <div className="text-red-500 font-mono text-sm tracking-widest">{progress}%</div>
             </div>
 
             {/* Decorative Corners */}
