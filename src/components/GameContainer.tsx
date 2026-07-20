@@ -37,6 +37,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const [kickedUser, setKickedUser] = useState(false);
     const [spadesMasterError, setSpadesMasterError] = useState(false); // Track if a Master tries to join Spades
     const [playingVideo, setPlayingVideo] = useState<'start' | 'end' | null>(null);
+    const [videoLoaded, setVideoLoaded] = useState(false);
     const [skipVideos, setSkipVideosState] = useState(() => localStorage.getItem('skipVideos') === 'true');
     const setSkipVideos = (val: boolean) => {
         localStorage.setItem('skipVideos', String(val));
@@ -972,20 +973,28 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                 setWaitingForGM(true);
                             }
                             setPlayingVideo(null);
+                            setVideoLoaded(false);
                         }}
                     >
+                        {!videoLoaded && (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center">
+                                <Loader />
+                            </div>
+                        )}
                         <video
                             ref={videoRef}
                             src={`/${playingVideo}.mp4`}
                             autoPlay
                             playsInline
-                            className="w-full h-full object-cover"
+                            className={`w-full h-full object-cover transition-opacity duration-300 ${videoLoaded ? 'opacity-100' : 'opacity-0'}`}
+                            onCanPlay={() => setVideoLoaded(true)}
                             onEnded={() => {
                                 if (playingVideo === 'start') {
                                     setShowRules(false);
                                     setWaitingForGM(true);
                                 }
                                 setPlayingVideo(null);
+                                setVideoLoaded(false);
                             }}
                         />
                         <div className="absolute bottom-8 right-8 text-red-500 font-bold font-mono text-sm sm:text-base tracking-widest uppercase animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]">
