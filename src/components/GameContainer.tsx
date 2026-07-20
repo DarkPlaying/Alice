@@ -979,7 +979,6 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                             src={`/${playingVideo}.mp4`}
                             autoPlay
                             playsInline
-                            muted
                             className="w-full h-full object-cover"
                             onEnded={() => {
                                 if (playingVideo === 'start') {
