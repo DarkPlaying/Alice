@@ -53,8 +53,8 @@ export const ClubsPointsTable: React.FC<ClubsPointsTableProps> = ({
 
                             {/* Rules Table */}
                             <div className="space-y-4">
-                                <div className="rounded-xl border border-white/5 overflow-hidden bg-white/[0.02]">
-                                    <table className="w-full text-sm">
+                                <div className="rounded-xl border border-white/5 overflow-x-auto bg-white/[0.02]">
+                                    <table className="w-full text-sm min-w-[300px]">
                                         <thead className="bg-white/5 text-white/40 font-mono text-xs uppercase tracking-wider">
                                             <tr>
                                                 <th className="p-4 text-left font-medium">Action</th>

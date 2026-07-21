@@ -258,25 +258,25 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-3">
-                    <div className="flex items-center gap-1 sm:gap-2 text-center">
+                    <div className="flex items-center gap-1 sm:gap-3 text-center">
                         <div className="flex flex-col items-center">
                             <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">PHASE</p>
-                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500 uppercase leading-none">
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500 uppercase leading-none mt-0.5 sm:mt-0">
                                 {phase}
                             </p>
                         </div>
                         <div className="w-px h-4 sm:h-6 bg-white/10" />
                         <div className="flex flex-col items-center">
                             <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">ROUND</p>
-                            <p className="text-[10px] sm:text-lg font-black font-oswald text-white leading-none">
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-white leading-none mt-0.5 sm:mt-0">
                                 1<span className="text-rose-900 text-[7px] sm:text-sm">/1</span>
                             </p>
                         </div>
                         <div className="w-px h-4 sm:h-6 bg-white/10" />
                         <div className="flex flex-col items-center">
                             <p className="text-[6px] sm:text-[9px] text-rose-300/40 font-mono uppercase tracking-[0.2em]">TIMER</p>
-                            <div className="flex items-center gap-1 leading-none">
-                                <RotateCcw size={10} className={`text-rose-500 sm:w-4 sm:h-4 ${timeLeft < 10 ? 'animate-spin' : ''}`} />
+                            <div className="flex items-center gap-1 leading-none mt-0.5 sm:mt-0">
+                                <RotateCcw size={8} className={`text-rose-500 sm:w-4 sm:h-4 ${timeLeft < 10 ? 'animate-spin' : ''}`} />
                                 <p className={`text-[10px] sm:text-lg font-black font-oswald tabular-nums ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-rose-500'}`}>
                                     {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
                                 </p>
@@ -285,11 +285,11 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
                         <div className="w-px h-4 sm:h-6 bg-white/10" />
                         <div className="flex flex-col items-center bg-rose-500/10 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded border border-rose-500/20">
                             <p className="text-[6px] sm:text-[9px] text-rose-400/70 font-mono uppercase tracking-[0.2em]">SCORE</p>
-                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500">
+                            <p className="text-[10px] sm:text-lg font-black font-oswald text-rose-500 leading-none mt-0.5 sm:mt-0">
                                 {myScore}
                             </p>
                         </div>
-                        <div className="w-px h-4 sm:h-6 bg-white/10" />
+                        <div className="w-px h-4 sm:h-6 bg-white/10 hidden sm:block" />
                     </div>
                     <button
                         onClick={() => setShowPlayerCard(true)}
@@ -447,6 +447,9 @@ export const DemoHeartsGame: React.FC<DemoHeartsGameProps> = ({ user }) => {
                             {[
                                 { label: 'Correct Identity', value: '+300', color: 'text-green-400' },
                                 { label: 'Incorrect Identity', value: '-200', color: 'text-red-400' },
+                                { label: 'Missed Transmission', value: '-100', color: 'text-red-400' },
+                                { label: 'Master Defeat', value: '+500', color: 'text-green-400' },
+                                { label: 'Game Over (Loss)', value: '-200', color: 'text-red-400' },
                             ].map(r => (
                                 <li key={r.label} className="flex justify-between items-center bg-white/5 p-3 rounded border border-white/5">
                                     <span className="text-xs font-mono text-slate-400 uppercase">{r.label}</span>

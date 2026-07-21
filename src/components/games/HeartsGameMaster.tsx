@@ -43,6 +43,7 @@ const PHASE_TIMINGS: Record<HeartsPhase, number> = {
     briefing: 60,
     shuffle: 5,
     reveal: 90,
+    message: 30,
     choosing: 30,
     result: 10,
     end: 0
@@ -289,7 +290,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
 
         const currentSessionId = currentState.active_game_id || 'hearts_main';
 
-        console.log(`[HEARTS MASTER] Transitioning to ${nextPhase} (Round ${nextRound})`);
+        console.log(`[HEARTS MASTER] Transitioning to ${nextPhase} (Round ${nextRound}) from ${phaseRef.current}`);
 
         const duration = PHASE_TIMINGS[nextPhase];
         let updates: Partial<HeartsGameState> = {
@@ -466,6 +467,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             }));
 
             updates.guesses = {}; // Clear local guesses state too
+            updates.chat_counts = {}; // Clear messages
         }
         else if (nextPhase === 'reveal') {
             // --------------------------------------------------------------------------------
@@ -517,6 +519,37 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             updates.groups = groups;
             updates.pairs = pairs;
             updates.participants = [...updatedActive, ...updatedEliminated];
+        }
+        else if (nextPhase === 'choosing') {
+            const current = gameStateRef.current || gameState;
+            const participants = current.participants || [];
+            const groups = current.groups || {};
+            const conveyed = (current.chat_counts as any) || {};
+
+            const updatedParticipants = participants.map((p: HeartsPlayer) => {
+                if (p.status === 'eliminated') return p;
+                const gId = p.groupId;
+                if (!gId || !groups[gId]) return p;
+
+                const groupMembers = groups[gId].filter(id => id !== p.id);
+                const myMessages = conveyed[p.id] || {};
+                let missingCount = 0;
+
+                for (const memberId of groupMembers) {
+                    const memberStatus = participants.find(m => m.id === memberId)?.status;
+                    if (memberStatus !== 'eliminated' && !myMessages[memberId]) {
+                        missingCount++;
+                    }
+                }
+
+                if (missingCount > 0) {
+                    const penalty = missingCount * 100;
+                    console.log(`[HEARTS MASTER] Player ${p.name} missed sending messages to ${missingCount} players. Penalty -${penalty}.`);
+                    return { ...p, score: (Number(p.score) || 0) - penalty };
+                }
+                return p;
+            });
+            updates.participants = updatedParticipants;
         }
         else if (nextPhase === 'result') {
             // Use latest local state to avoid database query overhead and potential hangs
@@ -809,11 +842,22 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
             const currentGameState = gameStateRef.current || gameState;
             if (currentGameState?.is_paused || isPaused) return; // Respect pause state
 
-            const startedAt = currentGameState?.phase_started_at ? new Date(currentGameState.phase_started_at) : new Date();
-            const duration = currentGameState?.phase_duration_sec || 0;
+            // Use local refs first to avoid race conditions with DB sync where old state triggers 0 remaining time
+            const startedAtStr = phaseStartedAtRef.current || currentGameState?.phase_started_at;
+            const startedAt = startedAtStr ? new Date(startedAtStr) : new Date();
+            const duration = phaseDurationRef.current || currentGameState?.phase_duration_sec || 0;
+            
             const now = new Date();
             const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
-            const remaining = Math.max(0, duration - elapsed);
+            const trueRemaining = duration - elapsed;
+            const remaining = Math.max(0, trueRemaining);
+
+            // FAILSAFE: If isProcessingRef is stuck for more than 15 seconds, force unlock it.
+            if (isProcessingRef.current && trueRemaining <= -15) {
+                console.warn('[HEARTS MASTER] Processing lock stuck for >15s. Force unlocking.');
+                isProcessingRef.current = false;
+            }
+
             console.log('[HEARTS MASTER TIMER TICK] phase:', phaseRef.current, 'remaining:', remaining, 'isProcessing:', isProcessingRef.current, 'system_start:', gameState.system_start);
 
             if (remaining === 0 && !isProcessingRef.current && gameState.system_start) {
@@ -829,6 +873,8 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
                 } else if (phaseRef.current === 'shuffle') {
                     next = 'reveal';
                 } else if (phaseRef.current === 'reveal') {
+                    next = 'message';
+                } else if (phaseRef.current === 'message') {
                     next = 'choosing';
                 } else if (phaseRef.current === 'choosing') {
                     next = 'result';
@@ -926,35 +972,7 @@ export const HeartsGameMaster: React.FC<HeartsGameMasterProps> = ({ user, onComp
     // --- Handlers ---
     // --- RENDER ---
     return (
-        <div className="w-full h-full relative flex flex-col bg-black text-white font-mono overflow-hidden">
-            {/* Header Info */}
-            <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-black/50 backdrop-blur-md z-50">
-                <div className="flex items-center gap-4">
-                    <div className="text-xl font-bold font-oswald text-rose-500 tracking-wider">HEARTS PROTOCOL // MASTER CONTROL</div>
-                    <div className="px-3 py-1 rounded bg-white/5 text-xs text-white/50 border border-white/10">v4.2.0-ALPHA</div>
-                </div>
-                <div className="flex items-center gap-6 text-sm">
-                    <div className="flex items-center gap-2">
-                        <span className="text-white/40">PHASE</span>
-                        <span className="text-rose-400 font-bold uppercase">{phaseRef.current}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-white/40">ROUND</span>
-                        <span className="text-white font-bold">{roundRef.current}/{MAX_ROUNDS}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-white/40">PLAYERS</span>
-                        <span className="text-white font-bold">{gameState.participants?.length || 0}</span>
-                    </div>
-                </div>
-                <button
-                    onClick={() => window.location.href = '/admin'}
-                    className="p-2 hover:bg-red-500/20 border border-transparent hover:border-red-500/50 rounded-xl transition-all text-gray-500 hover:text-red-400 group"
-                    title="Exit Master Control"
-                >
-                    <X size={20} className="group-hover:rotate-90 transition-transform" />
-                </button>
-            </div>
+        <div className="w-full h-full relative flex flex-col bg-black/1 backdrop-blur-md text-white font-mono overflow-hidden">
 
             <div className="flex-1 flex overflow-hidden relative">
                 {/* Main Game View */}

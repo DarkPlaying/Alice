@@ -1,7 +1,7 @@
 // Types for Hearts "Cross-Reveal" Game
 // Consolidated from src/game/hearts.ts
 
-export type HeartsPhase = 'idle' | 'briefing' | 'shuffle' | 'reveal' | 'choosing' | 'result' | 'end';
+export type HeartsPhase = 'idle' | 'briefing' | 'shuffle' | 'reveal' | 'message' | 'choosing' | 'result' | 'end';
 
 export interface Card {
     rank: string;
@@ -17,6 +17,7 @@ export interface HeartsPlayer {
     status: 'active' | 'eliminated' | 'survived';
     score: number;
     eye_of_truth_uses: number; // Master=2, Player=1
+    verify_uses: number;
     groupId?: string; // ID of the group (e.g., '1', '2')
 
     // Cross-Reveal Mechanic:
@@ -42,6 +43,7 @@ export interface HeartsGameState {
     eliminated: string[];             // [pid]
     winners: string[];                // [pid]
     chat_counts: Record<string, number>; // { [pid]: count } - Reset each round
+    conveyed_messages?: Record<string, Record<string, string>>; // { [senderId]: { [targetId]: 'black' | 'red' } }
 
     // Timestamp for synchronization
     phase_started_at?: string;
@@ -57,5 +59,6 @@ export const INITIAL_PLAYER_STATE: HeartsPlayer = {
     role: 'player',
     status: 'active',
     score: 0,
-    eye_of_truth_uses: 1
+    eye_of_truth_uses: 1,
+    verify_uses: 3
 };

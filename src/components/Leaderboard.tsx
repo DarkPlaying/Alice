@@ -3,6 +3,14 @@ import { Crown, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../supabaseClient';
 
+interface Profile {
+    role?: string;
+    username?: string;
+    created_at?: string;
+    visa_points?: number;
+    wins?: number;
+}
+
 interface PlayerData {
     rank: number;
     id: string; // Firebase player_id
@@ -41,7 +49,7 @@ export const Leaderboard = () => {
 
                 if (fetchError) throw fetchError;
 
-                const sortedProfiles = [...(allProfiles || [])].sort((a: any, b: any) => {
+                const sortedProfiles = [...(allProfiles || [])].sort((a: Profile, b: Profile) => {
                     const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
                     const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
                     if (isMasterA && !isMasterB) return -1;
@@ -52,7 +60,7 @@ export const Leaderboard = () => {
                 });
 
                 const idMap: Record<string, string> = {};
-                sortedProfiles.forEach((u: any, index) => {
+                sortedProfiles.forEach((u: Profile, index) => {
                     const pid = `PLAYER${(index + 1).toString().padStart(3, '0')}`;
                     if (u.username) {
                         idMap[u.username.toLowerCase()] = pid;
@@ -60,7 +68,7 @@ export const Leaderboard = () => {
                 });
 
                 // Sort again by visa_points for leaderboard
-                const leaderboardProfiles = [...sortedProfiles].sort((a: any, b: any) => (b.visa_points || 0) - (a.visa_points || 0));
+                const leaderboardProfiles = [...sortedProfiles].sort((a: Profile, b: Profile) => (b.visa_points || 0) - (a.visa_points || 0));
 
                 // Merge data
                 const mergedPlayers: PlayerData[] = leaderboardProfiles.map((profile, index) => {

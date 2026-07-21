@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PlayerCache } from '../../lib/playerCache';
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Timer, AlertTriangle, ShieldCheck, Loader2, LogOut, X, Info, Scan, User } from 'lucide-react';
+import { Timer, AlertTriangle, ShieldCheck, Loader2, LogOut, X, Info, Scan, User, FastForward, Spade } from 'lucide-react';
 import { PlayerCardModal } from '../PlayerCardModal';
 import { DemoSpadesGame } from './DemoSpadesGame';
 import {
@@ -49,8 +49,19 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
     const [showTableModal, setShowTableModal] = useState(false);
     const [showPointsModal, setShowPointsModal] = useState(false);
     const [showRulesModal, setShowRulesModal] = useState(false);
+    const [showHintModal, setShowHintModal] = useState(false);
+    const [hintModalText, setHintModalText] = useState('');
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [pointsPage, setPointsPage] = useState(0);
+    const [isScrolled, setIsScrolled] = useState(false);
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
+
+    useEffect(() => {
+        if (phase === 'completed' && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [phase, hasPlayedEndVideo]);
 
     // Refs
     const myId = user?.id || 'PLAYER';
@@ -66,7 +77,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
             isFetchingRef.current = true;
             try {
                 // console.log('[SPADES PLAYER] fetchState() executing...');
-                
+
                 const accessToken = await getAccessToken();
                 const response = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.${GAME_ID}&select=*`, {
                     headers: {
@@ -79,25 +90,25 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
 
                 let data = null;
                 let error = null;
-                
+
                 if (response.ok) {
                     data = await response.json();
                 } else {
                     error = await response.text();
                 }
-                
+
                 // console.log('[SPADES PLAYER] fetchState() completed! Data:', data, 'Error:', error);
                 console.log('[SPADES PLAYER] fetchState() completed! Data:', data, 'Error:', error);
 
-            if (error) {
-                console.error('[SPADES PLAYER] CRITICAL: Raw fetch failed:', error);
-                return;
-            }
+                if (error) {
+                    console.error('[SPADES PLAYER] CRITICAL: Raw fetch failed:', error);
+                    return;
+                }
 
-            if (data) {
-                syncState(data);
-            }
-        } catch (err) {
+                if (data) {
+                    syncState(data);
+                }
+            } catch (err) {
                 console.error('[SPADES PLAYER] fetchState() THREW AN EXCEPTION:', err);
             } finally {
                 isFetchingRef.current = false;
@@ -410,15 +421,15 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
             // This prevents overwriting user input while they type/delete
             if (data.players[myId]) {
                 const myPlayer = data.players[myId];
-            // Update my bid input ONLY one time (initial load) OR if phase is not bidding
-            if (myPlayer) {
-                if (myPlayer.bid !== null && myPlayer.bid !== undefined) {
-                    if (!bidInitializedRef.current || currentPhase !== 'bidding') {
-                        setMyBidInput(String(myPlayer.bid));
-                        bidInitializedRef.current = true;
+                // Update my bid input ONLY one time (initial load) OR if phase is not bidding
+                if (myPlayer) {
+                    if (myPlayer.bid !== null && myPlayer.bid !== undefined) {
+                        if (!bidInitializedRef.current || currentPhase !== 'bidding') {
+                            setMyBidInput(String(myPlayer.bid));
+                            bidInitializedRef.current = true;
+                        }
                     }
                 }
-            }
             }
         }
 
@@ -513,7 +524,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
             setBidError('Invalid bid amount');
             return;
         }
-        
+
         const currentScore = players[myId]?.score || 1000;
         if (!validateBid(currentScore, numericBid)) {
             setBidError('Bid exceeds your current score!');
@@ -526,7 +537,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
     const updateBidInDatabase = async (bidAmount: number) => {
         try {
             const accessToken = await getAccessToken();
-            
+
             // Fetch latest players to avoid overwrite
             const fetchRes = await fetch(`${supabaseUrl}/rest/v1/spades_game_state?id=eq.${GAME_ID}&select=players`, {
                 headers: {
@@ -760,11 +771,12 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
     };
 
     // --- Main Game UI ---
+
     return (
-        <div className="relative h-screen bg-black text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
-            {/* Background */}
-            <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518544806314-5f87afc71c1b?q=80&w=2560&auto=format&fit=crop')] opacity-[0.03] bg-cover bg-center pointer-events-none mix-blend-screen" />
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-black to-black pointer-events-none" />
+        <div
+            className="w-full h-full text-white font-sans overflow-y-auto relative selection:bg-blue-500/30 bg-black/40 backdrop-blur-md"
+            onScroll={(e) => setIsScrolled(e.currentTarget.scrollTop > 10)}
+        >
 
             {/* PAUSED OVERLAY */}
             <AnimatePresence>
@@ -995,6 +1007,40 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
 
             {/* SCORING RULES Modal */}
             <AnimatePresence>
+                {showHintModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[1000] bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
+                        onClick={() => setShowHintModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 10 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 10 }}
+                            className="bg-zinc-950 border border-white/10 rounded-2xl p-6 sm:p-8 max-w-sm w-full shadow-2xl flex flex-col items-center text-center"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <Spade className="text-blue-500 mb-4" size={32} />
+                            <h3 className="text-sm sm:text-base font-black font-mono text-blue-400 tracking-widest uppercase mb-4">
+                                HINT SIGNAL
+                            </h3>
+                            <p className="text-xs sm:text-sm text-gray-300 font-mono mb-6 whitespace-pre-line">
+                                {hintModalText}
+                            </p>
+                            <button
+                                onClick={() => setShowHintModal(false)}
+                                className="px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded transition-all text-xs font-bold uppercase tracking-widest text-white w-full"
+                            >
+                                CLOSE
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
                 {showRulesModal && (
                     <motion.div
                         initial={{ opacity: 0 }}
@@ -1045,7 +1091,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
             </AnimatePresence>
 
             {/* Header / HUD */}
-            <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-md border-b border-white/10 px-4 py-3 sm:px-8 sm:py-4">
+            <header className={`fixed top-0 left-0 right-0 z-[100] border-b border-white/10 px-4 py-3 sm:px-8 sm:py-4 transition-all duration-300 ${isScrolled ? 'bg-black/90 backdrop-blur-xl' : 'bg-transparent'}`}>
                 <div className="max-w-7xl mx-auto flex items-center justify-between">
                     {/* Left: Brand / Title */}
                     <div className="flex flex-col">
@@ -1057,8 +1103,23 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                         </h1>
                     </div>
 
-                    {/* Right: Actions (Close/Scoring) */}
-                    <div className="flex items-center gap-2">
+                    {/* Right: Controls & Score */}
+                    <div className="flex gap-2 sm:gap-4 flex-wrap justify-end">
+                        <button
+                            onClick={() => {
+                                const current = localStorage.getItem('skipVideos') === 'true';
+                                localStorage.setItem('skipVideos', String(!current));
+                                window.dispatchEvent(new CustomEvent('skip-videos-toggled', { detail: !current }));
+                                // Force re-render of this button to reflect state
+                                setIsScrolled(prev => !prev);
+                                setTimeout(() => setIsScrolled(prev => !prev), 10);
+                            }}
+                            className={`p-2 sm:px-4 sm:py-2 border text-[8px] sm:text-[10px] font-bold uppercase tracking-widest transition-all rounded flex items-center justify-center ${localStorage.getItem('skipVideos') === 'true' ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-white/20 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white'}`}
+                        >
+                            <span className="hidden sm:inline">Skip Intro: {localStorage.getItem('skipVideos') === 'true' ? 'ON' : 'OFF'}</span>
+                            <FastForward size={18} className="sm:hidden" />
+                        </button>
+
                         <button
                             onClick={() => setShowProfileModal(true)}
                             className="p-2 sm:px-4 sm:py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-white transition-all active:scale-95"
@@ -1096,6 +1157,34 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                             {round}<span className="text-slate-600 text-[10px] sm:text-sm">/5</span>
                         </p>
                     </div>
+
+                    <div className="w-px h-6 bg-white/10 sm:hidden" />
+
+                    {/* HINT BUTTON IN HUB */}
+                    <button
+                        onClick={() => {
+                            if (phase !== 'hint' && phase !== 'bidding') {
+                                setHintModalText('No hint available at this time.');
+                                setShowHintModal(true);
+                                return;
+                            }
+                            if (!localRoundData || (!localRoundData.hint && !localRoundData.target_card)) {
+                                setHintModalText('Awaiting signal...');
+                                setShowHintModal(true);
+                                return;
+                            }
+                            let hintText = localRoundData.hint || 'Signal corrupted.';
+                            if (localRoundData.target_card && localRoundData.target_card.suit.toLowerCase() === 'clubs') {
+                                hintText = `${localRoundData.target_card.rank} OF CLUBS`;
+                            }
+                            setHintModalText(hintText);
+                            setShowHintModal(true);
+                        }}
+                        className="flex flex-col items-center justify-center bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 px-3 py-1 sm:px-4 sm:py-1.5 rounded transition-all active:scale-95"
+                    >
+                        <p className="text-[7px] sm:text-[9px] text-purple-400/70 font-mono uppercase tracking-[0.2em]">SIGNAL</p>
+                        <p className="text-sm sm:text-xl font-black font-oswald text-purple-400 tracking-wider">HINT</p>
+                    </button>
 
                     <div className="w-px h-6 bg-white/10 sm:hidden" />
 
@@ -1282,7 +1371,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                         onChange={(e) => handleBidChange(e.target.value)}
                                         className="w-full bg-transparent border-b-2 border-slate-700 text-5xl font-black font-oswald text-center text-white focus:border-blue-500 focus:outline-none transition-colors py-4"
                                     />
-                                    <button 
+                                    <button
                                         onClick={submitBid}
                                         className={`px-4 py-2 font-bold font-mono text-sm tracking-wider rounded transition-all flex flex-col items-center justify-center border ${myPlayer?.bid === parseInt(myBidInput) ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-blue-600 hover:bg-blue-500 text-white border-blue-500'} `}
                                     >
@@ -1319,10 +1408,10 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ duration: 0.8, ease: "easeOut" }}
-                            className="fixed inset-0 z-50 flex flex-col items-center justify-start pt-16 sm:pt-20 gap-6 sm:gap-10 bg-black/95 overflow-y-auto pb-12"
+                            className="fixed inset-0 z-50 flex flex-col items-center justify-start pt-28 sm:pt-36 gap-6 sm:gap-10 bg-black/95 overflow-y-auto pb-12"
                         >
-                            <div className="text-center flex flex-col gap-4 mt-20">
-                                <h1 className="text-2xl sm:text-5xl font-black font-cinzel text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] px-4">
+                            <div className="text-center flex flex-col gap-4 mt-10 sm:mt-15">
+                                <h1 className="text-2xl sm:text-3xl md:text-4xl font-black font-cinzel text-white tracking-widest uppercase drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] px-4">
                                     SURVIVAL AUCTION COMPLETE
                                 </h1>
                                 <motion.div
@@ -1331,7 +1420,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                     transition={{ delay: 0.3, duration: 0.6 }}
                                 >
                                     {(myPlayer?.score || 0) >= 0 ? (
-                                        <h2 className="text-xs md:text-sm font-bold font-mono text-green-500 tracking-[0.4em] uppercase italic">
+                                        <h2 className="text-xs md:text-sm font-bold font-mono text-blue-500 tracking-[0.4em] uppercase italic">
                                             VITALITY CHECK // PASSED
                                         </h2>
                                     ) : (
@@ -1352,15 +1441,15 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                 <div className="relative rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col sm:flex-row items-stretch justify-between p-0 z-10">
 
                                     {/* Top Accent Line */}
-                                    <div className={`absolute top-0 left-0 w-full h-[2px] ${(myPlayer?.score || 0) >= 0 ? 'bg-gradient-to-r from-transparent via-green-500 to-transparent' : 'bg-gradient-to-r from-transparent via-red-500 to-transparent'} opacity-80`} />
+                                    <div className={`absolute top-0 left-0 w-full h-[2px] ${(myPlayer?.score || 0) >= 0 ? 'bg-gradient-to-r from-transparent via-blue-500 to-transparent' : 'bg-gradient-to-r from-transparent via-red-500 to-transparent'} opacity-80`} />
 
                                     {/* Background Ambient Glow */}
-                                    <div className={`absolute -top-20 -left-20 w-60 h-60 rounded-full blur-[100px] ${(myPlayer?.score || 0) >= 0 ? 'bg-green-500/10' : 'bg-red-500/10'} pointer-events-none`} />
+                                    <div className={`absolute -top-20 -left-20 w-60 h-60 rounded-full blur-[100px] ${(myPlayer?.score || 0) >= 0 ? 'bg-blue-500/10' : 'bg-red-500/10'} pointer-events-none`} />
 
                                     {/* Left Module: Score */}
                                     <div className="flex-1 min-h-[100px] sm:min-h-[140px] flex flex-col items-center justify-center relative p-4 sm:p-6 sm:border-r border-b sm:border-b-0 border-white/5 bg-zinc-900/40">
                                         <p className="text-zinc-500 font-mono text-[10px] sm:text-[9px] uppercase tracking-[0.4em] mb-3">
-                                            NET MERIT
+                                            Final Score
                                         </p>
                                         <div className="relative">
                                             <p className={`text-3xl sm:text-6xl font-black font-oswald tracking-tighter leading-tight text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] py-2`}>
@@ -1374,14 +1463,14 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                         {/* Status Row */}
                                         <div className="flex items-center justify-between border-b border-white/5 pb-2">
                                             <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
-                                            <span className={`text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase ${(myPlayer?.score || 0) >= 0 ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]' : 'text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.4)]'}`}>
+                                            <span className={`text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase ${(myPlayer?.score || 0) >= 0 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.4)]' : 'text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.4)]'}`}>
                                                 {(myPlayer?.score || 0) >= 0 ? 'SURVIVED' : 'KIA'}
                                             </span>
                                         </div>
 
                                         {/* Cards Row */}
                                         <div className="flex items-center justify-between">
-                                            <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">INTEL</span>
+                                            <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">No. Card Holding</span>
                                             <span className="text-2xl sm:text-lg font-bold text-white font-display tracking-widest">
                                                 {myPlayer?.cards?.length || 0}
                                             </span>
@@ -1391,7 +1480,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                         {myPlayer?.cards?.length === 0 && (
                                             <div className="mt-2 text-center bg-red-500/10 py-2 rounded border border-red-500/20 px-2">
                                                 <span className="text-[10px] sm:text-xs text-red-500 font-bold font-mono uppercase tracking-wider animate-pulse flex items-center justify-center gap-2">
-                                                    <AlertTriangle size={14} /> ZIPPER PROTOCOL (-500)
+                                                    <AlertTriangle size={14} /> NO CARD HOLDING (-500)
                                                 </span>
                                             </div>
                                         )}
@@ -1399,13 +1488,13 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                 </div>
 
                                 {/* Subtle Outer Glow */}
-                                <div className={`absolute -inset-4 rounded-3xl blur-2xl opacity-20 ${(myPlayer?.score || 0) >= 0 ? 'bg-green-500' : 'bg-red-500'} z-0`} />
+                                <div className={`absolute -inset-4 rounded-3xl blur-2xl opacity-20 ${(myPlayer?.score || 0) >= 0 ? 'bg-blue-500' : 'bg-red-500'} z-0`} />
                             </motion.div>
 
                             <div className="mt-4 w-full max-w-xs">
                                 <button
                                     onClick={() => window.location.href = '/home/card'}
-                                    className="group relative w-full h-14 bg-green-600 hover:bg-green-500 border border-green-400/50 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)] hover:shadow-[0_0_30px_rgba(34,197,94,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
+                                    className="group relative w-full h-14 bg-blue-600 hover:bg-blue-500 border border-blue-400/50 rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.4)] hover:shadow-[0_0_30px_rgba(59,130,246,0.6)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 flex items-center justify-center overflow-hidden"
                                 >
                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
                                     <span className="relative text-white font-oswald text-base sm:text-sm tracking-[0.2em] font-medium flex items-center gap-2 uppercase drop-shadow-md">

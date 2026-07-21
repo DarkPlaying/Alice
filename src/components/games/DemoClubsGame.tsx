@@ -174,6 +174,15 @@ export const DemoClubsGame: React.FC<DemoClubsGameProps> = ({ user }) => {
     };
 
     // ── Card click handler ─────────────────────────────────────────────────
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
+
+    useEffect(() => {
+        if (phase === 'result' && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [phase, hasPlayedEndVideo]);
+
     const handleCardClick = (cardId: string) => {
         if (phase === 'setup_phase1') {
             const card = cards.find(c => c.id === cardId);
@@ -414,7 +423,7 @@ export const DemoClubsGame: React.FC<DemoClubsGameProps> = ({ user }) => {
 
     // ── Main Render ────────────────────────────────────────────────────────
     return (
-        <div className="relative w-full h-full min-h-screen bg-black flex flex-col font-sans text-white overflow-x-hidden overscroll-y-auto">
+        <div className="relative w-full h-full min-h-screen bg-black/40 backdrop-blur-md flex flex-col font-sans text-white overflow-x-hidden overscroll-y-auto">
             {/* Modals */}
             {showPointsTable && <ClubsPointsTable isOpen={showPointsTable} currentRound={round} onClose={() => setShowPointsTable(false)} />}
             {showPlayerCard && (
@@ -455,7 +464,13 @@ export const DemoClubsGame: React.FC<DemoClubsGameProps> = ({ user }) => {
             {renderHUD()}
 
             {/* ── Board ── */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-8 relative bg-black/40 pt-24 sm:pt-32">
+            <div 
+                className="flex-1 overflow-y-auto p-4 sm:p-8 relative bg-transparent pt-24 sm:pt-32"
+                onScroll={(e) => {
+                    const scrolled = e.currentTarget.scrollTop > 10;
+                    window.dispatchEvent(new CustomEvent('hearts-scroll', { detail: scrolled }));
+                }}
+            >
 
                 {/* Phase title row */}
                 <div className="max-w-6xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 sm:px-0">

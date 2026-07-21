@@ -39,6 +39,34 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     const [playingVideo, setPlayingVideo] = useState<'start' | 'end' | null>(null);
     const [videoLoaded, setVideoLoaded] = useState(false);
     const [skipVideos, setSkipVideosState] = useState(() => localStorage.getItem('skipVideos') === 'true');
+    const [isGameScrolled, setIsGameScrolled] = useState(false);
+    const [isGameEnded, setIsGameEnded] = useState(false);
+    const [isBriefing, setIsBriefing] = useState(false);
+
+    useEffect(() => {
+        const handleEnd = () => setIsGameEnded(true);
+        window.addEventListener('borderland-trial-ended', handleEnd);
+        return () => window.removeEventListener('borderland-trial-ended', handleEnd);
+    }, []);
+
+    useEffect(() => {
+        const handleBriefing = (e: Event) => {
+            const customEvent = e as CustomEvent<boolean>;
+            setIsBriefing(customEvent.detail);
+        };
+        window.addEventListener('borderland-briefing-state', handleBriefing);
+        return () => window.removeEventListener('borderland-briefing-state', handleBriefing);
+    }, []);
+
+    useEffect(() => {
+        const handleScroll = (e: Event) => {
+            const customEvent = e as CustomEvent<boolean>;
+            setIsGameScrolled(customEvent.detail);
+        };
+        window.addEventListener('hearts-scroll', handleScroll);
+        return () => window.removeEventListener('hearts-scroll', handleScroll);
+    }, []);
+
     const setSkipVideos = (val: boolean) => {
         localStorage.setItem('skipVideos', String(val));
         setSkipVideosState(val);
@@ -444,7 +472,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                 return {
                     title: "Psychological Betrayal",
                     difficulty: "A of Hearts",
-                    description: "A 5-round social deduction game of survival where you must deduce your own identity using hints from your partner. \n\n[SYSTEM UPDATE]: \n1. Each round you are paired with a random survivor. \n2. You see your partner's card, but NOT your own. \n3. Use private chat (Limit: 4 messages) to share hints indirectly. \n4. Use 'Eye of Truth' power wisely (Master: 2x, Player: 1x).",
+                    description: "A 5-round social deduction game of survival where you must deduce your own identity using hints from your group.\n\n[SYSTEM UPDATE]: \n1. Each round you are grouped with 2 other players.\n2. You see their cards, but NOT your own.\n3. [MESSAGE PHASE]: You MUST transmit intel to ALL other agents in your group. Failure to transmit intel results in a -100 credit penalty per missed agent.\n4. [CHOOSE PHASE]: Correctly identify your own suit (+300 points) or face termination (-200 points).\n5. Use 'Eye of Truth' wisely (Limited uses).",
                     limit: "5 Rounds",
                     objective: "Correctly identify your own suit to avoid elimination.",
                     cardImage: "/borderland_cards/Hearts_10.png"
@@ -511,12 +539,27 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         }
     }, [playingVideo]);
 
+    useEffect(() => {
+        const handlePlayEndVideo = () => {
+            if (!skipVideos) setPlayingVideo('end');
+        };
+        const handleSkipToggle = (e: any) => {
+            setSkipVideos(e.detail);
+        };
+        window.addEventListener('play-end-video', handlePlayEndVideo);
+        window.addEventListener('skip-videos-toggled', handleSkipToggle);
+        return () => {
+            window.removeEventListener('play-end-video', handlePlayEndVideo);
+            window.removeEventListener('skip-videos-toggled', handleSkipToggle);
+        };
+    }, [skipVideos]);
+
     if (!isLoaded) return <Loader />;
 
     return (
         <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
             {/* Base dark overlay for readability across all games */}
-            <div className="absolute inset-0 bg-black/60 pointer-events-none z-0" />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-md pointer-events-none z-0" />
 
             <div className="relative z-10 flex flex-col w-full h-full">
                 {showPlayerCard && (
@@ -569,7 +612,20 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
                 {/* Protocol Header */}
                 {((type === 'Clubs' || type === 'Hearts') || (waitingForGM || showRules || kickedUser)) && (
-                    <div className="relative z-50 flex justify-between items-center px-4 py-3 sm:px-8 sm:py-6 border-b border-white/10 bg-black/40 backdrop-blur-md overflow-hidden">
+                    <div 
+                        id="protocol-header"
+                        className={`relative z-50 flex justify-between items-center px-4 py-3 sm:px-8 sm:py-6 border-b transition-all duration-300 overflow-hidden ${
+                            (isGameEnded || isBriefing)
+                                ? 'bg-black border-transparent' 
+                                : isGameScrolled 
+                                    ? 'bg-black/90 backdrop-blur-xl border-white/10' 
+                                    : 'backdrop-blur-md'
+                        }`}
+                        style={!(isGameEnded || isBriefing) && !isGameScrolled ? {
+                            backgroundColor: (waitingForGM && !showRules) ? `${theme.color}15` : 'rgba(0,0,0,0.4)',
+                            borderColor: (waitingForGM && !showRules) ? `${theme.color}50` : 'rgba(255,255,255,0.1)'
+                        } : undefined}
+                    >
                         {/* Ambient Header Glow - ONLY show when waiting, not in confirm page (showRules) */}
                         {(!showRules && waitingForGM) && (
                             <div className="absolute inset-0 pointer-events-none opacity-40">
@@ -709,107 +765,107 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                             >
                                 <div className="w-full h-full max-w-7xl flex flex-col items-center justify-center gap-4 sm:gap-6 lg:gap-4 py-4 sm:py-8 custom-scrollbar px-4 sm:px-10 lg:px-20 mx-auto">
                                     <div className="w-full flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-6 sm:gap-8 lg:gap-16">
-                                    {/* LEFT: The Card Artifact */}
-                                    <div className="w-full sm:w-1/2 flex justify-center lg:justify-end perspective-1000">
-                                        <motion.div
-                                            initial={{ opacity: 0, scale: 0.8, rotateY: 90, filter: 'brightness(0)' }}
-                                            animate={{ opacity: 1, scale: 1, rotateY: 0, filter: 'brightness(1)' }}
-                                            transition={{ duration: 1.2, ease: "easeOut", type: "spring", bounce: 0.3 }}
-                                            whileHover={{ scale: 1.05, y: -10, rotateY: 10, rotateX: 5, filter: 'brightness(1.2)' }}
-                                            className="relative w-[140px] h-[210px] sm:w-[220px] sm:h-[330px] lg:w-[280px] lg:h-[420px] group shrink-0 cursor-pointer"
-                                            style={{ willChange: 'transform, opacity, filter', transformStyle: 'preserve-3d' }}
-                                        >
-                                            <div className="w-full h-full relative overflow-hidden bg-transparent shadow-[0_20px_50px_rgba(0,0,0,0.7)] border border-white/20">
-                                                <div className="absolute inset-0">
-                                                    <img
-                                                        src={
-                                                            type === 'Diamonds' ? '/suit_assets/diamond.png' :
-                                                                type === 'Spades' ? '/suit_assets/spade.png' :
-                                                                    type === 'Clubs' ? '/suit_assets/clubs.png' :
-                                                                        type === 'Hearts' ? '/suit_assets/hearts.png' :
-                                                                            (rules?.cardImage || undefined)
-                                                        }
-                                                        alt="Rules Card"
-                                                        className="w-full h-full object-cover drop-shadow-[0_0_20px_rgba(255,255,255,0.1)]"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    </div>
-
-                                    {/* RIGHT: The Protocol Instructions */}
-                                    <div className="w-full sm:w-1/2 space-y-4 sm:space-y-8 text-center sm:text-left lg:pr-12 xl:pr-20">
-                                        <motion.div 
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ duration: 1, ease: "easeOut" }}
-                                            className="space-y-4 sm:space-y-6 lg:space-y-4 xl:space-y-6"
-                                        >
-                                            <div className="space-y-2 sm:space-y-4 lg:space-y-2 xl:space-y-4">
-                                                <div className="flex items-center justify-center sm:justify-start gap-3">
-                                                    <span className={`px-2 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] font-mono font-bold uppercase tracking-widest bg-black border border-white/10 ${theme.tailwindColor}`}>
-                                                        Difficulty: {rules.difficulty}
-                                                    </span>
-                                                </div>
-                                                <h2 className="text-xl sm:text-2xl md:text-2xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-cinzel text-white uppercase font-bold tracking-tight drop-shadow-lg leading-tight">
-                                                    {rules.title}
-                                                </h2>
-                                            </div>
-
-                                            <div className="space-y-2 sm:space-y-4 lg:space-y-3 xl:space-y-4">
-                                                <div className="bg-black/40 backdrop-blur-md border-y-2 sm:border-y-0 sm:border-l-2 px-3 py-3 sm:px-0 sm:pl-6 sm:py-4 rounded-lg sm:rounded-l-none sm:rounded-r-lg" style={{ borderColor: theme.color, boxShadow: `inset 20px 0 30px -30px ${theme.color}` }}>
-                                                    <p className="text-white/40 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-1 sm:mb-2">Description</p>
-                                                    <p className="text-gray-300 font-mono text-[9px] sm:text-xs lg:text-[11px] xl:text-sm leading-relaxed">
-                                                        {rules.description}
-                                                    </p>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4 sm:gap-8 lg:gap-4 xl:gap-8">
-                                                    <div>
-                                                        <p className="text-white/30 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-0.5 sm:mb-1">Objective</p>
-                                                        <p className="text-white font-bold font-mono text-[8px] sm:text-xs lg:text-[10px] xl:text-xs uppercase tracking-wider">
-                                                            {rules.objective}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-white/30 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-0.5 sm:mb-1">Time Limit</p>
-                                                        <p className={`text-sm sm:text-xl lg:text-lg xl:text-xl font-display font-black italic uppercase ${theme.tailwindColor}`}>
-                                                            {rules.limit}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    </div>
-                                </div>
-
-                                {/* BOTTOM: Center Confirm Button */}
-                                <div className="flex justify-center w-full">
-                                    <motion.button
-                                        whileHover={{ scale: 1.02 }}
-                                        whileTap={{ scale: 0.98 }}
-                                        onClick={() => {
-                                                    if (skipVideos) {
-                                                        setShowRules(false);
-                                                        setWaitingForGM(true);
-                                                    } else {
-                                                        setPlayingVideo('start');
-                                                    }
-                                                }}
-                                                className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-black/60 backdrop-blur-md text-white font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden transition-all border border-white/20 hover:border-white shadow-lg"
-                                                style={{
-                                                    clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
-                                                    boxShadow: `0 0 20px ${theme.color}40`,
-                                                    textShadow: `0 0 10px ${theme.color}80`
-                                                }}
+                                        {/* LEFT: The Card Artifact */}
+                                        <div className="w-full sm:w-1/2 flex justify-center lg:justify-end perspective-1000">
+                                            <motion.div
+                                                initial={{ opacity: 0, scale: 0.8, rotateY: 90, filter: 'brightness(0)' }}
+                                                animate={{ opacity: 1, scale: 1, rotateY: 0, filter: 'brightness(1)' }}
+                                                transition={{ duration: 1.2, ease: "easeOut", type: "spring", bounce: 0.3 }}
+                                                whileHover={{ scale: 1.05, y: -10, rotateY: 10, rotateX: 5, filter: 'brightness(1.2)' }}
+                                                className="relative w-[140px] h-[210px] sm:w-[220px] sm:h-[330px] lg:w-[280px] lg:h-[420px] group shrink-0 cursor-pointer"
+                                                style={{ willChange: 'transform, opacity, filter', transformStyle: 'preserve-3d' }}
                                             >
-                                                <div className="absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity" style={{ backgroundColor: theme.color }} />
-                                                <span className="relative z-10 flex items-center gap-4">
-                                                    CONFIRM PARTICIPATION
-                                                    <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                                                </span>
-                                            </motion.button>
+                                                <div className="w-full h-full relative overflow-hidden bg-transparent shadow-[0_20px_50px_rgba(0,0,0,0.7)] border border-white/20">
+                                                    <div className="absolute inset-0">
+                                                        <img
+                                                            src={
+                                                                type === 'Diamonds' ? '/suit_assets/diamond.png' :
+                                                                    type === 'Spades' ? '/suit_assets/spade.png' :
+                                                                        type === 'Clubs' ? '/suit_assets/clubs.png' :
+                                                                            type === 'Hearts' ? '/suit_assets/hearts.png' :
+                                                                                (rules?.cardImage || undefined)
+                                                            }
+                                                            alt="Rules Card"
+                                                            className="w-full h-full object-cover drop-shadow-[0_0_20px_rgba(255,255,255,0.1)]"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </motion.div>
                                         </div>
+
+                                        {/* RIGHT: The Protocol Instructions */}
+                                        <div className="w-full sm:w-1/2 space-y-4 sm:space-y-8 text-center sm:text-left lg:pr-12 xl:pr-20">
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 10 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ duration: 1, ease: "easeOut" }}
+                                                className="space-y-4 sm:space-y-6 lg:space-y-4 xl:space-y-6"
+                                            >
+                                                <div className="space-y-2 sm:space-y-4 lg:space-y-2 xl:space-y-4">
+                                                    <div className="flex items-center justify-center sm:justify-start gap-3">
+                                                        <span className={`px-2 py-0.5 rounded text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] font-mono font-bold uppercase tracking-widest bg-black border border-white/10 ${theme.tailwindColor}`}>
+                                                            Difficulty: {rules.difficulty}
+                                                        </span>
+                                                    </div>
+                                                    <h2 className={`font-cinzel text-white uppercase font-bold tracking-tight drop-shadow-lg leading-tight ${type === 'Hearts' ? 'text-base sm:text-lg md:text-xl lg:text-xl xl:text-2xl 2xl:text-3xl' : 'text-xl sm:text-2xl md:text-2xl lg:text-3xl xl:text-4xl 2xl:text-5xl'}`}>
+                                                        {rules.title}
+                                                    </h2>
+                                                </div>
+
+                                                <div className="space-y-2 sm:space-y-4 lg:space-y-3 xl:space-y-4">
+                                                    <div className="bg-black/40 backdrop-blur-md border-y-2 sm:border-y-0 sm:border-l-2 px-3 py-3 sm:px-0 sm:pl-6 sm:py-4 rounded-lg sm:rounded-l-none sm:rounded-r-lg" style={{ borderColor: theme.color, boxShadow: `inset 20px 0 30px -30px ${theme.color}` }}>
+                                                        <p className="text-white/40 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-1 sm:mb-2">Description</p>
+                                                        <p className="text-gray-300 font-mono text-[9px] sm:text-xs lg:text-[11px] xl:text-sm leading-relaxed">
+                                                            {rules.description}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-4 sm:gap-8 lg:gap-4 xl:gap-8">
+                                                        <div>
+                                                            <p className="text-white/30 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-0.5 sm:mb-1">Objective</p>
+                                                            <p className="text-white font-bold font-mono text-[8px] sm:text-xs lg:text-[10px] xl:text-xs uppercase tracking-wider">
+                                                                {rules.objective}
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-white/30 font-mono text-[8px] sm:text-[10px] lg:text-[9px] xl:text-[10px] uppercase tracking-widest mb-0.5 sm:mb-1">Time Limit</p>
+                                                            <p className={`text-sm sm:text-xl lg:text-lg xl:text-xl font-display font-black italic uppercase ${theme.tailwindColor}`}>
+                                                                {rules.limit}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </motion.div>
+                                        </div>
+                                    </div>
+
+                                    {/* BOTTOM: Center Confirm Button */}
+                                    <div className="flex justify-center w-full">
+                                        <motion.button
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => {
+                                                if (skipVideos) {
+                                                    setShowRules(false);
+                                                    setWaitingForGM(true);
+                                                } else {
+                                                    setPlayingVideo('start');
+                                                }
+                                            }}
+                                            className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-black/60 backdrop-blur-md text-white font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden transition-all border border-white/20 hover:border-white shadow-lg"
+                                            style={{
+                                                clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
+                                                boxShadow: `0 0 20px ${theme.color}40`,
+                                                textShadow: `0 0 10px ${theme.color}80`
+                                            }}
+                                        >
+                                            <div className="absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity" style={{ backgroundColor: theme.color }} />
+                                            <span className="relative z-10 flex items-center gap-4">
+                                                CONFIRM PARTICIPATION
+                                                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                                            </span>
+                                        </motion.button>
+                                    </div>
                                 </div>
                             </motion.div>
                         ) : kickedUser ? (

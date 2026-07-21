@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Timer, Shield, CheckCircle2, MessageSquare, X, FileText } from 'lucide-react';
-import { supabase } from '../../supabaseClient';
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
+import { chatClient } from '../../chatClient';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { ClubsGameMaster } from './ClubsGameMaster';
 import { Loader } from '../Loader';
@@ -60,6 +61,15 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     const [phaseExpiry, setPhaseExpiry] = useState<Date | null>(null);
     const [_briefingShown, setBriefingShown] = useState(false);
     const [isCancelled, setIsCancelled] = useState(false);
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
+
+    useEffect(() => {
+        if ((gameState === 'won' || gameState === 'lost') && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            window.dispatchEvent(new CustomEvent('borderland-trial-ended'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [gameState, hasPlayedEndVideo]);
 
     // Refs for synchronization stability
     const roundRef = useRef(round);
@@ -561,7 +571,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     // Realtime Management
     useEffect(() => {
         const fetchMessages = async () => {
-            const { data } = await supabase
+            const { data } = await chatClient
                 .from('messages')
                 .select('*')
                 .eq('game_id', 'clubs_king')
@@ -583,23 +593,49 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
         };
         fetchMessages();
 
-        const channel = supabase.channel('clubs_king_game', {
+        const channel = chatClient.channel('clubs_king_game', {
             config: { presence: { key: 'player' } }
         });
         channelRef.current = channel;
 
         channel
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'game_id=eq.clubs_king' }, (payload) => {
-                const newMsg = payload.new;
-                if (newMsg.channel === 'player' || newMsg.is_system) {
-                    setMessages(prev => [...prev, {
-                        id: newMsg.id,
-                        user: newMsg.user_name,
-                        userId: newMsg.user_id,
-                        text: newMsg.content,
-                        timestamp: new Date(newMsg.created_at),
-                        isSystem: newMsg.is_system
-                    }]);
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+                if (payload.eventType === 'DELETE' && payload.old && payload.old.id) {
+                    setMessages(prev => prev.filter(m => String(m.id) !== String(payload.old.id)));
+                    return;
+                }
+
+                // For INSERT and UPDATE, filter by game_id client-side
+                if (payload.new && (payload.new as any).game_id !== 'clubs_king') return;
+
+                if (payload.eventType === 'INSERT') {
+                    const newMsg = payload.new;
+                    if (newMsg.channel === 'player' || newMsg.is_system) {
+                        setMessages(prev => {
+                            // Find matching optimistic message
+                            const optIndex = prev.findIndex(m => String(m.id).startsWith('temp-') && m.text === newMsg.content);
+                            
+                            const realMsg = {
+                                id: newMsg.id,
+                                user: newMsg.user_name,
+                                userId: newMsg.user_id,
+                                text: newMsg.content,
+                                timestamp: new Date(newMsg.created_at),
+                                isSystem: newMsg.is_system
+                            };
+
+                            if (optIndex !== -1) {
+                                // Replace optimistic message with real one
+                                const newArr = [...prev];
+                                newArr[optIndex] = realMsg;
+                                return newArr;
+                            }
+
+                            // Normal Deduplicate by ID
+                            if (prev.some(m => m.id === newMsg.id)) return prev;
+                            return [...prev, realMsg];
+                        });
+                    }
                 }
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, (payload) => {
@@ -942,39 +978,76 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
         console.log('Selection broadcasted to Master for persistence.');
     };
 
-    const sendMessage = async (e?: React.FormEvent) => {
+    // Control header background based on game state
+    useEffect(() => {
+        const header = document.getElementById('protocol-header');
+        if (header) {
+            if (gameState === 'briefing' || gameState === 'card_reveal' || gameState === 'round_reveal' || gameState === 'selection_reveal') {
+                header.style.backgroundColor = 'rgba(0, 0, 0, 1)'; // Solid black
+            } else {
+                header.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'; // Default transparent black
+            }
+        }
+        return () => {
+            if (header) header.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+        };
+    }, [gameState]);
 
+    const sendMessage = async (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!inputMessage.trim()) return;
         const senderName = user?.username || 'PLAYER';
         const tempContent = inputMessage;
         setInputMessage('');
 
+        // Generate a temporary ID for optimistic update
+        const msgId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+
+        // Optimistic update
+        setMessages(prev => [...prev, {
+            id: msgId,
+            user: senderName,
+            userId: user?.id as string | undefined,
+            text: tempContent,
+            timestamp: new Date(),
+            isSystem: false
+        }]);
+
         try {
-            const { error } = await supabase.from('messages').insert({
-                game_id: 'clubs_king',
-                user_name: senderName,
-                user_id: user?.id as string,
-                content: tempContent,
-                is_system: false,
-                channel: 'player'
+            const token = await getAccessToken();
+            const res = await fetch(`${supabaseUrl}/rest/v1/messages`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'apikey': supabaseKey,
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify({
+                    game_id: 'clubs_king',
+                    user_name: senderName,
+                    user_id: user?.id as string,
+                    content: tempContent,
+                    is_system: false,
+                    channel: 'player'
+                })
             });
 
-            if (error) {
-                console.error('Error sending message:', error);
-                // Optionally revert proper optimistically or show toast
+            if (!res.ok) {
+                console.error('Error sending message:', res.statusText);
+                setMessages(prev => prev.filter(m => m.id !== msgId));
             }
         } catch (err) {
             console.error('Exception sending message:', err);
+            setMessages(prev => prev.filter(m => m.id !== msgId));
         }
     };
 
 
 
-
     const isGameLoading = (!cards || cards.length === 0) && gameState !== 'idle';
     return (
-        <div className="relative w-full h-full bg-black flex flex-col font-sans overflow-hidden">
+        <div className="relative w-full h-full bg-black/40 backdrop-blur-md flex flex-col font-sans overflow-hidden">
             {isGameLoading && <Loader />}
             {/* PHASE NOTIFICATION BANNER */}
             <AnimatePresence>
@@ -1059,31 +1132,36 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             </AnimatePresence>
 
             {/* HEADER HUB - Consolidated with Main Header */}
-            <div className="px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0 relative">
+            <div className="px-2 py-2 sm:px-8 sm:py-2 border-b border-white/5 flex flex-row overflow-x-auto scrollbar-hide items-center bg-transparent z-[110] gap-4 sm:gap-0 relative">
                 {/* POINTS TABLE BUTTON */}
                 <button
                     onClick={() => setShowPointsTable(true)}
-                    className="sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[10px] font-bold uppercase tracking-widest transition-all mb-2 sm:mb-0"
+                    className="shrink-0 sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-widest transition-all"
                 >
-                    <FileText size={14} />
-                    <span>Rules & Points</span>
+                    <FileText size={12} />
+                    <span className="hidden sm:inline">Rules & Points</span>
+                    <span className="sm:hidden">Rules</span>
                 </button>
 
-                <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
-                    <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
+                <div className="flex items-center gap-2 sm:gap-8 w-full sm:w-auto sm:min-w-max shrink-0 sm:mx-auto px-1 sm:px-2">
+                    <div className="flex items-center gap-2 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-between sm:justify-start">
                         {/* ROUND */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
+                        <div className="text-center">
+                            <p className="text-[6px] sm:text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
                             <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{round}/6</p>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* TOP PLAYER */}
-                        <div className="text-center min-w-[70px] sm:min-w-[100px]">
+                        <div className="text-center max-w-[60px] sm:max-w-none sm:min-w-[100px]">
                             <p className="text-[7px] text-yellow-500/50 uppercase tracking-widest mb-0.5">TOP PLAYER</p>
                             <div className="flex flex-col items-center leading-none">
-                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId || '--')}</p>
+                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">
+                                    {topPlayerId && playerIdMap[topPlayerId] 
+                                        ? playerIdMap[topPlayerId] 
+                                        : (topPlayerId === user?.id ? (user?.username || 'YOU') : (topPlayerId ? (topPlayerId.length > 15 ? topPlayerId.slice(0, 8) + '...' : topPlayerId) : '--'))}
+                                </p>
                                 <p className="text-xs sm:text-lg font-mono font-black text-white">{topPlayerScore}</p>
                             </div>
                         </div>
@@ -1091,24 +1169,26 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* TOP MASTER */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
-                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{topMasterScore}</p>
+                        <div className="text-center max-w-[60px] sm:max-w-none sm:min-w-[100px]">
+                            <p className="text-[6px] sm:text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
+                            <div className="flex flex-col items-center leading-none">
+                                <p className="text-xs sm:text-lg font-mono font-black text-red-500">{topMasterScore}</p>
+                            </div>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* MY SCORE */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-blue-500/50 uppercase tracking-widest mb-0.5">MY SCORE</p>
-                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{myScore}</p>
+                        <div className="text-center max-w-[50px] sm:max-w-none sm:min-w-[100px]">
+                            <p className="text-[6px] sm:text-[7px] text-white/30 uppercase tracking-widest mb-0.5">MY SCORE</p>
+                            <p className="text-xs sm:text-lg font-mono font-black text-white leading-none">{myScore}</p>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* TIMER */}
-                        <div className="text-center min-w-[60px]">
-                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
+                        <div className="text-center max-w-[40px] sm:max-w-none sm:min-w-[60px]">
+                            <p className="text-[6px] sm:text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
                             <div className="flex items-center justify-center gap-1">
                                 <Timer size={12} className="text-red-500" />
                                 <p className="text-xs sm:text-lg font-mono font-black text-red-500 leading-none">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</p>
@@ -1122,7 +1202,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
             <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative z-10">
 
                 {/* GAME BOARD */}
-                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-black/40">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-transparent">
 
 
                     {/* INFO HUD */}
@@ -1236,7 +1316,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     {/* CARDS GRID */}
                     <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-4 max-w-6xl mx-auto">
                         {cards.map((card) => {
-                            if (card.isRemoved) return <div key={card.id} className="aspect-[2/3] opacity-0 pointer-events-none" />;
+                            if (card.isRemoved) return null;
 
                             const isSelectedAngel = selection.angel === card.id;
                             const isSelectedDemon = selection.demon === card.id;
@@ -1385,7 +1465,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                             <motion.div
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-32 sm:pt-12 lg:pt-0">
+                                className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-8 sm:pt-12 lg:pt-0">
                                 {/* Card Display Section */}
                                 <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 lg:gap-20 max-w-full scale-[0.65] sm:scale-85 lg:scale-90 origin-top sm:origin-center lg:origin-center pb-24 lg:pb-0 mt-8 sm:mt-0">
                                     {/* Master's Selected Cards */}
@@ -1451,7 +1531,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                     </div>
                                 </div>
 
-                                <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
+                                <div className="absolute bottom-12 left-0 w-full text-center text-white/40 font-mono animate-pulse">
                                     CALCULATING ROUND OUTCOME...
                                 </div>
                             </motion.div>
@@ -1513,9 +1593,9 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                 </div>
 
                 {/* DESKTOP CHAT SIDEBAR - Hidden on mobile, matching Master style */}
-                <div className="hidden sm:flex sm:w-80 sm:h-full bg-[#0A0A0E] sm:border-l border-white/10 flex-col">
-                    <div className="p-3 border-b border-white/10 bg-[#0F0F13]">
-                        <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS INTERCEPT</h3>
+                <div className="hidden sm:flex sm:w-80 sm:h-full bg-transparent sm:border-l border-white/10 flex-col">
+                    <div className="p-3 border-b border-white/10 bg-transparent">
+                        <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS</h3>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                         {messages.length === 0 && (
@@ -1523,7 +1603,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                 <p className="text-xs uppercase tracking-widest font-mono">Channel Silent...</p>
                             </div>
                         )}
-                        {messages.map((msg) => (
+                        {messages.filter(msg => msg.text && msg.text.trim() !== '').map((msg) => (
                             <div key={msg.id} className="relative group">
                                 <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-white/20 group-hover:bg-green-500/50 transition-colors" />
                                 <div className="pl-3 py-1">
@@ -1538,7 +1618,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         ))}
                         <div ref={chatEndRef} />
                     </div>
-                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-[#0F0F13]">
+                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-transparent">
                         <div className="relative">
                             <input
                                 type="text"
@@ -1552,7 +1632,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     </form>
 
                     {/* Logs - Matching Master style */}
-                    <div className="p-3 border-t border-white/10 bg-[#050508] font-mono">
+                    <div className="p-3 border-t border-white/10 bg-transparent font-mono">
                         <h3 className="text-[8px] font-black text-white/30 uppercase mb-2 tracking-widest">SYSTEM STATUS</h3>
                         <div className="space-y-1">
                             <p className="text-[7px] text-cyan-500 uppercase">ROUND {round} ARCHITECTURE SYNC COMPLETE</p>
@@ -1644,10 +1724,11 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 mt-20 bg-black/98 backdrop-blur-xl z-[200] flex items-start justify-center overflow-y-auto pt-16 sm:pt-24 scrollbar-hide"
+                        className="fixed inset-0 bg-black/98 backdrop-blur-xl z-[200] overflow-y-auto scrollbar-hide"
                     >
-                        <div className="max-w-4xl w-full mx-4 text-center space-y-6 pb-20 sm:pb-32">
-                            {/* Determine Winner */}
+                        <div className="min-h-full flex flex-col items-center justify-start py-12 sm:py-24">
+                            <div className="max-w-4xl w-full mx-4 text-center space-y-6 mt-auto mb-auto">
+                                {/* Determine Winner */}
                             {(() => {
                                 const playerWins = topPlayerScore > topMasterScore;
                                 const masterWins = topMasterScore > topPlayerScore;
@@ -1655,10 +1736,10 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                     <>
                                         {/* Victory/Defeat Banner - SMALLER */}
                                         <div className="space-y-2">
-                                            <h1 className={`text-4xl sm:text-5xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
+                                            <h1 className={`text-2xl sm:text-3xl md:text-5xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
                                                 {playerWins ? 'PLAYERS PREVAILED' : masterWins ? 'MASTERS TRIUMPH' : 'PERFECT EQUILIBRIUM'}
                                             </h1>
-                                            <div className={`h-1 w-64 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
+                                            <div className={`h-1 w-64 md:w-96 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
                                             <p className="text-sm font-mono text-white/60 uppercase tracking-wider">
                                                 {playerWins ? 'Collective intelligence triumphed. The Borderland acknowledges their skill.' :
                                                     masterWins ? 'The Masters\' deception proved superior. Players failed the trial.' :
@@ -1667,35 +1748,35 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                         </div>
 
                                         {/* Score Display - STACKED ON MOBILE TO PREVENT OVERLAP */}
-                                        <div className="flex flex-col sm:grid sm:grid-cols-3 gap-4 sm:gap-6 w-full max-w-4xl px-4 sm:px-0 scrollbar-hide">
+                                        <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 w-full max-w-4xl px-4 sm:px-0 scrollbar-hide">
                                             {/* Top Player */}
-                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP PLAYER</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-2 truncate">
+                                            <div className={`p-4 sm:p-6 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">TOP PLAYER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-1 truncate">
                                                     {topPlayerId ? (playerIdMap[topPlayerId as string] || topPlayerId.slice(0, 8) + '...') : '--'}
                                                 </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
-                                                {playerWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                                <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
+                                                {playerWins && <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
                                             </div>
 
                                             {/* My Score */}
-                                            <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
+                                            <div className="p-4 sm:p-6 rounded-xl border-2 border-blue-500 bg-blue-500/10">
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">MY SCORE</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-1">
                                                     {playerIdMap[(user?.id || '') as string] || user?.username || 'YOU'}
                                                 </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
-                                                <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
+                                                <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{myScore}</p>
+                                                <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
                                             </div>
 
                                             {/* Top Master */}
-                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP MASTER</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-2 text-center">
+                                            <div className={`p-4 sm:p-6 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">TOP MASTER</p>
+                                                <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-1 text-center">
                                                     [OVERSEER]
                                                 </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topMasterScore}</p>
-                                                {masterWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                                <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{topMasterScore}</p>
+                                                {masterWins && <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
                                             </div>
                                         </div>
 
@@ -1721,13 +1802,14 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                                         {/* Return Button */}
                                         <button
                                             onClick={() => window.location.href = '/home/card'}
-                                            className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
+                                            className="px-12 py-4 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-sm rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
                                         >
                                             RETURN TO LOBBY
                                         </button>
                                     </>
                                 );
                             })()}
+                            </div>
                         </div>
                     </motion.div>
                 )}

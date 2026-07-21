@@ -32,7 +32,7 @@ export const GameStatusGuard = ({ children, isAdmin = false, isLoggedIn = false 
                 .eq('id', 'clubs_king')
                 .single();
 
-            if (data && data.system_start) {
+            if (data && data.system_start && data.gameState !== 'won' && data.gameState !== 'lost') {
                 // Check Access Control
                 if (data.allowed_players && Array.isArray(data.allowed_players) && data.allowed_players.length > 0) {
                     // We need to import auth to get current UID
@@ -74,7 +74,7 @@ export const GameStatusGuard = ({ children, isAdmin = false, isLoggedIn = false 
                 filter: 'id=eq.clubs_king'
             }, async (payload) => {
                 const newData = payload.new;
-                if (newData.system_start) {
+                if (newData.system_start && newData.gameState !== 'won' && newData.gameState !== 'lost') {
                     // Check Access Control Real-time
                     const { data: { session } } = await supabase.auth.getSession();
                     const currentUserId = session?.user?.id;

@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3 } from 'lucide-react';
+import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3, MessageSquare } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
@@ -1756,7 +1756,33 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         fetchProfiles();
         const channel = supabase.channel('public:profiles_admin')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, fetchProfiles)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload: any) => {
+                if (payload.eventType === 'INSERT') {
+                    setPlayers(prev => {
+                        const newPlayers = [payload.new, ...prev].sort((a: any, b: any) => {
+                            const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
+                            const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
+                            if (isMasterA && !isMasterB) return -1;
+                            if (!isMasterA && isMasterB) return 1;
+                            return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+                        });
+                        PlayerCache.set(newPlayers);
+                        return newPlayers;
+                    });
+                } else if (payload.eventType === 'UPDATE') {
+                    setPlayers(prev => {
+                        const newPlayers = prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p);
+                        PlayerCache.set(newPlayers);
+                        return newPlayers;
+                    });
+                } else if (payload.eventType === 'DELETE') {
+                    setPlayers(prev => {
+                        const newPlayers = prev.filter(p => p.id !== payload.old.id);
+                        PlayerCache.set(newPlayers);
+                        return newPlayers;
+                    });
+                }
+            })
             .subscribe();
 
         return () => {
@@ -2078,14 +2104,14 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <div className="flex items-center gap-4 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
                                     <span className="text-xl font-bold text-green-500">♣</span>
-                                    <span className={clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'text-yellow-400' : 'text-green-500') : 'text-green-500'}>
+                                    <span className={clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'text-green-500' : 'text-green-500') : 'text-green-500'}>
                                         {clubsGameStatus.is_active ? (clubsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
                                     </span>
                                 </span>
                                 <span className="text-gray-600">|</span>
-                                <span className="text-cyan-400">ROUND {clubsGameStatus.current_round}/6</span>
+                                <span className="text-green-400">ROUND {clubsGameStatus.current_round}/6</span>
                                 <span className="text-gray-600">|</span>
-                                <span className="text-yellow-400">{waitingPlayers.length} QUEUED</span>
+                                <span className="text-green-400">{waitingPlayers.length} QUEUED</span>
                             </div>
                         )}
                         {activeView === 'spades' && (
@@ -2575,7 +2601,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? '#eab308' : '#22c55e') : '#22c55e' }}>
+                                                            <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none" style={{
+                                                                color: (() => {
+                                                                    const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
+                                                                    if (p === 'setup_phase1' || p === 'briefing' || p === 'idle') return '#22c55e';
+                                                                    return clubsGameStatus?.system_start ? (clubsGameStatus?.is_paused ? '#eab308' : '#22c55e') : '#22c55e';
+                                                                })()
+                                                            }}>
                                                                 {(() => {
                                                                     const p = (clubsGameStatus?.gameState || clubsGameStatus?.phase || 'IDLE').toLowerCase();
                                                                     if (p === 'setup_phase1') return 'SETUP';
@@ -2588,7 +2620,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-[9px] text-green-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-green-500/50 drop-shadow-md">
+                                                            <div className="text-xl sm:text-2xl xl:text-xl 2xl:text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-green-500/50 drop-shadow-md">
                                                                 {clubsTimerDisplay}
                                                             </div>
                                                         </div>
@@ -2720,13 +2752,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: spadesGameStatus?.system_start ? (spadesGameStatus?.is_paused ? '#eab308' : '#3b82f6') : '#3b82f6' }}>
+                                                            <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none" style={{ color: spadesGameStatus?.system_start ? (spadesGameStatus?.is_paused ? '#eab308' : '#3b82f6') : '#3b82f6' }}>
                                                                 {spadesGameStatus?.is_active && spadesGameStatus?.phase ? spadesGameStatus.phase.replace('_', ' ') : 'IDLE'}
                                                             </div>
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-[9px] text-blue-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-blue-500/50 drop-shadow-md">
+                                                            <div className="text-xl sm:text-2xl xl:text-xl 2xl:text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-blue-500/50 drop-shadow-md">
                                                                 {spadesTimerDisplay}
                                                             </div>
                                                         </div>
@@ -2858,13 +2890,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-lg sm:text-xl font-display font-black uppercase leading-none tracking-wider" style={{ color: diamondsGameStatus?.system_start ? (diamondsGameStatus?.is_paused ? '#eab308' : '#a855f7') : '#a855f7' }}>
+                                                            <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none" style={{ color: diamondsGameStatus?.system_start ? (diamondsGameStatus?.is_paused ? '#eab308' : '#a855f7') : '#a855f7' }}>
                                                                 {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
                                                             </div>
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-purple-500/50 drop-shadow-md">
+                                                            <div className="text-xl sm:text-2xl xl:text-xl 2xl:text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-purple-500/50 drop-shadow-md">
                                                                 {diamondsTimerDisplay}
                                                             </div>
                                                         </div>
@@ -2951,13 +2983,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <div className="flex justify-between items-end mb-2 relative z-10">
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
-                                                            <div className="text-xl sm:text-2xl font-display font-black uppercase leading-none tracking-wider" style={{ color: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? '#eab308' : '#ef4444') : '#ef4444' }}>
+                                                            <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none" style={{ color: heartsGameStatus?.system_start ? (heartsGameStatus?.is_paused ? '#eab308' : '#ef4444') : '#ef4444' }}>
                                                                 {heartsGameStatus.phase || 'IDLE'}
                                                             </div>
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="text-[9px] text-red-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
-                                                            <div className="text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-red-500/50 drop-shadow-md">
+                                                            <div className="text-xl sm:text-2xl xl:text-xl 2xl:text-2xl font-mono font-bold text-white tracking-widest leading-none shadow-red-500/50 drop-shadow-md">
                                                                 {heartsTimerDisplay}
                                                             </div>
                                                         </div>
@@ -3125,12 +3157,12 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         const isCompleted = roundNum < gameStatus.current_round;
 
                                                         return (
-                                                            <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-white/20'}`}>
+                                                            <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? (suit.id === 'spades' ? 'border-blue-500/50 bg-blue-500/5' : suit.id === 'diamonds' ? 'border-purple-400/50 bg-purple-400/5' : 'border-green-500/50 bg-green-500/5') : 'border-white/10 hover:border-white/20'}`}>
                                                                 <div className="flex justify-between items-center">
-                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? 'text-green-500' : 'text-gray-500'}`}>
+                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? (suit.id === 'spades' ? 'text-blue-500' : suit.id === 'diamonds' ? 'text-purple-400' : 'text-green-500') : 'text-gray-500'}`}>
                                                                         PHASE_{roundNum.toString().padStart(2, '0')}
                                                                     </span>
-                                                                    <div className={`px-2 py-0.5 rounded text-[9px] font-bold ${isCurrentRound ? 'bg-green-500 text-black animate-pulse' : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
+                                                                    <div className={`px-2 py-0.5 rounded text-[7px] font-bold ${isCurrentRound ? `${suit.id === 'spades' ? 'bg-blue-500' : suit.id === 'diamonds' ? 'bg-purple-400' : 'bg-green-500'} text-black animate-pulse` : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
                                                                         {isCurrentRound ? (gameStatus.is_paused ? 'PAUSED' : (gameStatus.phase?.toUpperCase() || 'ACTIVE')) : isCompleted ? 'CLEARED' : 'LOCKED'}
                                                                     </div>
                                                                 </div>
@@ -3138,10 +3170,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 <div>
                                                                     <h4 className="text-lg font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
                                                                     <div className="flex items-center gap-2 mt-1">
-                                                                        <div className={`h-full transition-all duration-1000 ${isCurrentRound ? 'bg-green-500' : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
+                                                                        <div className={`h-full transition-all duration-1000 ${isCurrentRound ? (suit.id === 'spades' ? 'bg-blue-500' : suit.id === 'diamonds' ? 'bg-purple-400' : 'bg-green-500') : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
                                                                             style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
                                                                         />
-                                                                        <span className="text-[9px] font-mono text-gray-500 uppercase tracking-tighter">
+                                                                        <span className="text-[px] font-mono text-gray-500 uppercase tracking-tighter">
                                                                             {isCurrentRound ? `${gameStatus.votes_submitted || 0} VOTES CAST` : isCompleted ? 'SYNC DONE' : 'WAITING'}
                                                                         </span>
                                                                     </div>
@@ -3181,7 +3213,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444',
                                                     }}
                                                 >
-                                                    {getEffectiveViewMode(suit.id) === 'bar' ? <><PieChartIcon size={14} /> PIE</> : getEffectiveViewMode(suit.id) === 'pie' ? <><Activity size={14} /> LINE</> : <><BarChart3 size={14} /> CHARTS</>}
+                                                    {getEffectiveViewMode(suit.id) === 'chat' ? <><BarChart3 size={14} /> CHARTS</> : getEffectiveViewMode(suit.id) === 'bar' ? <><PieChartIcon size={14} /> PIE</> : getEffectiveViewMode(suit.id) === 'pie' ? <><Activity size={14} /> LINE</> : suit.id === 'clubs' ? <><MessageSquare size={14} /> CHAT</> : <><BarChart3 size={14} /> CHARTS</>}
                                                 </button>
 
                                                 <div className="flex flex-col xl:flex-row items-end xl:items-center gap-3">
@@ -3678,15 +3710,23 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
                                                             return (
                                                                 <tr key={getPlayerElementKey(player, idx, 'waiting')} className="hover:bg-white/[0.02] transition-colors">
-                                                                    <td className="p-2 sm:p-4 font-mono text-xs text-green-500 font-bold hidden sm:table-cell">
+                                                                    <td className={`p-2 sm:p-4 font-mono text-xs font-bold hidden sm:table-cell ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
                                                                         {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
                                                                     </td>
                                                                     <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
                                                                         {player.username}
                                                                     </td>
                                                                     <td className="p-2 sm:p-4 hidden sm:table-cell">
-                                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold bg-green-500/10 text-green-500 border border-green-500/20 uppercase tracking-wider">
-                                                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                                                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider ${selectedSuitForModal === 'hearts' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                                                                            selectedSuitForModal === 'spades' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
+                                                                                selectedSuitForModal === 'diamonds' ? 'bg-purple-400/10 text-purple-400 border-purple-400/20' :
+                                                                                    'bg-green-500/10 text-green-500 border-green-500/20'
+                                                                            }`}>
+                                                                            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${selectedSuitForModal === 'hearts' ? 'bg-red-500' :
+                                                                                selectedSuitForModal === 'spades' ? 'bg-blue-500' :
+                                                                                    selectedSuitForModal === 'diamonds' ? 'bg-purple-400' :
+                                                                                        'bg-green-500'
+                                                                                }`} />
                                                                             READY
                                                                         </span>
                                                                     </td>

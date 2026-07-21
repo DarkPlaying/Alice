@@ -61,6 +61,16 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
     const [showRulesModal, setShowRulesModal] = useState(false);
     const [showPointsModal, setShowPointsModal] = useState(false);
     const [showPlayerCard, setShowPlayerCard] = useState(false);
+    const [isScrolled, setIsScrolled] = useState(false);
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
+
+    useEffect(() => {
+        if (phase === 'completed' && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [phase, hasPlayedEndVideo]);
+
     const [deckRef] = useState(() => generateDeck());
     const remainingDeckRef = useRef<Card[]>([...deckRef]);
     const phaseTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -230,7 +240,7 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
     // ── Shared HUD & Modals ────────────────────────────────────────────────
     const renderHUD = () => (
-        <header className="fixed top-0 left-0 right-0 z-[150] bg-black/80 backdrop-blur-md">
+        <header className={`fixed top-0 left-0 right-0 z-[150] transition-all duration-300 ${isScrolled ? 'bg-black/90 backdrop-blur-xl border-b border-white/10' : 'bg-transparent'}`}>
             {/* Top Overlay — Trial Specialty */}
             <div className="flex justify-between items-center px-4 py-3 sm:px-8 sm:py-4 border-b border-white/10">
                 <div className="flex items-center gap-3 sm:gap-6">
@@ -482,9 +492,10 @@ export const DemoSpadesGame: React.FC<DemoSpadesGameProps> = ({ user }) => {
 
     // ── Main Game Render ───────────────────────────────────────────────────
     return (
-        <div className="relative h-screen bg-black text-white overflow-y-auto font-sans selection:bg-blue-500/30 overscroll-y-auto">
-            {/* Background */}
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-black to-black pointer-events-none" />
+        <div
+            className="w-full h-full text-white font-sans overflow-y-auto relative selection:bg-blue-500/30 bg-black/40 backdrop-blur-md"
+            onScroll={(e) => setIsScrolled(e.currentTarget.scrollTop > 10)}
+        >
 
             {/* Rules Modal */}
             <AnimatePresence>

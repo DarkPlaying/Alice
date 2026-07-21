@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Users, Shield, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, X, ChevronUp, ChevronDown, Crown, Radio, Activity, Pencil } from 'lucide-react';
 import Papa from 'papaparse';
 import { createClient } from '@supabase/supabase-js';
-import { supabase, supabaseUrl, supabaseKey } from '../../supabaseClient';
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
 import { PlayerCache } from '../../lib/playerCache';
 import { PlayerCardModal } from '../PlayerCardModal';
 
@@ -735,8 +735,8 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                 </div>
             )}
 
-            <div className="bg-black/40 border border-white/10 rounded-lg overflow-hidden">
-                <table className="w-full text-left">
+            <div className="bg-black/40 border border-white/10 rounded-lg overflow-x-auto">
+                <table className="w-full text-left min-w-[800px]">
                     <thead className="bg-white/5 text-xs text-white/50 uppercase tracking-wider">
                         <tr>
                             <th className="p-4 border-b border-white/10 w-10">
@@ -876,8 +876,24 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                                                                         return;
                                                                     }
                                                                     try {
-                                                                        await supabase.from('profiles').update({ visa_points: tempPoints }).eq('id', player.id);
+                                                                        const token = await getAccessToken();
+                                                                        const res = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${player.id}`, {
+                                                                            method: 'PATCH',
+                                                                            headers: {
+                                                                                'Content-Type': 'application/json',
+                                                                                'Authorization': `Bearer ${token}`,
+                                                                                'apikey': supabaseKey
+                                                                            },
+                                                                            body: JSON.stringify({ visa_points: tempPoints })
+                                                                        });
+                                                                        
+                                                                        if (!res.ok) {
+                                                                            console.error("Failed to update points:", await res.text());
+                                                                        }
+                                                                        
                                                                         setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, visa_points: tempPoints } : p));
+                                                                        PlayerCache.clear();
+                                                                        onRefreshRequest();
                                                                     } catch (err) {
                                                                         console.error(err);
                                                                     }
@@ -896,8 +912,24 @@ export const VisaManagement = ({ players, activeView, onRefreshRequest, setPlaye
                                                                     return;
                                                                 }
                                                                 try {
-                                                                    await supabase.from('profiles').update({ visa_points: tempPoints }).eq('id', player.id);
+                                                                    const token = await getAccessToken();
+                                                                    const res = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${player.id}`, {
+                                                                        method: 'PATCH',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'Authorization': `Bearer ${token}`,
+                                                                            'apikey': supabaseKey
+                                                                        },
+                                                                        body: JSON.stringify({ visa_points: tempPoints })
+                                                                    });
+                                                                    
+                                                                    if (!res.ok) {
+                                                                        console.error("Failed to update points:", await res.text());
+                                                                    }
+
                                                                     setPlayers(prev => prev.map(p => p.id === player.id ? { ...p, visa_points: tempPoints } : p));
+                                                                    PlayerCache.clear();
+                                                                    onRefreshRequest();
                                                                 } catch (err) {
                                                                     console.error(err);
                                                                 }

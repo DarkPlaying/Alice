@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
+import { chatClient } from '../../chatClient';
 
-import { Timer, FileText } from 'lucide-react';
+import { Timer, FileText, Trash2 } from 'lucide-react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Loader } from '../Loader';
 import { ClubsPointsTable } from './ClubsPointsTable';
@@ -87,11 +88,34 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
 
     // Points Table State
     const [showPointsTable, setShowPointsTable] = useState(false);
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
+
+    useEffect(() => {
+        if ((gameState === 'won' || gameState === 'lost') && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            window.dispatchEvent(new CustomEvent('borderland-trial-ended'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [gameState, hasPlayedEndVideo]);
 
 
     const [cards, setCards] = useState<Card[]>([]);
     const [messages, setMessages] = useState<any[]>([]);
     const [inputMessage, setInputMessage] = useState('');
+    // Control header background based on game state
+    useEffect(() => {
+        const header = document.getElementById('protocol-header');
+        if (header) {
+            if (gameState === 'briefing' || gameState === 'card_reveal' || gameState === 'round_reveal' || gameState === 'selection_reveal') {
+                header.style.backgroundColor = 'rgba(0, 0, 0, 1)'; // Solid black
+            } else {
+                header.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'; // Default transparent black
+            }
+        }
+        return () => {
+            if (header) header.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+        };
+    }, [gameState]);
 
     const sendMessage = async (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -100,21 +124,65 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
         const tempContent = inputMessage;
         setInputMessage('');
 
+        // Generate a temporary ID for optimistic update
+        const msgId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+
+        // Optimistic update
+        setMessages(prev => [...prev, {
+            id: msgId,
+            user: senderName,
+            userId: user?.id,
+            text: tempContent,
+            timestamp: new Date(),
+            isSystem: false
+        }]);
+
         try {
-            const { error } = await supabase.from('messages').insert({
-                game_id: 'clubs_king',
-                user_name: senderName,
-                user_id: user?.id as string,
-                content: tempContent,
-                is_system: false,
-                channel: 'master'
+            const token = await getAccessToken();
+            const res = await fetch(`${supabaseUrl}/rest/v1/messages`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'apikey': supabaseKey,
+                    'Prefer': 'return=representation'
+                },
+                body: JSON.stringify({
+                    game_id: 'clubs_king',
+                    user_name: senderName,
+                    user_id: user?.id as string,
+                    content: tempContent,
+                    is_system: false,
+                    channel: 'master'
+                })
             });
 
-            if (error) {
-                console.error('Error sending message:', error);
+            if (!res.ok) {
+                console.error('Error sending message:', res.statusText);
+                setMessages(prev => prev.filter(m => m.id !== msgId));
             }
         } catch (err) {
             console.error('Exception sending message:', err);
+            setMessages(prev => prev.filter(m => m.id !== msgId));
+        }
+    };
+
+    const deleteMessage = async (msgId: string) => {
+        try {
+            const token = await getAccessToken();
+            const res = await fetch(`${supabaseUrl}/rest/v1/messages?id=eq.${msgId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'apikey': supabaseKey
+                }
+            });
+            if (!res.ok) {
+                console.error('Error deleting message:', res.statusText);
+            }
+            // Realtime listener will remove it from the UI automatically
+        } catch (err) {
+            console.error('Exception deleting message:', err);
         }
     };
 
@@ -217,19 +285,28 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
         const uidsToFetch: string[] = [];
         if (topPlayerId && !playerIdMap[topPlayerId] && topPlayerId !== 'TBD' && topPlayerId !== 'MASTER') uidsToFetch.push(topPlayerId);
         if (topMasterId && !playerIdMap[topMasterId] && topMasterId !== 'TBD' && topMasterId !== 'MASTER') uidsToFetch.push(topMasterId);
-        
+
         if (uidsToFetch.length > 0) {
             const fetchProfiles = async () => {
                 const { data } = await supabase.from('profiles').select('id, username').in('id', uidsToFetch);
-                if (data) {
-                    setPlayerIdMap(prev => {
-                        const next = { ...prev };
+
+                setPlayerIdMap(prev => {
+                    const next = { ...prev };
+
+                    // Mark as fetched even if not found to prevent infinite loop.
+                    // Fall back to #PLAYER so that the UI does not show a raw UUID string.
+                    uidsToFetch.forEach(uid => {
+                        next[uid] = '#PLAYER';
+                    });
+
+                    if (data) {
                         data.forEach(p => {
                             if (p.id && p.username) next[p.id] = p.username.toUpperCase();
                         });
-                        return next;
-                    });
-                }
+                    }
+
+                    return next;
+                });
             };
             fetchProfiles();
         }
@@ -497,7 +574,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     const gameStatusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
                         headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
                     });
-                    
+
                     if (gameStatusRes.ok) {
                         const gameStatusData = await gameStatusRes.json();
                         const gameStatus = gameStatusData && gameStatusData.length > 0 ? gameStatusData[0] : null;
@@ -548,7 +625,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     const latestStatusRes = await fetch(`${supabaseUrl}/rest/v1/clubs_game_status?id=eq.clubs_king&select=scores`, {
                         headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
                     });
-                    
+
                     if (latestStatusRes.ok) {
                         const latestStatusData = await latestStatusRes.json();
                         const latestStatus = latestStatusData && latestStatusData.length > 0 ? latestStatusData[0] : null;
@@ -677,7 +754,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                         const dataArray = await statusDataRes.json();
                         statusData = dataArray && dataArray.length > 0 ? dataArray[0] : null;
                     }
-                    
+
                     if (statusData) {
                         const currentStart = statusData?.scores?.start || {};
                         const playerIds: string[] = statusData?.allowed_players?.map((p: any) => String(p)) || [];
@@ -785,7 +862,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     if (!isEngine) window.location.href = '/home/card';
                     return;
                 }
-                
+
                 if (data.system_start) {
                     const resolvedState = data.gameState || 'setup_phase1';
                     setGameState(resolvedState);
@@ -909,7 +986,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
             }
         };
         fetchState();
-        
+
         let isFetchingSync = false;
         const syncInterval = setInterval(async () => {
             if (isEngine || isFetchingSync) return;
@@ -920,7 +997,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                 isFetchingSync = false;
             }
         }, 15000);
-        
+
         return () => clearInterval(syncInterval);
     }, [initializeBoard, isEngine]);
 
@@ -946,7 +1023,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                             gameState,
                             round,
                             phaseExpiry: phaseExpiry.toISOString(),
-                        }); 
+                        });
                         advancePhase();
                     }
                 }
@@ -961,12 +1038,22 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
     // Subscriptions
     useEffect(() => {
         const fetchMessages = async () => {
-            const { data } = await supabase.from('messages').select('*').eq('game_id', 'clubs_king').eq('channel', 'master').order('created_at', { ascending: false }).limit(50);
-            if (data) setMessages([...data].reverse());
+            const { data } = await chatClient.from('messages').select('*').eq('game_id', 'clubs_king').eq('channel', 'master').order('created_at', { ascending: false }).limit(50);
+            if (data) {
+                setMessages([...data].reverse().map(msg => ({
+                    id: msg.id,
+                    user: msg.user_name,
+                    userId: msg.user_id,
+                    text: msg.content,
+                    timestamp: new Date(msg.created_at),
+                    isSystem: msg.is_system,
+                    channel: msg.channel
+                })));
+            }
         };
         fetchMessages();
 
-        const channel = supabase.channel('clubs_king_game', {
+        const channel = chatClient.channel('clubs_king_game', {
             config: { presence: { key: 'master' } }
         });
         channelRef.current = channel;
@@ -1111,8 +1198,47 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     }
                 }
             })
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'game_id=eq.clubs_king' }, (payload) => {
-                if (payload.new.channel === 'master') setMessages(prev => [...prev, payload.new]);
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+                // Handle Delete Message
+                if (payload.eventType === 'DELETE' && payload.old && payload.old.id) {
+                    setMessages(prev => prev.filter(m => String(m.id) !== String(payload.old.id)));
+                    return;
+                }
+
+                // For INSERT and UPDATE, filter by game_id client-side
+                if (payload.new && (payload.new as any).game_id !== 'clubs_king') return;
+
+                // Handle Insert/Update Message
+                if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                    const newMsg = payload.new;
+                    if (newMsg && ((newMsg as any).channel === 'master' || (newMsg as any).is_system)) {
+                        setMessages(prev => {
+                            // Find matching optimistic message
+                            const optIndex = prev.findIndex(m => String(m.id).startsWith('temp-') && m.text === newMsg.content);
+
+                            const realMsg = {
+                                id: newMsg.id,
+                                user: newMsg.user_name,
+                                userId: newMsg.user_id,
+                                text: newMsg.content,
+                                timestamp: new Date(newMsg.created_at),
+                                isSystem: newMsg.is_system,
+                                channel: newMsg.channel
+                            };
+
+                            if (optIndex !== -1) {
+                                // Replace optimistic message with real one
+                                const newArr = [...prev];
+                                newArr[optIndex] = realMsg as any;
+                                return newArr;
+                            }
+
+                            // Normal Deduplicate by ID
+                            if (prev.some(m => m.id === newMsg.id)) return prev;
+                            return [...prev, realMsg as any];
+                        });
+                    }
+                }
             })
             .on('broadcast', { event: 'force_exit' }, () => {
                 console.log("FORCE EXIT RECEIVED");
@@ -1667,14 +1793,14 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                                                 const initialScore = finalScores?.start?.[uid] || 0;
                                                 const finalScore = adjustedCurrent[uid] || 0;
                                                 const isWin = finalScore >= initialScore;
-                                                
+
                                                 await fetch(`${supabaseUrl}/rest/v1/profiles?email=eq.${encodeURIComponent(profile.email)}`, {
                                                     method: 'PATCH',
                                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Prefer': 'return=minimal' },
-                                                    body: JSON.stringify({ 
-                                                        visa_points: finalScore, 
-                                                        wins: (profile.wins || 0) + (isWin ? 1 : 0), 
-                                                        losses: (profile.losses || 0) + (isWin ? 0 : 1) 
+                                                    body: JSON.stringify({
+                                                        visa_points: finalScore,
+                                                        wins: (profile.wins || 0) + (isWin ? 1 : 0),
+                                                        losses: (profile.losses || 0) + (isWin ? 0 : 1)
                                                     })
                                                 });
                                             }
@@ -1773,7 +1899,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                 err.name === 'AbortError' ||
                 err.message.toLowerCase().includes('aborted')
             );
-            
+
             if (isTimeoutError) {
                 console.warn("[ADVANCE PHASE] Engine transition timed out globally. Will automatically retry on next tick.");
                 lastProcessedPhase.current = null; // Clear so it can retry
@@ -1833,7 +1959,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                             metadata: { created_via: 'auto_recovery' }
                         }])
                     });
-                    
+
                     if (newSessionRes.ok) {
                         const newSessionData = await newSessionRes.json();
                         const newSession = newSessionData && newSessionData.length > 0 ? newSessionData[0] : null;
@@ -1976,12 +2102,12 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                 const isMaster = isMasterUid(uid, playerIdsArr);
                 const score = Number(s) || 0;
                 if (isMaster) {
-                     if (score > maxMScore) maxMScore = score;
+                    if (score > maxMScore) maxMScore = score;
                 } else {
-                     if (score > maxPScore) {
-                         maxPScore = score;
-                         topPId = uid;
-                     }
+                    if (score > maxPScore) {
+                        maxPScore = score;
+                        topPId = uid;
+                    }
                 }
             });
 
@@ -2084,11 +2210,11 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     console.log("[EVAL TRACE] 6. Upserting round scores...");
                     const upsertRes = await fetch(`${supabaseUrl}/rest/v1/clubs_round_scores?on_conflict=game_id,player_email,round_number`, {
                         method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json', 
-                            'Authorization': `Bearer ${accessToken}`, 
-                            'apikey': supabaseKey, 
-                            'Prefer': 'resolution=merge-duplicates' 
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`,
+                            'apikey': supabaseKey,
+                            'Prefer': 'resolution=merge-duplicates'
                         },
                         body: JSON.stringify(roundScoreRecords)
                     });
@@ -2164,7 +2290,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
     if (isEngine) return null;
 
     return (
-        <div className="relative w-full h-full bg-[#050508] flex flex-col font-sans overflow-hidden">
+        <div className="relative w-full h-full bg-black/40 backdrop-blur-md flex flex-col font-sans overflow-hidden">
             {isGameLoading && <Loader />}
             {/* PHASE NOTIFICATION BANNER */}
             <AnimatePresence>
@@ -2175,7 +2301,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                         exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
                         className="absolute inset-0 z-[200] flex items-center justify-center pointer-events-none"
                     >
-                        <div className="bg-black/80 border border-white/20 p-8 sm:p-12 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(255,255,255,0.1)] text-center">
+                        <div className="bg-black/90 border border-white/20 p-8 sm:p-12 rounded-xl backdrop-blur-md shadow-[0_0_50px_rgba(255,255,255,0.1)] text-center">
                             <p className="text-white/50 text-sm tracking-[0.3em] uppercase mb-2">PHASE INITIATED</p>
                             <h2 className="text-3xl sm:text-5xl font-mono text-white tracking-widest font-bold drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
                                 {phaseBanner}
@@ -2186,32 +2312,35 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
             </AnimatePresence>
 
             {/* HEADER HUB - Consolidated with Main Header */}
-            <div className={`px-4 py-3 sm:px-8 sm:py-2 border-b border-white/5 flex flex-col sm:flex-row justify-center items-center bg-white/[0.01] z-[110] gap-4 sm:gap-0 relative`}>
+            <div className={`px-2 py-2 sm:px-8 sm:py-2 border-b border-white/5 flex flex-row overflow-x-auto scrollbar-hide items-center ${gameState === 'briefing' ? 'bg-black/95' : 'bg-transparent'} z-[110] gap-4 sm:gap-0 relative`}>
 
                 {/* POINTS TABLE BUTTON */}
                 <button
                     onClick={() => setShowPointsTable(true)}
-                    className="sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[10px] font-bold uppercase tracking-widest transition-all mb-2 sm:mb-0"
+                    className="shrink-0 sm:absolute sm:left-4 sm:top-1/2 sm:-translate-y-1/2 flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/60 hover:text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-widest transition-all"
                 >
-                    <FileText size={14} />
-                    <span>Rules & Points</span>
+                    <FileText size={12} />
+                    <span className="hidden sm:inline">Rules & Points</span>
+                    <span className="sm:hidden">Rules</span>
                 </button>
 
-                <div className="flex items-center gap-4 sm:gap-8 w-full sm:w-auto justify-center">
-                    <div className="flex items-center gap-4 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-around sm:justify-start">
+                <div className="flex items-center gap-2 sm:gap-8 w-full sm:w-auto sm:min-w-max shrink-0 sm:mx-auto px-1 sm:px-2">
+                    <div className="flex items-center gap-2 sm:gap-8 border-l-0 sm:border-l border-white/10 pl-0 sm:pl-8 w-full justify-between sm:justify-start">
                         {/* ROUND */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
+                        <div className="text-center">
+                            <p className="text-[6px] sm:text-[7px] text-white/30 uppercase tracking-widest mb-0.5">ROUND</p>
                             <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{round}/6</p>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* TOP PLAYER */}
-                        <div className="text-center min-w-[70px] sm:min-w-[100px]">
+                        <div className="text-center max-w-[60px] sm:max-w-none sm:min-w-[100px]">
                             <p className="text-[7px] text-yellow-500/50 uppercase tracking-widest mb-0.5">TOP PLAYER</p>
                             <div className="flex flex-col items-center leading-none">
-                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId || '--')}</p>
+                                <p className="text-[7px] sm:text-[9px] font-bold text-yellow-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">
+                                    {topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId === (user?.uid || user?.id) ? (user?.username || 'YOU') : (topPlayerId ? (topPlayerId.length > 15 ? topPlayerId.slice(0, 8) + '...' : topPlayerId) : '--'))}
+                                </p>
                                 <p className="text-xs sm:text-lg font-mono font-black text-white">{topPlayerScore}</p>
                             </div>
                         </div>
@@ -2219,27 +2348,26 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* TOP MASTER */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
+                        <div className="text-center max-w-[60px] sm:max-w-none sm:min-w-[100px]">
+                            <p className="text-[6px] sm:text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TOP MASTER</p>
                             <div className="flex flex-col items-center leading-none">
-                                <p className="text-[7px] sm:text-[9px] font-bold text-red-500 mb-0.5 truncate max-w-[80px] sm:max-w-none">{topMasterId && playerIdMap[topMasterId] ? playerIdMap[topMasterId] : (topMasterId || '--')}</p>
-                                <p className="text-xs sm:text-lg font-mono font-bold text-white">{topMasterScore}</p>
+                                <p className="text-xs sm:text-lg font-mono font-black text-red-500">{topMasterScore}</p>
                             </div>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
                         {/* MY SCORE */}
-                        <div className="text-center min-w-[40px]">
-                            <p className="text-[7px] text-blue-500/50 uppercase tracking-widest mb-0.5">MY SCORE</p>
-                            <p className="text-xs sm:text-lg font-mono font-bold text-white leading-none">{myScore}</p>
+                        <div className="text-center max-w-[50px] sm:max-w-none sm:min-w-[100px]">
+                            <p className="text-[6px] sm:text-[7px] text-white/30 uppercase tracking-widest mb-0.5">MY SCORE</p>
+                            <p className="text-xs sm:text-lg font-mono font-black text-white leading-none">{myScore}</p>
                         </div>
 
                         <div className="w-px h-6 bg-white/10" />
 
-                        {/* TIMER */}
-                        <div className="text-center min-w-[60px]">
-                            <p className="text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
+                        {/* TIME */}
+                        <div className="text-center max-w-[40px] sm:max-w-none sm:min-w-[60px]">
+                            <p className="text-[6px] sm:text-[7px] text-red-500/50 uppercase tracking-widest mb-0.5">TIME</p>
                             <div className="flex items-center justify-center gap-1">
                                 <Timer size={12} className="text-red-500" />
                                 <p className="text-xs sm:text-lg font-mono font-black text-red-500 leading-none">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</p>
@@ -2253,7 +2381,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
             <div className="flex-1 flex flex-col sm:flex-row overflow-hidden relative z-10">
 
                 {/* GAME BOARD */}
-                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-black/40">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-8 scrollbar-hide relative bg-transparent">
 
                     {/* INFO HUD */}
                     <div className="max-w-6xl mx-auto mb-8 flex justify-between items-end">
@@ -2332,23 +2460,6 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                                         <p className={`text-[10px] font-mono font-bold ${Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'text-green-500' : 'text-white/40'}`}>
                                             {Object.keys(phase1Selections).length > 0 || (playerSelection.angel && playerSelection.demon) ? 'SYNC_LOCKED' : 'CALCULATING...'}
                                         </p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* BRIEFING STATE */}
-                        {gameState === 'briefing' && (
-                            <div className="absolute inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center">
-                                <div className="max-w-4xl mx-auto text-center space-y-8 p-8">
-                                    <h1 className="text-4xl font-cinzel font-black text-white uppercase tracking-[0.2em]">
-                                        Protocol Briefing
-                                    </h1>
-                                    <div className="h-1 w-64 mx-auto bg-gradient-to-r from-transparent via-green-500 to-transparent" />
-                                    <div className="space-y-4 text-white/80 font-mono text-center">
-                                        <p className="text-xl">Initializing Game Engine...</p>
-                                        <p className="text-sm">Players are receiving mission parameters.</p>
-                                        <p className="text-sm text-green-500 font-bold animate-pulse mt-4">AWAITING PHASE SHIFT...</p>
                                     </div>
                                 </div>
                             </div>
@@ -2472,7 +2583,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     {/* CARDS GRID */}
                     <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-4 max-w-6xl mx-auto">
                         {cards.map((card) => {
-                            if (card.isRemoved) return <div key={card.id} className="aspect-[2/3] opacity-0 pointer-events-none" />;
+                            if (card.isRemoved) return null;
 
                             const isMyAngel = mySelection.angel === card.id;
                             const isMyDemon = mySelection.demon === card.id;
@@ -2558,91 +2669,91 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     </div>
                 </div>
 
-            {/* CARD REVEAL: SHOW ANGEL & DEMON */}
-            <AnimatePresence>
-                {gameState === 'card_reveal' && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-32 sm:pt-12 lg:pt-0">
-                        {/* Card Display Section */}
-                        <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 lg:gap-20 max-w-full scale-[0.65] sm:scale-85 lg:scale-90 origin-top sm:origin-center lg:origin-center pb-24 lg:pb-0 mt-8 sm:mt-0">
-                            {/* Master's Selected Cards */}
-                            <div className="space-y-8 sm:space-y-6 flex flex-col items-center">
-                                <h3 className="text-xl sm:text-xl font-mono font-bold uppercase tracking-[0.5em] text-center text-yellow-500/90 drop-shadow-[0_0_10px_rgba(234,179,8,0.3)]">MASTER</h3>
-                                <div className="flex gap-4 sm:gap-4 justify-center">
-                                    {/* MASTER ANGEL */}
-                                    {(() => {
-                                        const card = cards.find(c => c.id === mySelection.angel);
-                                        if (!card) return null;
-                                        return (
-                                            <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-yellow-500 shadow-[0_0_40px_rgba(234,179,8,0.4)]">
-                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY ANGEL</div>
-                                            </div>
-                                        );
-                                    })()}
-                                    {/* MASTER DEMON */}
-                                    {(() => {
-                                        const card = cards.find(c => c.id === mySelection.demon);
-                                        if (!card) return null;
-                                        return (
-                                            <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-red-600 shadow-[0_0_40px_rgba(220,38,38,0.4)]">
-                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY DEMON</div>
-                                            </div>
-                                        );
-                                    })()}
+                {/* CARD REVEAL: SHOW ANGEL & DEMON */}
+                <AnimatePresence>
+                    {gameState === 'card_reveal' && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="fixed inset-0 bg-black flex flex-col items-center justify-start lg:justify-center z-[300] overflow-y-auto p-4 pt-8 sm:pt-12 lg:pt-0">
+                            {/* Card Display Section */}
+                            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 lg:gap-20 max-w-full scale-[0.65] sm:scale-85 lg:scale-90 origin-top sm:origin-center lg:origin-center pb-24 lg:pb-0 mt-8 sm:mt-0">
+                                {/* Master's Selected Cards */}
+                                <div className="space-y-8 sm:space-y-6 flex flex-col items-center">
+                                    <h3 className="text-xl sm:text-xl font-mono font-bold uppercase tracking-[0.5em] text-center text-yellow-500/90 drop-shadow-[0_0_10px_rgba(234,179,8,0.3)]">MASTER</h3>
+                                    <div className="flex gap-4 sm:gap-4 justify-center">
+                                        {/* MASTER ANGEL */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === mySelection.angel);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-yellow-500 shadow-[0_0_40px_rgba(234,179,8,0.4)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY ANGEL</div>
+                                                </div>
+                                            );
+                                        })()}
+                                        {/* MASTER DEMON */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === mySelection.demon);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-32 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-red-600 shadow-[0_0_40px_rgba(220,38,38,0.4)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-3 sm:px-4 py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap shadow-xl">MY DEMON</div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+
+                                {/* VS SEPARATOR */}
+                                <div className="hidden sm:block h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
+                                <div className="sm:hidden w-64 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent my-12" />
+
+                                {/* PLAYER SIDE */}
+                                <div className="flex flex-col items-center gap-8 sm:gap-6">
+                                    <h3 className="text-xl sm:text-xl font-bold font-mono tracking-[0.5em] border-b border-blue-500/20 pb-3 text-blue-500/70 uppercase">PLAYERS</h3>
+                                    <div className="flex gap-2 sm:gap-6 justify-center">
+                                        {/* PLAYER ANGEL */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === playerSelection.angel);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.4)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER ANGEL</div>
+                                                </div>
+                                            );
+                                        })()}
+                                        {/* PLAYER DEMON */}
+                                        {(() => {
+                                            const card = cards.find(c => c.id === playerSelection.demon);
+                                            if (!card) return null;
+                                            return (
+                                                <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-purple-600 shadow-[0_0_30px_rgba(147,51,234,0.4)]">
+                                                    <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
+                                                    <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER DEMON</div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* VS SEPARATOR */}
-                            <div className="hidden sm:block h-64 w-px bg-gradient-to-b from-transparent via-white/20 to-transparent" />
-                            <div className="sm:hidden w-64 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent my-12" />
-
-                            {/* PLAYER SIDE */}
-                            <div className="flex flex-col items-center gap-8 sm:gap-6">
-                                <h3 className="text-xl sm:text-xl font-bold font-mono tracking-[0.5em] border-b border-blue-500/20 pb-3 text-blue-500/70 uppercase">PLAYERS</h3>
-                                <div className="flex gap-2 sm:gap-6 justify-center">
-                                    {/* PLAYER ANGEL */}
-                                    {(() => {
-                                        const card = cards.find(c => c.id === playerSelection.angel);
-                                        if (!card) return null;
-                                        return (
-                                            <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.4)]">
-                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER ANGEL</div>
-                                            </div>
-                                        );
-                                    })()}
-                                    {/* PLAYER DEMON */}
-                                    {(() => {
-                                        const card = cards.find(c => c.id === playerSelection.demon);
-                                        if (!card) return null;
-                                        return (
-                                            <div className="relative w-28 sm:w-40 aspect-[2/3] rounded-xl border-2 sm:border-4 border-purple-600 shadow-[0_0_30px_rgba(147,51,234,0.4)]">
-                                                <img src={`/borderland_cards/${card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}_${card.rank}.png`} className="w-full h-full object-cover rounded-lg" />
-                                                <div className="absolute -bottom-3 sm:-bottom-4 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-2 sm:px-4 py-0.5 sm:py-1 font-black text-[10px] sm:text-xs uppercase tracking-widest rounded-full whitespace-nowrap">PLAYER DEMON</div>
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
+                            <div className="absolute bottom-12 left-0 w-full text-center text-white/40 font-mono animate-pulse">
+                                CALCULATING ROUND OUTCOME...
                             </div>
-                        </div>
-
-                        <div className="absolute bottom-12 text-center text-white/40 font-mono animate-pulse">
-                            CALCULATING ROUND OUTCOME...
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* SIDEBAR (Bottom on mobile, Right on desktop) */}
-                <div className="w-full sm:w-80 h-[30vh] sm:h-full border-t sm:border-t-0 sm:border-l border-white/10 flex flex-col bg-[#0A0A0E]">
+                <div className={`hidden sm:flex sm:w-80 sm:h-full ${gameState === 'briefing' ? 'bg-black/95' : 'bg-transparent'} sm:border-l border-white/10 flex-col relative z-20`}>
                     {/* Chat */}
-                    <div className="flex-1 flex flex-col min-h-0 bg-[#0A0A0E] border-b border-white/5">
-                        <div className="p-3 border-b border-white/10 bg-[#0F0F13]">
-                            <h3 className="text-[10px] font-black tracking-[0.2em] text-white/50 uppercase">PLAYER COMMS INTERCEPT</h3>
+                    <div className="flex-1 flex flex-col min-h-0 bg-transparent border-b border-white/5">
+                        <div className="p-3 border-b border-white/10 bg-transparent">
+                            <h3 className="text-[10px] font-black tracking-[0.2em] text-red-500 uppercase">MASTER COMMS</h3>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-black scrollbar-track-transparent">
                             {messages.length === 0 && (
@@ -2650,14 +2761,16 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                                     <p className="text-xs uppercase tracking-widest font-mono">Channel Silent...</p>
                                 </div>
                             )}
-                            {messages.map((msg) => (
+                            {messages.filter(msg => msg.text && msg.text.trim() !== '').map((msg) => (
                                 <div key={msg.id} className="relative group">
                                     <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-white/20 group-hover:bg-cyan-500/50 transition-colors" />
-                                    <div className="pl-3 py-1">
-                                        <p className="text-[10px] font-black text-white/40 mb-1">
-                                            {msg.user_id === user?.id ? '#MASTER' : (msg.user_name || playerIdMap[msg.user_id] || (msg.user_id || 'SYS').slice(0, 8)).toUpperCase()}
-                                        </p>
-                                        <p className="text-xs text-white/80 font-mono leading-relaxed">{msg.content || msg.text}</p>
+                                    <div className="pl-3 py-1 flex items-start justify-between gap-2">
+                                        <div>
+                                            <p className="text-[10px] font-black text-white/40 mb-1">
+                                                {msg.userId === user?.id ? '#MASTER' : (msg.user || playerIdMap[msg.userId as string] || (msg.userId || 'SYS').slice(0, 8)).toUpperCase()}
+                                            </p>
+                                            <p className="text-xs text-white/80 font-mono leading-relaxed">{msg.text}</p>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -2666,7 +2779,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     </div>
 
                     {/* Chat Input */}
-                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-[#0F0F13]">
+                    <form onSubmit={sendMessage} className="p-3 border-t border-white/10 bg-transparent">
                         <div className="relative">
                             <input
                                 type="text"
@@ -2680,7 +2793,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                     </form>
 
                     {/* Status Footer */}
-                    <div className="p-4 border-t border-white/10 bg-black/40">
+                    <div className="p-4 border-t border-white/10 bg-transparent">
                         <div className="flex flex-col gap-2">
                             <div className="text-[10px] uppercase tracking-widest text-white/30">SYSTEM STATUS</div>
                             <div className="text-xs font-mono text-cyan-500/80">
@@ -2704,94 +2817,95 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
             {/* GAME OVER OVERLAY */}
             {
                 gameState === 'won' && (
-                    <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center">
-                        <div className="max-w-4xl w-full mx-4 text-center space-y-8">
-                            {/* Determine Winner */}
-                            {(() => {
-                                const playerWins = topPlayerScore > topMasterScore;
-                                const masterWins = topMasterScore > topPlayerScore;
+                    <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] overflow-y-auto scrollbar-hide">
+                        <div className="min-h-full flex flex-col items-center justify-start py-12 sm:py-24">
+                            <div className="max-w-4xl w-full mx-4 text-center space-y-6 mt-auto mb-auto">
+                                {/* Determine Winner */}
+                                {(() => {
+                                    const playerWins = topPlayerScore > topMasterScore;
+                                    const masterWins = topMasterScore > topPlayerScore;
 
-                                return (
-                                    <>
-                                        {/* Victory/Defeat Banner */}
-                                        <div className="space-y-4">
-                                            <h1 className={`text-7xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
-                                                {playerWins ? 'PLAYERS PREVAILED' : masterWins ? 'MASTERS TRIUMPH' : 'PERFECT EQUILIBRIUM'}
-                                            </h1>
-                                            <div className={`h-1 w-96 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
-                                            <p className="text-lg font-mono text-white/60 uppercase tracking-wider">
-                                                {playerWins ? 'Collective intelligence triumphed. The Borderland acknowledges their skill.' :
-                                                    masterWins ? 'The Masters\' deception proved superior. Players failed the trial.' :
-                                                        'Both sides demonstrated equal mastery. A rare occurrence.'}
+                                    return (
+                                        <>
+                                            {/* Victory/Defeat Banner */}
+                                            <div className="space-y-3">
+                                                <h1 className={`text-xl sm:text-2xl md:text-3xl font-cinzel font-black uppercase tracking-widest ${playerWins ? 'text-green-500' : masterWins ? 'text-red-500' : 'text-white'}`}>
+                                                    {playerWins ? 'PLAYERS PREVAILED' : masterWins ? 'MASTERS TRIUMPH' : 'PERFECT EQUILIBRIUM'}
+                                                </h1>
+                                                <div className={`h-1 w-64 md:w-96 mx-auto bg-gradient-to-r ${playerWins ? 'from-transparent via-green-500 to-transparent' : masterWins ? 'from-transparent via-red-500 to-transparent' : 'from-transparent via-white to-transparent'} opacity-70`} />
+                                                <p className="text-sm sm:text-base font-mono text-white/60 uppercase tracking-wider">
+                                                    {playerWins ? 'Collective intelligence triumphed. The Borderland acknowledges their skill.' :
+                                                        masterWins ? 'The Masters\' deception proved superior. Players failed the trial.' :
+                                                            'Both sides demonstrated equal mastery. A rare occurrence.'}
+                                                </p>
+                                            </div>
+
+                                            {/* Score Display - STACKED ON MOBILE TO PREVENT OVERLAP */}
+                                            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 w-full max-w-4xl px-4 sm:px-0">
+                                                {/* Top Player */}
+                                                <div className={`p-4 sm:p-6 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                    <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">TOP PLAYER</p>
+                                                    <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-1 truncate">
+                                                        {topPlayerId && playerIdMap[topPlayerId] ? playerIdMap[topPlayerId] : (topPlayerId === (user?.uid || user?.id) ? (user?.username || 'YOU') : (topPlayerId ? (topPlayerId.length > 15 ? topPlayerId.slice(0, 8) + '...' : topPlayerId) : '--'))}
+                                                    </p>
+                                                    <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
+                                                    {playerWins && <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                                </div>
+
+                                                {/* My Score (Master) */}
+                                                <div className="p-4 sm:p-6 rounded-xl border-2 border-blue-500 bg-blue-500/10">
+                                                    <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">MY SCORE</p>
+                                                    <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-1">
+                                                        MASTER (YOU)
+                                                    </p>
+                                                    <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{myScore}</p>
+                                                    <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
+                                                </div>
+
+                                                {/* Top Master */}
+                                                <div className={`p-4 sm:p-6 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
+                                                    <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-2 font-mono">TOP MASTER</p>
+                                                    <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-1">
+                                                        {(topMasterScore > 0 && topMasterScore === myScore) ? 'YOU' : '[IDENTITY CONCEALED]'}
+                                                    </p>
+                                                    <p className="text-3xl sm:text-5xl font-black font-mono text-white leading-none">{topMasterScore}</p>
+                                                    {masterWins && <p className="mt-1 sm:mt-2 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
+                                                </div>
+                                            </div>
+
+                                            {/* Game Stats */}
+                                            <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+                                                <p className="text-xs text-white/30 uppercase tracking-widest mb-4 font-mono">TRIAL COMPLETE</p>
+                                                <div className="grid grid-cols-3 gap-4 text-center">
+                                                    <div>
+                                                        <p className="text-2xl font-mono font-bold text-white">6/6</p>
+                                                        <p className="text-[10px] text-white/40 uppercase tracking-wider">ROUNDS</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-2xl font-mono font-bold text-green-500">♣ KING</p>
+                                                        <p className="text-[10px] text-white/40 uppercase tracking-wider">DIFFICULTY</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-2xl font-mono font-bold text-white">{playerWins ? '+' : masterWins ? '-' : '±'}{Math.abs(topPlayerScore - topMasterScore)}</p>
+                                                        <p className="text-[10px] text-white/40 uppercase tracking-wider">MARGIN</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Return Button */}
+                                            <button
+                                                onClick={() => { if (!isEngine) window.location.href = '/home/card'; }}
+                                                className="px-12 py-4 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-sm rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
+                                            >
+                                                RETURN TO LOBBY
+                                            </button>
+                                            <p className="text-xs text-white/20 font-mono uppercase tracking-widest">
+                                                GAME ID: CLUBS_KING • ROUND: {round}/{round}
                                             </p>
-                                        </div>
-
-                                        {/* Score Display - STACKED ON MOBILE TO PREVENT OVERLAP */}
-                                        <div className="flex flex-col sm:grid sm:grid-cols-3 gap-3 sm:gap-6 w-full max-w-4xl px-4 sm:px-0">
-                                            {/* Top Player */}
-                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${playerWins ? 'border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'border-white/20 bg-white/5'}`}>
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP PLAYER</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-yellow-500 mb-0.5 sm:mb-2 truncate">
-                                                    {topPlayerId ? (playerIdMap[topPlayerId] || topPlayerId.slice(0, 8) + '...') : '--'}
-                                                </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topPlayerScore}</p>
-                                                {playerWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-green-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
-                                            </div>
-
-                                            {/* My Score (Master) */}
-                                            <div className="p-4 sm:p-8 rounded-xl border-2 border-blue-500 bg-blue-500/10">
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">MY SCORE</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-blue-400 mb-0.5 sm:mb-2">
-                                                    MASTER (YOU)
-                                                </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{myScore}</p>
-                                                <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-blue-400 uppercase tracking-wider">YOUR PERFORMANCE</p>
-                                            </div>
-
-                                            {/* Top Master */}
-                                            <div className={`p-4 sm:p-8 rounded-xl border-2 ${masterWins ? 'border-red-500 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-white/20 bg-white/5'}`}>
-                                                <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest mb-1 sm:mb-3 font-mono">TOP MASTER</p>
-                                                <p className="text-[10px] sm:text-sm font-mono text-red-500 mb-0.5 sm:mb-2">
-                                                    {(topMasterScore > 0 && topMasterScore === myScore) ? 'YOU' : '[IDENTITY CONCEALED]'}
-                                                </p>
-                                                <p className="text-3xl sm:text-6xl font-black font-mono text-white leading-none">{topMasterScore}</p>
-                                                {masterWins && <p className="mt-2 sm:mt-3 text-[9px] sm:text-xs text-red-500 uppercase tracking-wider font-bold">★ VICTOR ★</p>}
-                                            </div>
-                                        </div>
-
-                                        {/* Game Stats */}
-                                        <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-                                            <p className="text-xs text-white/30 uppercase tracking-widest mb-4 font-mono">TRIAL COMPLETE</p>
-                                            <div className="grid grid-cols-3 gap-4 text-center">
-                                                <div>
-                                                    <p className="text-2xl font-mono font-bold text-white">6/6</p>
-                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">ROUNDS</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-2xl font-mono font-bold text-green-500">♣ KING</p>
-                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">DIFFICULTY</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-2xl font-mono font-bold text-white">{playerWins ? '+' : masterWins ? '-' : '±'}{Math.abs(topPlayerScore - topMasterScore)}</p>
-                                                    <p className="text-[10px] text-white/40 uppercase tracking-wider">MARGIN</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Return Button */}
-                                        <button
-                                            onClick={() => { if (!isEngine) window.location.href = '/home/card'; }}
-                                            className="px-16 py-5 bg-white/10 hover:bg-white/20 border-2 border-white/30 hover:border-white/50 text-white font-black uppercase tracking-widest text-base rounded-lg transition-all duration-300 hover:scale-105 font-mono shadow-lg"
-                                        >
-                                            RETURN TO LOBBY
-                                        </button>
-
-                                        <p className="text-xs text-white/20 font-mono uppercase tracking-widest">
-                                            GAME ID: CLUBS_KING • ROUND: 6/6
-                                        </p>
-                                    </>
-                                );
-                            })()}
+                                        </>
+                                    );
+                                })()}
+                            </div>
                         </div>
                     </div>
                 )
@@ -2844,13 +2958,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
                 )
             }
 
-            {/* DEBUG OVERLAY */}
-            <div className="fixed bottom-0 right-0 p-2 bg-black/80 text-[8px] font-mono text-green-500 pointer-events-none z-[9999]">
-                <p>STATE: {gameState}</p>
-                <p>ROUND: {round}</p>
-                <p>EXPIRY: {phaseExpiry?.toISOString() || 'NULL'}</p>
-                <p>TIMELEFT: {timeLeft}</p>
-            </div>
+
         </div >
     );
 };
