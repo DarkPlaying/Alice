@@ -54,6 +54,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     const [selectedSteal, setSelectedSteal] = useState<{ targetId: string, card: DiamondsCard } | null>(null);
     const [opponentHandCounts, setOpponentHandCounts] = useState<Record<string, number>>({});
     const [detectorActive, setDetectorActive] = useState(false);
+    const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
 
     const [powerUsage, setPowerUsage] = useState({
         hasUsedRefresh: false,
@@ -82,6 +83,14 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     useEffect(() => {
         gameStateRef.current = gameState;
     }, [gameState]);
+
+    // End Game Video Logic
+    useEffect(() => {
+        if (gameState?.phase === 'end' && !hasPlayedEndVideo) {
+            window.dispatchEvent(new CustomEvent('play-end-video'));
+            setHasPlayedEndVideo(true);
+        }
+    }, [gameState?.phase, hasPlayedEndVideo]);
 
     // Wheel-to-Scroll Logic for Deployment Hand
     useEffect(() => {
@@ -1325,7 +1334,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // --- RENDER ---
     return (
-        <div className="relative w-full min-h-screen bg-black flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
+        <div className={`relative w-full min-h-screen flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30 ${gameState?.phase === 'end' ? 'bg-black/40 backdrop-blur-md' : 'bg-black'}`}>
             {/* Background Texture - Using Hub atmosphere but keeping protocol noise */}
             <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 pointer-events-none"></div>
@@ -1436,21 +1445,21 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                 <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
                                                 <span className="text-xs font-black font-cinzel text-white">ZOMBIE</span>
                                             </div>
-                                            <span className="text-[10px] font-mono text-white/40">BEATS ALL NUMBERS</span>
+                                            <span className="text-[10px] font-mono text-white/40">VALUE = 999</span>
                                         </div>
                                         <div className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
                                                 <span className="text-xs font-black font-cinzel text-white">INJECTION</span>
                                             </div>
-                                            <span className="text-[10px] font-mono text-white/40">CURES ZOMBIES</span>
+                                            <span className="text-[10px] font-mono text-white/40">CURES ZOMBIE SLOT (+200CR)</span>
                                         </div>
                                         <div className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" />
                                                 <span className="text-xs font-black font-cinzel text-white">SHOTGUN</span>
                                             </div>
-                                            <span className="text-[10px] font-mono text-white/40">ELIMINATES TARGETS</span>
+                                            <span className="text-[10px] font-mono text-white/40">KILLS ALL ZOMBIES (+100CR)</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1634,21 +1643,21 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             <BriefingCard
                                                 title="ZOMBIE"
                                                 id="28472A"
-                                                desc="OFFENSIVE OVERRIDE. Beats any numeric card. Overrides standard defenses instantly. Vulnerable to tactical serums."
+                                                desc="SUPREME VALUE (999). Guarantees slot victory unless neutralized by Shotgun or Injection."
                                                 delay={0.1}
                                                 color="purple"
                                             />
                                             <BriefingCard
                                                 title="INJECTION"
                                                 id="DVL291"
-                                                desc="NUMERIC STABILIZER. Resets infected arrays to baseline (2-9). Counteracts viral load and stabilizes volatility."
+                                                desc="SLOT NEUTRALIZER. Cures an opponent's slotted Zombie card (Value becomes 0). Grants +200CR bonus."
                                                 delay={0.2}
                                                 color="green"
                                             />
                                             <BriefingCard
                                                 title="SHOTGUN"
                                                 id="A683BF"
-                                                desc="TARGET ELIMINATION. Instantly neutralizes active threats. High-priority asset for stopping imminent signatures."
+                                                desc="GLOBAL ELIMINATION. Destroys all Zombies in opponent's hand and slots. Grants +100CR bonus per slotted Zombie."
                                                 delay={0.3}
                                                 color="orange"
                                             />
@@ -1690,8 +1699,8 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             <div className="space-y-3 p-2 h-full flex flex-col">
                                                 {[
                                                     { label: "WINNER", value: "SUM(ASSETS) > OPPONENT SUM", accent: "purple" },
-                                                    { label: "ZOMBIE", value: "OVERRIDES SLOT REGARDLESS OF SUM", accent: "purple" },
-                                                    { label: "LIMITS", value: "1Z, 2I, 2S PER TOTAL SESSION", accent: "orange" },
+                                                    { label: "ZOMBIE", value: "VALUE 999. OVERRIDES ALL SLOTS", accent: "purple" },
+                                                    { label: "LIMITS", value: "EXACTLY 1 SPECIAL PER PLAYER", accent: "orange" },
                                                     { label: "SCORING", value: "SURVIVAL: +200CR | LOSS: -100CR", accent: "purple" }
                                                 ].map((item, idx) => (
                                                     <div key={idx} className="flex items-center gap-4 bg-white/[0.02] border border-white/5 p-3 rounded-lg group hover:border-purple-500/30 transition-all flex-1">
@@ -1744,7 +1753,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="fixed inset-0 z-[6000] bg-black/98 backdrop-blur-3xl flex flex-col items-center justify-center p-8 text-center overscroll-none"
+                        className="fixed inset-0 z-[6000] bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center overscroll-none"
                     >
                         <motion.div
                             initial={{ scale: 0.9, opacity: 0 }}
