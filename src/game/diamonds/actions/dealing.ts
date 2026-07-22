@@ -17,17 +17,21 @@ export const generateDiamondsDeck = (playerCount: number): DiamondsCard[] => {
     const specialTypes = ['zombie', 'injection', 'shotgun'];
     const selectedSpecials: string[] = [];
 
-    if (playerCount > 0) {
-        selectedSpecials.push('zombie'); // Always 1 zombie
-    }
-    if (playerCount === 2) {
+    if (playerCount === 1) {
+        selectedSpecials.push('zombie');
+    } else if (playerCount === 2) {
+        selectedSpecials.push('zombie');
         selectedSpecials.push(Math.random() > 0.5 ? 'injection' : 'shotgun');
-    } else if (playerCount >= 3) {
+    } else if (playerCount === 3) {
+        selectedSpecials.push('zombie');
         selectedSpecials.push('injection');
         selectedSpecials.push('shotgun');
-        // If more than 3, randomly assign the rest
-        for (let i = 3; i < playerCount; i++) {
-            selectedSpecials.push(specialTypes[Math.floor(Math.random() * specialTypes.length)]);
+    } else if (playerCount > 3) {
+        selectedSpecials.push('zombie');
+        selectedSpecials.push('zombie');
+        selectedSpecials.push('shotgun');
+        for (let i = 0; i < playerCount - 3; i++) {
+            selectedSpecials.push('injection');
         }
     }
 
