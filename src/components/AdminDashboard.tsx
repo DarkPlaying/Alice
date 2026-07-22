@@ -3688,7 +3688,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">ID</th>
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Status</th>
-                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Visa</th>
+                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Visa</th>
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
                                                 </tr>
                                             </thead>
@@ -3730,8 +3730,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                             READY
                                                                         </span>
                                                                     </td>
-                                                                    <td className="p-4 font-mono text-xs text-gray-500">
-                                                                        {dbUser?.visaDays || '???'} Days
+                                                                    <td className="p-2 sm:p-4 font-mono text-[10px] sm:text-xs text-gray-500">
+                                                                        {dbUser?.visa_points ?? '???'} Days
                                                                     </td>
                                                                     <td className="p-4 text-right">
                                                                         <button
@@ -3763,18 +3763,18 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     BANNED CANDIDATES
                                                 </h4>
                                             </div>
-                                            <table className="w-full text-left border-collapse">
+                                            <table className="w-full text-left border-collapse table-fixed">
                                                 <tbody>
                                                     {bannedPlayers.map((player, idx) => (
                                                         <tr key={getPlayerElementKey(player, idx, 'banned')} className="border-b border-red-500/10 last:border-0 hover:bg-red-500/5 transition-colors">
-                                                            <td className="p-4 text-gray-500 font-mono text-xs w-1/4 truncate">{player.user_id?.slice(0, 10) ?? 'UNKNOWN'}...</td>
-                                                            <td className="p-4 text-white font-mono text-sm w-1/3 truncate">{player.username}</td>
-                                                            <td className="p-4 text-center w-1/4">
-                                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/20 text-red-500 text-[10px] uppercase font-bold tracking-wider border border-red-500/30">
+                                                            <td className="p-2 sm:p-4 text-gray-500 font-mono text-[10px] sm:text-xs w-[25%] truncate">{player.user_id?.slice(0, 10) ?? 'UNKNOWN'}...</td>
+                                                            <td className="p-2 sm:p-4 text-white font-mono text-[11px] sm:text-sm w-[35%] truncate">{player.username}</td>
+                                                            <td className="p-2 sm:p-4 text-center w-[20%]">
+                                                                <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full bg-red-500/20 text-red-500 text-[8px] sm:text-[10px] uppercase font-bold tracking-wider border border-red-500/30">
                                                                     BANNED
                                                                 </span>
                                                             </td>
-                                                            <td className="p-4 text-right w-1/4">
+                                                            <td className="p-2 sm:p-4 text-right w-[20%]">
                                                                 <button
                                                                     onClick={() => {
                                                                         bannedPlayersRef.current = bannedPlayersRef.current.filter(p => p.user_id !== player.user_id);
@@ -3843,16 +3843,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     {waitingPlayers.filter(p => !selectedSuitForModal || (p.game_type?.toLowerCase() === selectedSuitForModal?.toLowerCase()) || (!p.game_type && selectedSuitForModal === 'clubs')).length}
                                                 </span> CANDIDATES READY
                                             </div>
-                                            <div className="flex items-center gap-2 sm:gap-3">
+                                            <div className="flex flex-wrap sm:flex-nowrap items-center justify-center sm:justify-end w-full sm:w-auto gap-2 sm:gap-3">
                                                 <button
                                                     onClick={handleGlobalPurgeQueue}
-                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[10px] sm:text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all mr-auto"
+                                                    className="px-2 sm:px-6 py-2 sm:py-3 flex-1 sm:flex-none rounded-lg border border-red-500/30 bg-red-500/10 text-[9px] sm:text-xs font-bold text-red-500 uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all text-center"
                                                 >
                                                     Global Purge
                                                 </button>
                                                 <button
                                                     onClick={() => setShowStartModal(false)}
-                                                    className="px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg border border-white/10 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all"
+                                                    className="px-2 sm:px-6 py-2 sm:py-3 flex-1 sm:flex-none rounded-lg border border-white/10 text-[9px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest hover:bg-white/5 hover:text-white transition-all text-center"
                                                 >
                                                     Cancel
                                                 </button>
@@ -4178,11 +4178,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 setShowStartModal(false);
                                                             }
                                                         } catch (err: any) {
-                                                            console.warn("=> STEP 7 ERROR (Network):", err);
-                                                            showToast(`START ERROR: ${err.message}`, 'error');
+                                                            console.error("Failed to start game:", err);
+                                                            showToast("SYSTEM ERROR: FAILED TO INITIATE", "error");
                                                         }
                                                     }}
-                                                    className={`px-3 sm:px-6 py-2.5 sm:py-3 rounded-lg text-black text-[10px] sm:text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center gap-2 ${selectedSuitForModal === 'hearts' ? 'bg-red-500 hover:bg-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : selectedSuitForModal === 'spades' ? 'bg-blue-500 hover:bg-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : selectedSuitForModal === 'diamonds' ? 'bg-purple-500 hover:bg-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.3)]' : 'bg-green-500 hover:bg-green-400 shadow-[0_0_20px_rgba(34,197,94,0.3)]'}`}
+                                                    className={`px-2 sm:px-6 py-2 sm:py-3 flex-1 sm:flex-none rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center justify-center gap-2 ${selectedSuitForModal === 'hearts' ? 'bg-red-500 hover:bg-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : selectedSuitForModal === 'spades' ? 'bg-blue-500 hover:bg-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : selectedSuitForModal === 'diamonds' ? 'bg-purple-500 hover:bg-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.3)]' : 'bg-green-500 hover:bg-green-400 shadow-[0_0_20px_rgba(34,197,94,0.3)]'}`}
                                                 >
                                                     INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
                                                 </button>
