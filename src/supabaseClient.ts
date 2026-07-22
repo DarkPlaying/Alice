@@ -58,19 +58,10 @@ const authConfig: any = {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    lock: async (name: string, ...args: any[]) => {
+    lock: async (_name: string, ...args: any[]) => {
         const acquire = args.pop();
         if (typeof acquire === 'function') {
-            const previousLock = currentLock;
-            let releaseLock: () => void;
-            currentLock = new Promise(resolve => { releaseLock = resolve as () => void; });
-
-            try {
-                await previousLock;
-                return await acquire();
-            } finally {
-                releaseLock!();
-            }
+            return await acquire();
         }
     }
 };

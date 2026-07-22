@@ -1084,10 +1084,15 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         setOpponentSlots(others);
     };
 
-    const handleStealCard = async (targetId: string, card: DiamondsCard) => {
+    const handleStealCard = (targetId: string, card: DiamondsCard) => {
         if (!user || !gameState || hasPicked) return;
         setSelectedSteal({ targetId, card });
+    };
+
+    const executeSteal = async () => {
+        if (!selectedSteal || !user) return;
         setIsLoading(true);
+        const { targetId, card } = selectedSteal;
 
         try {
             const { data: oppHand } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', targetId).maybeSingle();
@@ -1334,7 +1339,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // --- RENDER ---
     return (
-        <div className={`relative w-full min-h-screen flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30 ${gameState?.phase === 'end' ? 'bg-black/40 backdrop-blur-md' : 'bg-black'}`}>
+        <div className="relative w-full min-h-screen bg-black/40 backdrop-blur-md flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
             {/* Background Texture - Using Hub atmosphere but keeping protocol noise */}
             <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 pointer-events-none"></div>
@@ -2498,12 +2503,25 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
                                             ) : (
                                                 <div className="flex flex-col items-center gap-6">
-                                                    <div className="flex flex-col items-center gap-2 opacity-30 grayscale hover:opacity-100 transition-all duration-500">
-                                                        <div className="flex items-center gap-3 px-8 py-4 border-2 border-purple-500/20 text-purple-500/40 rounded-full font-display font-black text-[10px] uppercase tracking-[0.3em] animate-pulse">
-                                                            Select Asset for Immediate Extraction
+                                                    {selectedSteal ? (
+                                                        <div className="flex flex-col items-center gap-2 transition-all duration-500">
+                                                            <button
+                                                                onClick={() => executeSteal()}
+                                                                className="flex items-center gap-3 px-8 py-4 bg-purple-500 text-black border-2 border-purple-500 rounded-full font-display font-black text-xs uppercase tracking-[0.3em] shadow-[0_0_20px_#a855f7] hover:scale-105 transition-all animate-pulse"
+                                                            >
+                                                                <Check size={18} strokeWidth={3} />
+                                                                Confirm Extraction
+                                                            </button>
+                                                            <span className="text-[8px] font-mono text-purple-400 uppercase tracking-[0.4em]">Target Acquired</span>
                                                         </div>
-                                                        <span className="text-[8px] font-mono text-white/10 uppercase tracking-[0.4em]">Protocol: Direct Uplink</span>
-                                                    </div>
+                                                    ) : (
+                                                        <div className="flex flex-col items-center gap-2 opacity-30 grayscale hover:opacity-100 transition-all duration-500">
+                                                            <div className="flex items-center gap-3 px-8 py-4 border-2 border-purple-500/20 text-purple-500/40 rounded-full font-display font-black text-[10px] uppercase tracking-[0.3em] animate-pulse">
+                                                                Select Asset for Immediate Extraction
+                                                            </div>
+                                                            <span className="text-[8px] font-mono text-white/10 uppercase tracking-[0.4em]">Protocol: Direct Uplink</span>
+                                                        </div>
+                                                    )}
 
                                                     <button
                                                         onClick={() => { setHasPicked(true); setOpponentSlots([]); }}
