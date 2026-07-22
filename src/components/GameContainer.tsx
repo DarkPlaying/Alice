@@ -841,30 +841,45 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
                                     {/* BOTTOM: Center Confirm Button */}
                                     <div className="flex justify-center w-full">
-                                        <motion.button
-                                            whileHover={{ scale: 1.02 }}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={() => {
-                                                if (skipVideos) {
-                                                    setShowRules(false);
-                                                    setWaitingForGM(true);
-                                                } else {
-                                                    setPlayingVideo('start');
-                                                }
-                                            }}
-                                            className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-black/60 backdrop-blur-md text-white font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden transition-all border border-white/20 hover:border-white shadow-lg"
-                                            style={{
-                                                clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
-                                                boxShadow: `0 0 20px ${theme.color}40`,
-                                                textShadow: `0 0 10px ${theme.color}80`
-                                            }}
-                                        >
-                                            <div className="absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity" style={{ backgroundColor: theme.color }} />
-                                            <span className="relative z-10 flex items-center gap-4">
-                                                CONFIRM PARTICIPATION
-                                                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                                            </span>
-                                        </motion.button>
+                                        {isMasterRole ? (
+                                            <div
+                                                className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-red-900/40 backdrop-blur-md text-red-400 font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden border border-red-500/30 cursor-not-allowed"
+                                                style={{
+                                                    clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
+                                                    boxShadow: `0 0 20px rgba(239, 68, 68, 0.2)`,
+                                                    textShadow: `0 0 10px rgba(239, 68, 68, 0.5)`
+                                                }}
+                                            >
+                                                <span className="relative z-10 flex items-center gap-4">
+                                                    MASTERS CANNOT PARTICIPATE
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <motion.button
+                                                whileHover={{ scale: 1.02 }}
+                                                whileTap={{ scale: 0.98 }}
+                                                onClick={() => {
+                                                    if (skipVideos) {
+                                                        setShowRules(false);
+                                                        setWaitingForGM(true);
+                                                    } else {
+                                                        setPlayingVideo('start');
+                                                    }
+                                                }}
+                                                className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-black/60 backdrop-blur-md text-white font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden transition-all border border-white/20 hover:border-white shadow-lg"
+                                                style={{
+                                                    clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
+                                                    boxShadow: `0 0 20px ${theme.color}40`,
+                                                    textShadow: `0 0 10px ${theme.color}80`
+                                                }}
+                                            >
+                                                <div className="absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity" style={{ backgroundColor: theme.color }} />
+                                                <span className="relative z-10 flex items-center gap-4">
+                                                    CONFIRM PARTICIPATION
+                                                    <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                                                </span>
+                                            </motion.button>
+                                        )}
                                     </div>
                                 </div>
                             </motion.div>
