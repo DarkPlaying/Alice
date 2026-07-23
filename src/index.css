@@ -140,7 +140,8 @@
     }
 
     /* Force Custom Cursor on all elements except html */
-    body, body * {
+    body,
+    body * {
         cursor: inherit !important;
     }
 
@@ -381,5 +382,5 @@
 
 /* Custom Red Pointer Cursor */
 * {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23ff0050" stroke="white" stroke-width="1"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>') 3 3, auto !important;
+    cursor: url('https://cdn.cursors-4u.net/previews/normal-4d9d684a-32.webp') 32 32, auto !important;
 }

@@ -49,15 +49,17 @@ export const evaluateRound = (
                 myBonuses.forEach(b => {
                     const match = b.desc.match(/\+(\d+)/);
                     if (match) {
-                        current.score += parseInt(match[1]);
-                        console.log(`[DIAMONDS_EVAL] Added bonus ${match[1]} to ${current.username}`);
+                        const bonusAmt = parseInt(match[1]);
+                        current.score += bonusAmt;
+                        current.roundBonus = (current.roundBonus || 0) + bonusAmt;
+                        console.log(`[DIAMONDS_EVAL] Added bonus ${bonusAmt} to ${current.username}`);
                     }
                 });
 
                 // Apply hand destruction (Shotgun kills Zombie in hand)
-                const handDestruction = res.effects.filter(e => e.type === 'eliminated' && e.playerId === p.id && e.desc === 'ZOMBIE DESTROYED IN HAND');
+                const handDestruction = res.effects.filter(e => e.type === 'eliminated' && e.playerId === p.id && e.desc?.includes('ZOMBIE DESTROYED IN HAND'));
                 if (handDestruction.length > 0) {
-                    current.cards = current.cards.filter(c => c.specialType !== 'zombie');
+                    current.cards = (current.cards || []).filter(c => c && c.specialType !== 'zombie');
                     console.log(`[DIAMONDS_EVAL] Zombie destroyed in hand for ${current.username}`);
                 }
             }
@@ -123,10 +125,14 @@ const processBattle = (players: DiamondsPlayer[]): BattleResult => {
                 }
             });
 
-            // Check hand
-            const hasZombieInHand = target.cards.some(c => c.specialType === 'zombie' && !target.slots.some(s => s?.id === c.id));
+            // Check target's hand for unslotted Zombie card
+            const hasZombieInHand = (target.cards || []).some(c => c && c.specialType === 'zombie' && !target.slots.some(s => s?.id === c.id));
             if (hasZombieInHand) {
-                res.effects?.push({ playerId: target.id, type: 'eliminated', desc: `ZOMBIE DESTROYED IN HAND` });
+                res.effects?.push({ playerId: target.id, type: 'eliminated', desc: 'ZOMBIE DESTROYED IN HAND BY SHOTGUN' });
+                if (!gotBonus) {
+                    res.effects?.push({ playerId: hunter.id, type: 'cured', desc: `SHOTGUN BONUS +100` });
+                    gotBonus = true;
+                }
             }
         });
     });

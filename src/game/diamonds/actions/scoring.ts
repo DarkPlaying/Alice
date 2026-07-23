@@ -8,16 +8,9 @@ export const updateScores = (
     isFinalRound: boolean = false
 ): { updatedParticipants: DiamondsPlayer[] } => {
 
-    // Score Rules:
-    // Win: +200
-    // Lose: -100
-    // Eliminated: -500 (Set status to eliminated)
-
     const updated = participants.map(p => {
-        let newScore = p.score;
         let pStatus = p.status;
 
-        // Find result for this player
         // Find result for this player (Robust Matching)
         const res = battleResults.find(r =>
             (r.p1Id && r.p1Id.toLowerCase() === p.id.toLowerCase()) ||
@@ -28,38 +21,35 @@ export const updateScores = (
             r.eliminatedIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)
         );
 
+        let baseAdj = 0;
         if (res) {
-            // 1. Elimination Check
+            const totalParticipantsInBattle = [res.p1Id, res.p2Id, res.p3Id].filter(Boolean).length;
+            const isTotalDraw = res.winners.length === totalParticipantsInBattle;
+
             if (res.eliminatedIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
-                newScore -= 500;
+                baseAdj = -500;
                 pStatus = 'eliminated';
-            }
-            // 2. Win Check
-            else if (res.winners.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
-                newScore += 200;
-            }
-            // 3. Loss Check
-            else if (res.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
-                newScore -= 100;
+            } else if (isTotalDraw) {
+                baseAdj = 0; // Total 3-way or 2-way draw
+            } else if (res.winners.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
+                baseAdj = 200; // Outright win or tied high score win
+            } else if (res.losers.some(id => id.toLowerCase() === p.id.toLowerCase() || id === p.username)) {
+                baseAdj = -100; // Defeat
             }
         } else {
             console.warn(`[DIAMONDS_SCORING] No battle result found for player: ${p.username} (${p.id})`);
         }
 
+        const totalAdj = baseAdj + (p.roundBonus || 0);
+        const newScore = (p.score ?? 1000) + totalAdj;
+
         return {
             ...p,
             score: newScore,
-            status: pStatus
+            status: pStatus,
+            roundAdjustment: totalAdj
         };
     });
 
-    return {
-        updatedParticipants: updated.map(p => {
-            const startScore = participants.find(op => op.id === p.id)!.score;
-            return {
-                ...p,
-                roundAdjustment: p.score - startScore
-            };
-        })
-    };
+    return { updatedParticipants: updated };
 };

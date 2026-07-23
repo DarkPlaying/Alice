@@ -321,9 +321,10 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         const whitelistActive = localAllowedPlayers.length > 0;
         const isAllowed = currentUserId && localAllowedPlayers.includes(currentUserId);
         const isSpades = type === 'Spades';
+        const isDiamonds = type === 'Diamonds';
 
-        // Masters are explicitly forbidden from joining Spades
-        const isForbiddenMaster = isSpades && isMasterRole;
+        // Masters are explicitly forbidden from joining Spades and Diamonds
+        const isForbiddenMaster = (isSpades || isDiamonds) && isMasterRole;
         const accessGranted = (!isForbiddenMaster && isMasterRole) || !whitelistActive || isAllowed;
 
         if (isForbiddenMaster) {
@@ -559,7 +560,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     return (
         <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
             {/* Base dark overlay for readability across all games */}
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-md pointer-events-none z-0" />
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-2xl pointer-events-none z-0" />
 
             <div className="relative z-10 flex flex-col w-full h-full">
                 {showPlayerCard && (
@@ -618,7 +619,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                             (isGameEnded || isBriefing)
                                 ? 'bg-black border-transparent' 
                                 : isGameScrolled 
-                                    ? 'bg-black/90 backdrop-blur-xl border-white/10' 
+                                    ? 'bg-black border-white/10' 
                                     : 'backdrop-blur-md'
                         }`}
                         style={!(isGameEnded || isBriefing) && !isGameScrolled ? {

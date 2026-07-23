@@ -35,11 +35,7 @@ export const resolveSteals = (
 
                 losers.forEach(l => {
                     l.slots.forEach(c => {
-                        if (c) {
-                            // "injection and shot gun cards are 0 points ,it is only speacial cards not calucate as points"
-                            // Can they be stolen? User didn't say NO. 
-                            // But usually you want high value cards.
-                            // Assuming all slotted cards are available.
+                        if (c && c.type !== 'special' && !c.specialType) {
                             targetCards.push({ ownerId: l.id, card: c });
                         }
                     });

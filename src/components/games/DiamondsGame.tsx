@@ -1,29 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { supabaseUrl, supabaseKey } from '../../supabaseClient';
-const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: {
-        storageKey: 'borderland-fresh-token-v2',
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        lock: async (_name: string, ...args: any[]) => {
-            const acquire = args.pop();
-            if (typeof acquire === 'function') {
-                return await acquire();
-            }
-        }
-    }
-});
+import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../supabaseClient';
 import type { DiamondsGameState, DiamondsPlayer, DiamondsCard, DiamondsPhase } from '../../game/diamonds';
 import { getCardImagePath } from '../../game/diamonds';
 import { generateDiamondsDeck } from '../../game/diamonds/actions/dealing';
 import { dealHands } from '../../game/diamonds/actions/dealing';
-import { assignGroups } from '../../game/diamonds/actions/shuffling';
-import { evaluateRound } from '../../game/diamonds/actions/evaluation';
-import { resolveSteals } from '../../game/diamonds/actions/picking';
-import { updateScores } from '../../game/diamonds/actions/scoring';
-import { Swords, Skull, Timer, CheckCircle2, AlertTriangle, X, Activity, Scan, Info, Shield, Syringe, Biohazard, User, ChevronRight } from 'lucide-react';
+import { Swords, Skull, Timer, CheckCircle2, AlertTriangle, X, Activity, Scan, Info, HelpCircle, Shield, Syringe, Biohazard, User, ChevronRight, Check, Gem, Crown, FastForward } from 'lucide-react';
 
 
 import { motion, AnimatePresence } from 'framer-motion';
@@ -52,16 +33,25 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
     const [opponentSlots, setOpponentSlots] = useState<{ playerId: string, username: string, slots: DiamondsCard[] }[]>([]);
     const [playerIdMap, setPlayerIdMap] = useState<Record<string, string>>({});
     const [selectedSteal, setSelectedSteal] = useState<{ targetId: string, card: DiamondsCard } | null>(null);
+    const [skipVideos, setSkipVideos] = useState(() => typeof window !== 'undefined' && localStorage.getItem('skipVideos') === 'true');
     const [opponentHandCounts, setOpponentHandCounts] = useState<Record<string, number>>({});
     const [detectorActive, setDetectorActive] = useState(false);
     const [hasPlayedEndVideo, setHasPlayedEndVideo] = useState(false);
 
+    const [pointsPage, setPointsPage] = useState(0);
+    const [isScrolled, setIsScrolled] = useState(false);
+
     const [powerUsage, setPowerUsage] = useState({
-        hasUsedRefresh: false,
-        hasUsedDetector: false,
+        hasUsedRefresh: typeof window !== 'undefined' && localStorage.getItem(`diamonds_refresh_used_${user?.id}`) === 'true',
+        hasUsedDetector: typeof window !== 'undefined' && localStorage.getItem(`diamonds_detector_used_${user?.id}`) === 'true',
         hasUsedFiveSlots: false
     });
     const [protocolToasts, setProtocolToasts] = useState<{ id: string, message: string, type: 'info' | 'error' | 'success' }[]>([]);
+    const [alertModal, setAlertModal] = useState<{ title: string; message: string } | null>(null);
+
+    const triggerAlert = (title: string, message: string) => {
+        setAlertModal({ title, message });
+    };
 
     const addToast = (message: string, type: 'info' | 'error' | 'success' = 'info') => {
         const id = Math.random().toString(36).substring(2, 9);
@@ -235,532 +225,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
 
 
-    const handlePhaseTimeout = async () => {
-        if (isProcessingRef.current || !gameStateRef.current) {
-            if (!gameStateRef.current) console.warn("[DIAMONDS_ENGINE] Timeout triggered but gameState is null");
-            return;
-        }
-
-        isProcessingRef.current = true;
-        const current = gameStateRef.current.phase;
-        const round = gameStateRef.current.current_round || 1;
-
-        console.log(`[DIAMONDS_ENGINE] Phase Timeout detected: ${current}. Round: ${round}. Admin: ${isAdmin}.`);
-
-        try {
-            console.log(`[DIAMONDS_ENGINE] Attempting distributed transition...`);
-
-            console.log(`[DIAMONDS_ENGINE] ---------------------------------------`);
-            console.log(`[DIAMONDS_ENGINE] STARTING TRANSITION FROM ${current.toUpperCase()}`);
-            console.log(`[DIAMONDS_ENGINE] ---------------------------------------`);
-
-            if (current === 'idle') await transitionTo('briefing');
-            else if (current === 'briefing') await transitionTo('shuffle');
-            else if (current === 'shuffle') {
-                if (round === 1) await transitionTo('dealing');
-                else await transitionTo('slotting');
-            }
-            else if (current === 'dealing') await transitionTo('slotting');
-            else if (current === 'slotting') await transitionTo('evaluation');
-            else if (current === 'evaluation') {
-                console.log("[DIAMONDS_ENGINE] Evaluation complete. Moving to SCORING to show results.");
-                await transitionTo('scoring');
-            }
-            else if (current === 'scoring') {
-                console.log("[DIAMONDS_ENGINE] Results shown. Moving to PICKING for card extraction.");
-                await transitionTo('picking');
-            }
-            else if (current === 'picking') {
-                console.log(`[DIAMONDS_ENGINE] Picking window closed. Preparing Round ${round + 1}.`);
-                if (round >= MAX_ROUNDS) await transitionTo('end');
-                else await transitionTo('shuffle', round + 1);
-            } else {
-                console.log(`[DIAMONDS_ENGINE] No transition mapped for phase: ${current}`);
-                isProcessingRef.current = false;
-            }
-        } catch (err) {
-            console.error("[DIAMONDS_ENGINE] Transition Exception:", err);
-            isProcessingRef.current = false;
-        } finally {
-            // Safety fallback - usually transitionTo handles this but we want to be sure
-            setTimeout(() => { isProcessingRef.current = false; }, 500);
-        }
-    };
-
-    const transitionTo = async (nextPhase: DiamondsPhase, nextRound: number = gameState?.current_round || 1) => {
-        const currentState = gameStateRef.current;
-        if (!currentState) {
-            isProcessingRef.current = false;
-            return;
-        }
-
-        // --- DISTRIBUTED ELECTION SYSTEM ---
-        // Only one browser can "win" the transition master role by successfully updating the record 
-        // with the specific current phase/round constraint.
-        const now = new Date().toISOString();
-        const { count, error: electionError } = await supabase.from('diamonds_game_state')
-            .update({ updated_at: now }, { count: 'exact' })
-            .eq('id', GAME_ID)
-            .eq('phase', currentState.phase)
-            .eq('current_round', currentState.current_round);
-
-        if (electionError || count === 0) {
-            console.log(`[DIAMONDS_ENGINE] Election Lost (Count: ${count}). Transition to ${nextPhase} handled by another browser.`);
-            isProcessingRef.current = false;
-            return;
-        }
-
-        console.log(`[DIAMONDS_ENGINE] Election WON. Executing transition to ${nextPhase} (Round ${nextRound})...`);
-
-        console.log(`[DIAMONDS_ENGINE] Transitioning to ${nextPhase} (Round ${nextRound})`);
-
-        try {
-            // 1. Robust Participant Fetch
-            let participants = gameStateRef.current?.participants || [];
-            if (participants.length === 0 && nextPhase !== 'briefing') {
-                console.warn("[DIAMONDS_ENGINE] Participants list seems empty. Fetching from DB...");
-                const { data: recovered } = await supabase.from('diamonds_game_state').select('participants').eq('id', GAME_ID).maybeSingle();
-                if (recovered?.participants && recovered.participants.length > 0) {
-                    participants = recovered.participants;
-                    console.log(`[DIAMONDS_ENGINE] Recovered ${participants.length} participants.`);
-                } else {
-                    console.error("[DIAMONDS_ENGINE] CRITICAL: No participants found in DB!");
-                }
-            }
-
-            let updates: Partial<DiamondsGameState> = {
-                phase: nextPhase,
-                current_round: nextRound,
-                updated_at: now,
-                phase_started_at: now,
-                phase_duration_sec: PHASE_TIMINGS[nextPhase] || 0
-            };
-
-            // ENGINE LOGIC
-            if (nextPhase === 'briefing') {
-                // ... (Keep existing user fetch logic, it's UI/DB binding, not core engine math)
-                let candidateIds: string[] = [];
-                const { data: statusData } = await supabase.from('diamonds_game_state').select('allowed_players').eq('id', GAME_ID).maybeSingle();
-                if (statusData?.allowed_players && statusData.allowed_players.length > 0) {
-                    candidateIds = statusData.allowed_players;
-                }
-
-                // DATABASE LOGGING
-                console.log("[DIAMONDS_BRIEFING] Initializing participants...");
-                console.log("[DIAMONDS_BRIEFING] Candidate IDs:", candidateIds);
-
-                // 2. Fetch User Metadata from Supabase Profiles (Authoritative IDs/Emails/Roles)
-                console.log("[DIAMONDS_BRIEFING] Fetching user metadata from Supabase profiles...");
-                const { data: fsUsers, error: fsError } = await supabase.from('profiles').select('*');
-                if (fsError) console.error("[DIAMONDS_ENGINE] Profiles fetch error:", fsError);
-                console.log(`[DIAMONDS_BRIEFING] Fetched ${fsUsers?.length || 0} users from Supabase.`);
-
-                // 3. Construct Participants
-                const initialParticipants: DiamondsPlayer[] = (fsUsers || [])
-                    .filter(u => {
-                        const isCandidate = candidateIds.length > 0 ? candidateIds.includes(u.id) : true;
-                        const isMaster = u.role === 'master' || u.username === 'admin' || u.username?.toLowerCase().includes('architect');
-                        const isAllowed = isCandidate && (!isMaster || u.username?.toLowerCase() === 'sanjay');
-                        if (!isAllowed) console.log(`[DIAMONDS_BRIEFING] Filtered out: ${u.username} (CandidateMatch: ${isCandidate}, IsMaster: ${isMaster})`);
-                        return isAllowed;
-                    })
-                    .map(u => {
-                        const finalScore = u.visa_points !== undefined ? u.visa_points : 1000;
-                        return {
-                            id: u.id,
-                            username: u.username || 'Agent',
-                            role: (u.role as any) || 'player',
-                            score: finalScore,
-                            status: 'active',
-                            cards: [],
-                            slots: [null, null, null, null, null],
-                            hasUsedFiveSlots: false,
-                            hasUsedRefresh: false,
-                            hasUsedDetector: false
-                        };
-                    });
-
-                console.log(`[DIAMONDS_BRIEFING] Final Initial Participants Count: ${initialParticipants.length}`);
-
-                // USER REQUEST: Reset local powers state for immediate UI feedback
-                setPowerUsage({
-                    hasUsedRefresh: false,
-                    hasUsedDetector: false,
-                    hasUsedFiveSlots: false
-                });
-
-                // ENGINE RESET
-                roundRef.current = 0;
-
-                // 5. CLEAR STALE DATA (Fresh Session Protocol)
-                console.log("[DIAMONDS_BRIEFING] Clearing stale hands and slots from DB...");
-                await supabase.from('diamonds_hands').delete().eq('game_id', GAME_ID);
-                await supabase.from('diamonds_slots').delete().eq('game_id', GAME_ID);
-                console.log("[DIAMONDS_BRIEFING] DB State Purged.");
-
-                // 6. SYNC PARTICIPANTS TO DB (For authoritative round handling)
-                const participantsToSync = initialParticipants.map(p => ({
-                    id: p.id,
-                    game_id: GAME_ID,
-                    username: p.username,
-                    score: p.score,
-                    status: p.status,
-                    groupId: p.groupId || null,
-                    // USER REQUEST: Reset power flags in DB for new game session
-                    hasUsedRefresh: false,
-                    hasUsedDetector: false,
-                    hasUsedFiveSlots: false
-                }));
-                const { error: syncError } = await supabase.from('diamonds_participants').upsert(participantsToSync);
-                if (syncError) console.error("[DIAMONDS_ENGINE] Participants Sync Failed:", syncError);
-
-                updates.participants = initialParticipants;
-                updates.round_data = {}; // Reset data
-            }
-
-            if (nextPhase === 'slotting') {
-                console.log(`[DIAMONDS_ENGINE] Round ${nextRound} slotting start. Purging all previous slots...`);
-                const { error: resetError } = await supabase.from('diamonds_slots').delete().eq('game_id', GAME_ID);
-                if (resetError) console.error("[DIAMONDS_ENGINE] Slot reset failed:", resetError);
-            }
-
-            if (nextPhase === 'shuffle' || nextPhase === 'end') {
-                // MODULAR: Clean up cards from previous round (Spending Protocol)
-                const lastRound = (gameState?.current_round || nextRound) - 1;
-                if (lastRound >= 1) {
-                    console.log(`[DIAMONDS_ENGINE] Cleaning up cards from Round ${lastRound}...`);
-
-                    const { data: lastSlots } = await supabase.from('diamonds_slots').select('*').eq('game_id', GAME_ID).eq('round', lastRound);
-                    const { data: allParticipants } = await supabase.from('diamonds_participants').select('*').eq('game_id', GAME_ID);
-
-                    if (lastSlots && allParticipants) {
-                        for (const p of allParticipants) {
-                            const pSlotRecord = lastSlots.find(s => s.player_id === p.id);
-                            if (!pSlotRecord?.slots) continue;
-
-                            const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
-                            if (!handData) continue;
-
-                            let updatedHand = handData.cards as DiamondsCard[];
-                            let cardsToRemove: string[] = [];
-
-                            (pSlotRecord.slots as DiamondsCard[]).forEach(s => {
-                                if (!s) return;
-                                const hIndex = updatedHand.findIndex(c => c.id === s.id);
-                                if (hIndex === -1) return; // Already moved/stolen
-
-                                if (s.type === 'standard') {
-                                    cardsToRemove.push(s.id);
-                                } else {
-                                    // Special card usage
-                                    let cardInHand = updatedHand[hIndex];
-                                    if (!cardInHand.metadata) cardInHand.metadata = { usesRemaining: 1 };
-                                    cardInHand.metadata.usesRemaining -= 1;
-                                    if (cardInHand.metadata.usesRemaining <= 0) {
-                                        cardsToRemove.push(s.id);
-                                    }
-                                }
-                            });
-
-                            const cleanedHand = updatedHand.filter(c => !cardsToRemove.includes(c.id));
-
-                            // Check for elimination
-                            if (cleanedHand.length === 0 && p.status !== 'eliminated') {
-                                console.log(`[DIAMONDS_ENGINE] !!! ELIMINATED: ${p.username} out of assets. !!!`);
-                                await supabase.from('diamonds_participants').update({ status: 'eliminated' }).eq('id', p.id);
-                            }
-
-                            await supabase.from('diamonds_hands').update({ cards: cleanedHand }).eq('game_id', GAME_ID).eq('player_id', p.id);
-                        }
-                    }
-                }
-            }
-
-            if (nextPhase === 'shuffle') {
-                // MODULAR: Assign Groups (1v1 / 1v1v1)
-                // Use robust participants variable defined at top
-                const grouped = assignGroups(participants);
-                updates.participants = grouped;
-                console.log(`[DIAMONDS_ENGINE] Assigned groups for ${grouped.length} players.`);
-            }
-
-            if (nextPhase === 'dealing') {
-                const currentState = gameStateRef.current;
-                // Use robust participants variable defined at top
-
-                // CRITICAL: Check session deck from STATE first to avoid regeneration
-                let sessionDeck: DiamondsCard[] = currentState?.round_data?.session_deck || [];
-
-                console.log(`[DIAMONDS_ENGINE] Dealing Phase. Round: ${nextRound}. Current Deck Size: ${sessionDeck.length}`);
-
-                // ONLY GENERATE IF EMPTY.
-                if (sessionDeck.length === 0) {
-                    console.log("[DIAMONDS_ENGINE] Generating NEW SESSION DECK (1Z, 2I, 2S)");
-                    sessionDeck = generateDiamondsDeck(participants.length);
-                    // sessionDeck = shuffleDeck(sessionDeck); // REMOVED: generateDiamondsDeck already calls weightedShuffle
-                }
-
-                // MODULAR: Deal Hands
-                const { updatedParticipants, remainingDeck, handsPayload } = dealHands(sessionDeck, participants);
-
-                // 2. DB Sync for Hands (Fresh Hand Overwrite)
-                console.log("[DIAMONDS_ENGINE] Syncing 7-card hands to Supabase...");
-                const handsWithGameId = handsPayload.map(h => ({ ...h, game_id: GAME_ID }));
-                const { error: handError } = await supabase.from('diamonds_hands').upsert(handsWithGameId, { onConflict: 'game_id,player_id' });
-
-                if (handError) {
-                    console.error("[DIAMONDS_ENGINE] CRITICAL: Hand Sync Failed:", handError);
-                    alert("DATABASE LINK FAILURE: Hands could not be uploaded.");
-                } else {
-                    console.log(`[DIAMONDS_SYNC] Successfully uploaded hands for ${handsWithGameId.length} players.`);
-                }
-
-                updates.participants = updatedParticipants;
-                updates.round_data = {
-                    ...(currentState?.round_data || {}),
-                    session_deck: remainingDeck
-                };
-            }
-
-
-
-            if (nextPhase === 'evaluation') {
-                // MODULAR: Evaluate
-                // 1. Fetch all slots from DB to be authoritative
-                const { data: allSlots } = await supabase.from('diamonds_slots').select('*').eq('game_id', GAME_ID).eq('round', nextRound);
-                const slotsMap = new Map<string, any[]>();
-                allSlots?.forEach((s: any) => slotsMap.set(s.player_id, s.slots));
-
-                // USER REQUEST: Auto-pick logic
-                // If a player hasn't slotted or locked, we force it.
-                for (const p of participants) {
-                    if (p.status !== 'active') continue;
-                    let pSlots = slotsMap.get(p.id) || [null, null, null, null, null];
-
-                    // USER REQUEST: Auto-pick logic
-                    // If not authorized OR 0 cards slotted, we force 1 card.
-                    // REFINED: Only force 1 card if they HAHA haven't slotted ANYTHING OR they are NOT authorized for 5 slots.
-                    // But if they HAVE slotted cards, we should respect them up to their auth limit.
-                    // const isAuthorized = p.hasUsedFiveSlots || (slotsMap.get(p.id)?.length || 0) > 1;
-
-                    // Actually, the real logic should be: 
-                    // 1. If slots are empty -> pick 1 random.
-                    // 2. If slots have >1 but p.hasUsedFiveSlots is false (from PREVIOUS rounds) -> this is their 5-slot turn!
-                    // 3. If p.hasUsedFiveSlots is TRUE (already used power in past round) -> force 1 card.
-
-                    const alreadyUsedPower = p.hasUsedFiveSlots;
-                    const cardsCount = pSlots.filter(s => s !== null).length;
-
-                    if (cardsCount === 0) {
-                        console.log(`[DIAMONDS_ENGINE] AUTO-PICK: ${p.username} (Empty slots). Enforcing 1-card.`);
-                        const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).single();
-                        if (handData?.cards && handData.cards.length > 0) {
-                            const hand = handData.cards as DiamondsCard[];
-                            const finalCard = hand[Math.floor(Math.random() * hand.length)];
-                            const newSlots = [finalCard, null, null, null, null];
-                            slotsMap.set(p.id, newSlots);
-                            await supabase.from('diamonds_slots').upsert({
-                                game_id: GAME_ID, player_id: p.id, round: nextRound, slots: newSlots, updated_at: now
-                            });
-                        }
-                    } else if (cardsCount > 1 && alreadyUsedPower) {
-                        console.log(`[DIAMONDS_ENGINE] AUTO-PICK: ${p.username} (Power Depleted, tried >1). Forcing 1-card.`);
-                        const firstCard = pSlots.find(s => s !== null);
-                        const newSlots = [firstCard, null, null, null, null];
-                        slotsMap.set(p.id, newSlots);
-                        await supabase.from('diamonds_slots').upsert({
-                            game_id: GAME_ID, player_id: p.id, round: nextRound, slots: newSlots, updated_at: now
-                        });
-                    }
-                }
-
-
-                const { results, updatedParticipants } = evaluateRound(participants, slotsMap);
-
-                // Aggregate ALL winners and losers for the UI overlay
-                const allWinners = results.reduce((acc: string[], r) => [...acc, ...r.winners], []);
-                const allLosers = results.reduce((acc: string[], r) => [...acc, ...r.losers], []);
-                const allEliminated = results.reduce((acc: string[], r) => [...acc, ...r.eliminatedIds], []);
-                const allEffects = results.reduce((acc: any[], r) => [...acc, ...(r.effects || [])], []);
-
-                // --- SPECIAL CARD HAND MANAGEMENT ---
-                console.log("[DIAMONDS_ENGINE] Processing card usage and infection spread...");
-
-                for (const p of updatedParticipants) {
-
-                    const { data: currentHandData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
-
-                    if (currentHandData) {
-                        let hand = currentHandData.cards as DiamondsCard[];
-                        let updatedHand = [...hand];
-
-
-                        // 1. Process Transformations (Cures or Shotgun Shatters) only in this phase
-                        // NOTE: Cards are fully "spent" (removed) at the end of the Picking phase to allow for stealing.
-                        results.forEach(res => {
-                            res.effects?.forEach((ef: any) => {
-                                if (ef.type === 'cured' && ef.playerId === p.id) {
-                                    // EXTRACT: New rank value and optional slot index from description
-                                    const newValMatch = ef.desc?.match(/TO (\d+)/);
-                                    const newVal = newValMatch ? parseInt(newValMatch[1]) : (Math.floor(Math.random() * 8) + 2);
-
-                                    const hIdx = updatedHand.findIndex(c => c.id === ef.originalCardId);
-                                    if (hIdx !== -1) {
-                                        // Create replacement card
-                                        const ts = Date.now().toString().slice(-4);
-                                        const replacement: DiamondsCard = {
-                                            id: `trans_${ts}_${p.id.slice(0, 3)}_${hIdx}`,
-                                            type: 'standard',
-                                            rank: newVal.toString(),
-                                            suit: 'hearts', // Standard theme
-                                            value: newVal,
-                                            isRevealed: true
-                                        };
-
-                                        // Permanently replace the Zombie with the new card in the hand
-                                        updatedHand[hIdx] = replacement;
-
-                                        // If it's in a slot, update that too (even if not explicitly mentioned by slotIndex)
-                                        p.slots.forEach((s, sIdx) => {
-                                            if (s?.id === ef.originalCardId) {
-                                                p.slots[sIdx] = replacement;
-                                            }
-                                        });
-
-                                        console.log(`[DIAMONDS_ENGINE] NEUTRALIZED ASSET: ${p.username} zombie replaced with ${newVal}.`);
-                                    }
-                                }
-                            });
-                        });
-
-
-
-                        // 2. Process Infection (Zombie Spread)
-                        const wasInfected = results.some(r => r.effects?.some(e => e.playerId === p.id && e.type === 'infected'));
-                        if (wasInfected) {
-                            const hasZombie = updatedHand.some(c => c.specialType === 'zombie');
-                            if (!hasZombie) {
-                                console.log(`[DIAMONDS_ENGINE] !!! SPREAD: ${p.username} infected. Awarding 1-Use Zombie !!!`);
-                                updatedHand.push({
-                                    id: `spread_zom_${Date.now()}_${p.id.slice(0, 4)}`,
-                                    type: 'special',
-                                    specialType: 'zombie',
-                                    suit: 'special',
-                                    value: 0,
-                                    metadata: { usesRemaining: 1 } // USER REQUEST: No 2-time use
-                                });
-                            } else {
-                                console.log(`[DIAMONDS_ENGINE] ${p.username} already infected. Skipping duplicate spread.`);
-                            }
-                        }
-
-                        // 3. Update DB
-                        await supabase.from('diamonds_hands').update({ cards: updatedHand }).eq('game_id', GAME_ID).eq('player_id', p.id);
-
-                    }
-                }
-
-                updates.participants = updatedParticipants;
-                updates.round_data = {
-                    ...(gameStateRef.current?.round_data || {}),
-                    results: results,
-                    winners: allWinners,
-                    losers: allLosers,
-                    effects: allEffects,
-                    eliminated: [...allEliminated, ...updatedParticipants.filter(p => p.status === 'eliminated').map(p => p.id)]
-                };
-            }
-
-            if (nextPhase === 'picking') {
-                // MODULAR: Resolve Steals (Prepare Data)
-                const battleResults = gameStateRef.current?.round_data?.results || [];
-                const { pendingSteals } = resolveSteals(participants, battleResults);
-
-                updates.round_data = {
-                    ...(gameStateRef.current?.round_data || {}),
-                    winners: battleResults.reduce((acc: string[], r: any) => [...acc, ...r.winners], []),
-                    losers: battleResults.reduce((acc: string[], r: any) => [...acc, ...r.losers], []),
-                    effects: battleResults.reduce((acc: any[], r: any) => [...acc, ...(r.effects || [])], []),
-                    pending_steals: pendingSteals
-                };
-            }
-
-            if (nextPhase === 'scoring') {
-                // MODULAR: Apply Scores
-                const battleResults = gameStateRef.current?.round_data?.results || [];
-                const isFinalRound = (gameStateRef.current?.current_round || 0) === 5;
-                const { updatedParticipants } = updateScores(participants, battleResults, isFinalRound);
-
-                // --- POST-COMBAT RESOURCE AUDIT ---
-                // If any player has 0 cards, they are eliminated
-                const finalParticipants: DiamondsPlayer[] = [];
-                for (const p of updatedParticipants) {
-                    if (p.status !== 'active') {
-                        finalParticipants.push(p);
-                        continue;
-                    }
-
-                    const { data: handData } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', p.id).maybeSingle();
-                    const handSize = (handData?.cards as any[])?.length || 0;
-
-                    if (handSize === 0) {
-                        console.log(`[DIAMONDS_ENGINE] !!! RESOURCE DEPLETION: ${p.username} eliminated. !!!`);
-                        finalParticipants.push({ ...p, status: 'eliminated' as 'active' | 'eliminated' | 'survived' });
-                    } else {
-                        finalParticipants.push(p);
-                    }
-                }
-
-                updates.participants = finalParticipants;
-
-                // CRITICAL: Synchronize scores with persistent diamonds_participants table
-                // This prevents fetchMyParticipantStatus from overwriting scores with stale data
-                for (const p of finalParticipants) {
-                    await supabase.from('diamonds_participants')
-                        .update({
-                            score: p.score,
-                            status: p.status,
-                            roundAdjustment: p.roundAdjustment
-                        })
-                        .eq('id', p.id);
-                }
-            }
-
-            if (nextPhase === 'idle' || nextPhase === 'briefing') {
-                // Reset logic for new game
-                setMyHand([]);
-                setMySlots([null, null, null, null, null]);
-                setIsLocked(false);
-                setHasPicked(false);
-            }
-
-            // SAFETY CHECK: Never write empty participants if we had them before
-            if (updates.participants && updates.participants.length === 0 && participants.length > 0) {
-                console.error("[DIAMONDS_ENGINE] SAFETY: Prevented writing empty participants list!");
-                delete updates.participants;
-            }
-
-            // 6. FINAL STATE PERSISTENCE
-            console.log("[DIAMONDS_ENGINE] Persisting state updates:", Object.keys(updates));
-            const { error: finalError } = await supabase.from('diamonds_game_state').update(updates).eq('id', GAME_ID);
-
-            if (finalError) {
-                console.error("[DIAMONDS_ENGINE] CRITICAL: Final State update failed:", finalError);
-                // If it's a 409, it might be a race condition or constraint. 
-                // We'll try to alert the user if it's severe.
-                if (finalError.code === '409') {
-                    console.warn("[DIAMONDS_ENGINE] Conflict (409) detected. Possibly a constraint violation.");
-                }
-            } else {
-                console.log("[DIAMONDS_ENGINE] State successfully persisted.");
-            }
-        } catch (err) {
-            console.error("[DIAMONDS_ENGINE] FATAL Engine Error:", err);
-            isProcessingRef.current = false;
-        } finally {
-            isProcessingRef.current = false;
-        }
-    };
+    // [DIAMONDS_ENGINE] transitionTo and handlePhaseTimeout logic has been moved to DiamondsGameMaster.tsx
 
     // Timer Sync Effect
     useEffect(() => {
@@ -773,35 +238,74 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 return;
             }
 
-            const start = new Date(gameState.phase_started_at).getTime();
+            let dStr = gameState.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const start = new Date(dStr).getTime();
             const duration = gameState.phase_duration_sec || 0;
             const now = Date.now();
             const elapsed = Math.floor((now - start) / 1000);
             const remaining = Math.max(0, duration - elapsed);
             setTimeLeft(remaining);
 
-            // AUTHORITY TRIGGER
+            // Timer reaches 0. Waiting for GameMaster to transition.
             if (remaining <= 0) {
-                if (isProcessingRef.current) {
-                    console.log(`[DIAMONDS_ENGINE] Heartbeat: Timer at ${remaining}s. Engine BUSY.`);
-                } else {
-                    console.log(`[DIAMONDS_ENGINE] Heartbeat: Timer at ${remaining}s. Engine IDLE. Triggering transition...`);
-                    handlePhaseTimeout();
+                if (!isProcessingRef.current) {
+                    console.log('[DIAMONDS_ENGINE] Timer at 0s. Waiting for GameMaster to transition...');
                 }
             }
         };
 
         syncTimer(); // Immediate sync
-        const interval = setInterval(syncTimer, 1000);
+        const interval = setInterval(syncTimer, 100);
         return () => clearInterval(interval);
     }, [gameState?.phase_started_at, gameState?.phase_duration_sec, gameState?.phase, gameState?.is_paused, user, gameState?.current_round, isMaster]);
+
+    const findMyParticipant = (participants: any[], userObj: any) => {
+        if (!userObj || !participants || participants.length === 0) return null;
+        const uid = userObj.id ? String(userObj.id).toLowerCase() : '';
+        const uname = userObj.username ? String(userObj.username).toLowerCase() : '';
+
+        const exact = participants.find((p: any) => {
+            const pid = p.id ? String(p.id).toLowerCase() : '';
+            const puname = p.username ? String(p.username).toLowerCase() : '';
+            if (uid && pid && pid === uid) return true;
+            if (uname && puname && puname === uname) return true;
+            return false;
+        });
+        if (exact) return exact;
+
+        const soft = participants.find((p: any) => {
+            const pid = p.id ? String(p.id).toLowerCase() : '';
+            const puname = p.username ? String(p.username).toLowerCase() : '';
+            if (uid && pid && (pid.includes(uid) || uid.includes(pid))) return true;
+            if (uname && puname && (puname.includes(uname) || uname.includes(puname))) return true;
+            return false;
+        });
+
+        return soft || null;
+    };
 
     // Supabase Realtime Sync (Centralized Source of Truth)
     useEffect(() => {
         if (!user) return;
 
         const handleUpdate = (data: any) => {
-            console.log("[DIAMONDS_PLAYER] Game State Received:", data);
+            if (!data) return;
+
+            // Prevent reverting to an older state due to read replica lag
+            if (data.phase_started_at && phaseStartedAtRef.current) {
+                let dStr = data.phase_started_at.replace(' ', 'T');
+                if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+                if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+                const fetchedStart = new Date(dStr);
+                const currentStart = new Date(phaseStartedAtRef.current);
+                if (fetchedStart.getTime() < currentStart.getTime()) {
+                    return; // Ignore stale data
+                }
+            }
+
+            console.log("[DIAMONDS_PLAYER] Game State Received:", data.phase, data.current_round);
             if (gameState?.phase !== data.phase) {
                 if (['evaluation', 'picking', 'scoring'].includes(data.phase)) {
                     fetchMySlots(data);
@@ -819,50 +323,24 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             systemStartRef.current = data.system_start;
 
             const participants = data.participants || [];
-            let me = participants.find((p: any) => p.id === user.id);
-            if (!me && user.username) {
-                me = participants.find((p: any) => p.username === user.username);
-            }
-            if (!me && user.username) {
-                me = participants.find((p: any) => p.username?.toLowerCase() === user.username.toLowerCase());
-            }
+            const me = findMyParticipant(participants, user);
 
-            // PRIORITY: Prioritize the dedicated participant status over the game state snapshot to prevent "flexing"
-            setMyPlayer(prev => {
-                const p = me;
-                if (!prev) return p;
-
-                // --- SCORING FIX ---
-                // During 'scoring' or 'picking', the Game State snapshot (calculated by transitionTo logic)
-                // is the AUTHORITATIVE source for points and adjustments.
-                // We MUST update scores from the snapshot during these phases.
-                if (data.phase === 'scoring' || data.phase === 'picking') {
-                    console.log(`[DIAMONDS_PLAYER] Scoring Phase Update: Taking authoritative score ${p.score} (Adj: ${p.roundAdjustment})`);
-                    return {
-                        ...p, // Take everything from the snapshot
-                        isZombie: prev.isZombie ?? p.isZombie // Preserve zombie state if ambiguous, but generally snapshot is king here too
-                    };
+            if (me) {
+                const meAny = me as any;
+                const realPoints = user?.visa_points ?? user?.points ?? user?.visaDays ?? meAny.visa_points ?? meAny.points ?? meAny.visaDays;
+                if (realPoints !== undefined && realPoints !== null && realPoints > 0) {
+                    if (me.score === undefined || me.score === 1000 || me.score === 0) {
+                        me.score = realPoints;
+                    }
+                } else if (me.score === undefined || me.score === 0) {
+                    me.score = 1000;
                 }
-
-                // For other phases (hunting, slotting), avoid "flexing" by keeping local detailed state
-                // until the next major transition.
-                return {
-                    ...p,
-                    score: prev.score, // Keep displayed score stable
-                    roundAdjustment: prev.roundAdjustment, // Keep displayed adjustment stable
-                    status: prev.status,
-                    isZombie: prev.isZombie ?? p.isZombie,
-                    groupId: p.groupId // Snapshots are good for group assignments
-                };
-            });
-
-            // CRITICAL: Refresh Hand and Slots on every state change
-            fetchMyHand();
-
-            // Interaction Fix: Don't fetch slots if we are actively drafting in slotting phase
-            const isActivelySlotting = data.phase === 'slotting' && !isLocked;
-            if (!isActivelySlotting) {
-                fetchMySlots(data);
+                setMyPlayer(me);
+                fetchMyHand(me);
+                const isActivelySlotting = data.phase === 'slotting' && !isLocked;
+                if (!isActivelySlotting) {
+                    fetchMySlots(data, me);
+                }
             }
 
             // 2s POLLING FALLBACK Sync often happens faster than state updates can reflect in fetchOpponentSlots
@@ -876,6 +354,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 setIsLocked(false);
                 setHasPicked(false);
                 setOpponentSlots([]); // Clear opponent slots on new round
+                handAssignedRoundRef.current = -1;
                 roundRef.current = data.current_round;
             }
 
@@ -897,21 +376,42 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         };
 
         const fetchInitial = async () => {
-            const { data } = await supabase.from('diamonds_game_state').select('*').eq('id', GAME_ID).maybeSingle();
-            if (data) handleUpdate(data);
-            else setIsLoading(false);
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.${GAME_ID}&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey,
+                        'Accept': 'application/vnd.pgrst.object+json'
+                    },
+                    cache: 'no-store'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data) {
+                        const rawState = Array.isArray(data) ? data[0] : data;
+                        handleUpdate(rawState);
+                    }
+                } else {
+                    setIsLoading(false);
+                }
+            } catch (err) {
+                console.error('[DIAMONDS_PLAYER] fetchInitial error:', err);
+                setIsLoading(false);
+            }
         };
 
         fetchInitial();
         fetchMyParticipantStatus();
 
-        // 2s POLLING FALLBACK (Resilient Sync)
+        // 1s POLLING FALLBACK (Resilient Sync like Spades)
         const pollInterval = setInterval(() => {
             if (!document.hidden) {
                 fetchInitial();
                 fetchMyParticipantStatus();
             }
-        }, 2000);
+        }, 1000);
 
         const channel = supabase
             .channel(`diamonds_state_sync_${GAME_ID}`)
@@ -943,63 +443,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         };
     }, [user, onClose]);
 
-    // Auto-Start Feature: Trigger briefing if game is idle but active (Admin only)
-    useEffect(() => {
-        if (gameState?.phase === 'idle' && gameState?.system_start === true && !isProcessingRef.current) {
-            console.log("[DIAMONDS_ENGINE] Detecting system start. Triggering briefing...");
-            isProcessingRef.current = true;
-            transitionTo('briefing').catch(err => {
-                console.error("[DIAMONDS_ENGINE] Initial start failed:", err);
-                isProcessingRef.current = false;
-            });
-        } else if (gameState?.phase === 'idle') {
-            console.log("[DIAMONDS_ENGINE] Idle, waiting for SystemStart signal...", { systemStart: gameState?.system_start });
-        }
-    }, [gameState?.phase, gameState?.system_start]);
 
-    // Distributed Ready Check (Skip timers if everyone has slotted)
-    useEffect(() => {
-        if (!gameState || gameState.phase !== 'slotting' || isProcessingRef.current) return;
-
-        const checkAllReady = async () => {
-            const activeParticipants = (gameState.participants || []).filter(p => p.status === 'active');
-            const activeCount = activeParticipants.length;
-            if (activeCount === 0) return;
-
-            const { data: slots, error } = await supabase
-                .from('diamonds_slots')
-                .select('player_id')
-                .eq('game_id', GAME_ID)
-                .eq('round', gameState.current_round);
-
-            if (!error && slots) {
-                // Ensure all active participants have a slot record
-                const slottedIds = new Set(slots.map(s => s.player_id));
-                const allReady = activeParticipants.every(p => slottedIds.has(p.id));
-
-                if (allReady) {
-                    console.log(`[DIAMONDS_ENGINE] All ${activeCount} active players ready. Transitioning...`);
-                    // We don't set isProcessingRef here because transitionTo handles the election
-                    transitionTo('evaluation').catch(err => {
-                        console.error("[DIAMONDS_ENGINE] Ready-check transition failed:", err);
-                    });
-                }
-            }
-        };
-
-        const interval = setInterval(checkAllReady, 3000); // Check every 3s
-        return () => clearInterval(interval);
-    }, [gameState?.phase, gameState?.current_round, gameState?.participants]);
-
-    // Safety watchdog for isProcessingRef
-    useEffect(() => {
-        const watchdog = setInterval(() => {
-            if (isProcessingRef.current) {
-                console.log("[DIAMONDS_ENGINE] Watchdog: Engine busy... checking status.");
-            }
-        }, 5000);
-        return () => clearInterval(watchdog);
-    }, []);
 
     // SAFETY BRIDGE: Prevent "Ghost Cards" in slots
     useEffect(() => {
@@ -1008,7 +452,10 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
         const staleIndices = mySlots.map((s, i) => {
             if (!s) return -1;
-            const existsInHand = myHand.some(h => h.id === s.id);
+            const existsInHand = myHand.some(h => 
+                h.id === s.id || 
+                (h.rank === s.rank && h.suit === s.suit && h.specialType === s.specialType)
+            );
             return existsInHand ? -1 : i;
         }).filter(idx => idx !== -1);
 
@@ -1020,39 +467,148 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         }
     }, [myHand, gameState?.phase]);
 
-    const fetchMyParticipantStatus = async () => {
-        if (!user?.id) return;
-        const { data, error } = await supabase
-            .from('diamonds_participants')
-            .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
+    // Toast notification when Zombie is destroyed/neutralized by Shotgun or Injection
+    const notifiedEffectsRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        if (!gameState?.round_data?.effects) return;
+        if (!['evaluation', 'scoring', 'picking'].includes(gameState?.phase || '')) return;
 
-        if (!error && data) {
-            console.log("[DIAMONDS_SYNC] Participant status updated:", data);
-            setMyPlayer(data);
-            setPowerUsage({
-                hasUsedRefresh: data.hasUsedRefresh || false,
-                hasUsedDetector: data.hasUsedDetector || false,
-                hasUsedFiveSlots: data.hasUsedFiveSlots || false
+        const myId = user?.id;
+        const myUname = user?.username?.toLowerCase();
+        const effects = gameState.round_data.effects || [];
+
+        effects.forEach((e: any) => {
+            const isMine = e.playerId === myId || (myUname && e.playerId?.toLowerCase() === myUname);
+            if (!isMine) return;
+
+            const effectKey = `${gameState.current_round}_${e.desc}`;
+            if (notifiedEffectsRef.current.has(effectKey)) return;
+
+            if (e.desc?.includes('ZOMBIE DESTROYED IN HAND') || e.desc?.includes('BY SHOTGUN')) {
+                notifiedEffectsRef.current.add(effectKey);
+                addToast("YOUR ZOMBIE CARD WAS DESTROYED BY AN OPPONENT'S SHOTGUN!", "error");
+            } else if (e.desc?.includes('BY INJECTION')) {
+                notifiedEffectsRef.current.add(effectKey);
+                addToast("YOUR ZOMBIE WAS CURED BY AN OPPONENT'S INJECTION!", "info");
+            } else if (e.desc?.includes('SHOTGUN BONUS')) {
+                notifiedEffectsRef.current.add(effectKey);
+                addToast("SHOTGUN BONUS ACTIVATED! OPPONENT ZOMBIE DESTROYED (+100 CR)", "success");
+            }
+        });
+    }, [gameState?.phase, gameState?.current_round, gameState?.round_data]);
+
+    // Helper: Create a fresh 8-card tactical hand for player fallback (7 standard + 1 special)
+    const generateFreshHandForPlayer = (playerId: string): DiamondsCard[] => {
+        const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+        const cards: DiamondsCard[] = [];
+        const ranks = ['4', '7', '9', '10', 'J', 'Q', 'K', 'A'];
+        const values = [4, 7, 9, 10, 11, 12, 13, 14];
+
+        for (let i = 0; i < 7; i++) {
+            const rankIdx = i % ranks.length;
+            cards.push({
+                id: `card_${playerId}_std_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+                type: 'standard',
+                rank: ranks[rankIdx],
+                suit: suits[i % 4],
+                value: values[rankIdx]
             });
+        }
+
+        const specials: Array<'zombie' | 'shotgun' | 'injection'> = ['zombie', 'injection', 'shotgun'];
+        const chosenSpecial = specials[Math.floor(Math.random() * specials.length)];
+
+        cards.push({
+            id: `card_${playerId}_${chosenSpecial}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            type: 'special',
+            specialType: chosenSpecial,
+            suit: 'special',
+            value: 0,
+            metadata: { usesRemaining: chosenSpecial === 'zombie' ? 2 : 1 }
+        });
+
+        return cards;
+    };
+
+    const hasAssignedCardsRef = useRef<Record<number, boolean>>({});
+
+    // ROUND 1 / SLOTTING SAFEGUARD: If player has 0 cards, auto-assign cards again!
+    useEffect(() => {
+        if (!gameState) return;
+        const round = gameState.current_round || 1;
+
+        if (['slotting', 'dealing'].includes(gameState.phase) && (!myHand || myHand.length === 0)) {
+            if (hasAssignedCardsRef.current[round]) return; // Eliminate infinite state refresh loop!
+
+            const me = findMyParticipant(gameState.participants || [], user);
+
+            if (me) {
+                hasAssignedCardsRef.current[round] = true;
+                console.log("[DIAMONDS_SAFEGUARD] Player has 0 cards in slotting/dealing! Auto-assigning fresh cards...");
+                const newCards = (me.cards && me.cards.length > 0) ? me.cards : generateFreshHandForPlayer(me.id || user?.id || 'player');
+                setMyHand(newCards);
+                if (!me.cards || me.cards.length === 0) {
+                    syncMyPlayerToState({
+                        ...me,
+                        cards: newCards
+                    });
+                }
+            }
+        }
+    }, [gameState?.phase, gameState?.current_round, myHand.length, user?.id, user?.username]);
+
+    const myHandRef = useRef<DiamondsCard[]>([]);
+    useEffect(() => {
+        myHandRef.current = myHand;
+    }, [myHand]);
+
+    const handAssignedRoundRef = useRef<number>(-1);
+
+    const fetchMyParticipantStatus = async () => {
+        if (!user) return;
+
+        const participant = findMyParticipant(gameState?.participants || [], user);
+        if (participant) {
+            setMyPlayer(participant);
         }
     };
 
-    const fetchMyHand = async () => {
-        const { data } = await supabase.from('diamonds_hands').select('cards').eq('game_id', GAME_ID).eq('player_id', user.id).maybeSingle();
-        if (data) setMyHand(data.cards || []);
+    const fetchMyHand = (passedMe?: DiamondsPlayer) => {
+        const me = passedMe || myPlayer;
+        const currentRound = gameStateRef.current?.current_round || 1;
+
+        if (me) {
+            // Keep cards constant once assigned for the round
+            if (myHandRef.current && myHandRef.current.length > 0 && handAssignedRoundRef.current === currentRound) {
+                return;
+            }
+
+            if (me.cards && me.cards.length > 0) {
+                setMyHand(me.cards);
+                myHandRef.current = me.cards;
+                handAssignedRoundRef.current = currentRound;
+            } else if (['slotting', 'dealing'].includes(gameStateRef.current?.phase || '')) {
+                if (hasAssignedCardsRef.current[currentRound]) return;
+                hasAssignedCardsRef.current[currentRound] = true;
+
+                console.log("[DIAMONDS_PLAYER] Participant has 0 cards! Auto-assigning hand...");
+                const newCards = generateFreshHandForPlayer(me.id || user?.id || 'player');
+                setMyHand(newCards);
+                myHandRef.current = newCards;
+                handAssignedRoundRef.current = currentRound;
+                syncMyPlayerToState({
+                    ...me,
+                    cards: newCards
+                });
+            }
+        }
     };
 
-    const fetchMySlots = async (passedState?: DiamondsGameState) => {
-        const round = passedState?.current_round || gameState?.current_round || 1;
-        const { data } = await supabase.from('diamonds_slots').select('slots').eq('game_id', GAME_ID).eq('player_id', user.id).eq('round', round).maybeSingle();
-        if (data) {
-            const newSlots = data.slots || [null, null, null, null, null];
-            // Only update if different to prevent animation triggers
+    const fetchMySlots = (_passedState?: DiamondsGameState, passedMe?: DiamondsPlayer) => {
+        const me = passedMe || myPlayer;
+        if (me && me.slots) {
+            const newSlots = me.slots || [null, null, null, null, null];
             setMySlots(prev => JSON.stringify(prev) === JSON.stringify(newSlots) ? prev : newSlots);
-        } else {
-            setMySlots(prev => prev.every(s => s === null) ? prev : [null, null, null, null, null]);
         }
     };
 
@@ -1089,39 +645,97 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         setSelectedSteal({ targetId, card });
     };
 
-    const executeSteal = async () => {
-        if (!selectedSteal || !user) return;
-        setIsLoading(true);
-        const { targetId, card } = selectedSteal;
+    const handlePickingDragEnd = (_: any, info: any, targetId: string, card: DiamondsCard) => {
+        if (!user || !gameState || hasPicked) return;
+        setSelectedSteal({ targetId, card });
 
-        try {
-            const { data: oppHand } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', targetId).maybeSingle();
-            if (oppHand) {
-                const newCards = (oppHand.cards as DiamondsCard[]).filter(c => c.id !== card.id);
-                await supabase.from('diamonds_hands').update({ cards: newCards }).eq('id', oppHand.id);
-            }
-
-            const { data: myHandData } = await supabase.from('diamonds_hands').select('*').eq('game_id', GAME_ID).eq('player_id', user.id).maybeSingle();
-            if (myHandData) {
-                const hasAlready = (myHandData.cards as DiamondsCard[]).some(c => c.id === card.id);
-                if (!hasAlready) {
-                    const newCards = [...(myHandData.cards as DiamondsCard[]), card];
-                    await supabase.from('diamonds_hands').update({ cards: newCards }).eq('id', myHandData.id);
-                    setMyHand(newCards);
-                }
-            }
-
-            setHasPicked(true);
-            setSelectedSteal(null);
-            setOpponentSlots([]);
-            console.log(`[DIAMONDS_UI] Extraction Complete: ${card.id} transferred.`);
-        } catch (err) {
-            console.error("Extraction failed:", err);
-        } finally {
-            setIsLoading(false);
+        // If dropped downwards towards confirmation zone, select card
+        if (info.offset.y > 30 || info.point.y > window.innerHeight - 350) {
+            setSelectedSteal({ targetId, card });
         }
     };
 
+    const executeSteal = async () => {
+        if (!selectedSteal || !user || !gameStateRef.current?.participants) return;
+        const { targetId, card } = selectedSteal;
+
+        // Instantly mark as picked locally
+        setHasPicked(true);
+
+        try {
+            const currentParticipants = gameStateRef.current.participants || [];
+            const myUname = user?.username?.toLowerCase();
+
+            const newParticipants = currentParticipants.map(p => {
+                const isTarget = p.id === targetId || (targetId && p.username?.toLowerCase() === targetId.toLowerCase());
+                const isMe = p.id === user.id || (myUname && p.username?.toLowerCase() === myUname);
+
+                if (isTarget) {
+                    // Remove stolen card from victim's hand
+                    const updatedCards = (p.cards || []).filter(c => c.id !== card.id);
+                    return { ...p, cards: updatedCards };
+                }
+
+                if (isMe) {
+                    // Add stolen card to thief's hand
+                    const hasCard = (p.cards || []).some(c => c.id === card.id);
+                    const updatedCards = hasCard ? (p.cards || []) : [...(p.cards || []), card];
+                    setMyHand(updatedCards);
+                    return { ...p, cards: updatedCards };
+                }
+
+                return p;
+            });
+
+            setGameState(prev => prev ? { ...prev, participants: newParticipants } : null);
+
+            const token = await getAccessToken();
+            await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.${GAME_ID}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'apikey': supabaseKey,
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ participants: newParticipants })
+            });
+
+            setSelectedSteal(null);
+            setOpponentSlots([]);
+            console.log(`[DIAMONDS_UI] Extraction Complete: ${card.id} transferred to ${user.username}.`);
+        } catch (err) {
+            console.error("Extraction failed:", err);
+        }
+    };
+
+
+    // Helper: Sync player changes (slots, cards, power usage) to diamonds_game_state via REST API
+    const syncMyPlayerToState = async (updatedPlayer: DiamondsPlayer) => {
+        if (!user?.id || !gameStateRef.current?.participants) return;
+
+        const currentParticipants = gameStateRef.current.participants || [];
+        const newParticipants = currentParticipants.map(p => p.id === updatedPlayer.id ? updatedPlayer : p);
+
+        setGameState(prev => prev ? { ...prev, participants: newParticipants } : null);
+        setMyPlayer(updatedPlayer);
+
+        try {
+            const token = await getAccessToken();
+            await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.${GAME_ID}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'apikey': supabaseKey,
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ participants: newParticipants })
+            });
+        } catch (e) {
+            console.error('[DIAMONDS_PLAYER] Failed to sync player state:', e);
+        }
+    };
 
     // --- Interactions ---
     const handleSlotCard = (card: DiamondsCard, slotIndex: number) => {
@@ -1131,7 +745,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         if (card.specialType === 'zombie') {
             const uses = myPlayer?.zombieUses || 0;
             if (uses >= 2) {
-                alert("CRITICAL: ZOMBIE PROTOCOL LIMIT REACHED (MAX 2 USES PER COMPONENT)");
+                triggerAlert("ZOMBIE PROTOCOL LIMIT", "CRITICAL: ZOMBIE PROTOCOL LIMIT REACHED (MAX 2 USES PER COMPONENT)");
                 return;
             }
         }
@@ -1142,18 +756,19 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         if (existingSlotIdx !== -1) newSlots[existingSlotIdx] = null;
 
         newSlots[slotIndex] = card;
+
+        const projectedSlottedCount = newSlots.filter(s => s !== null).length;
+        if (projectedSlottedCount === 5 && (powerUsage.hasUsedFiveSlots || myPlayer?.hasUsedFiveSlots)) {
+            triggerAlert("OVERLOAD PRINCIPLE", "Full 5-Slot Deployment can only be used ONCE per game session!");
+            return;
+        }
+
         setMySlots(newSlots);
 
-        // USER REQUEST: Persistent slots for better admin visibility/auto-pick
-        if (user?.id && gameState?.current_round) {
-            supabase.from('diamonds_slots').upsert({
-                game_id: GAME_ID,
-                player_id: user.id,
-                round: gameState.current_round,
-                slots: newSlots,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'game_id,player_id,round' }).then(({ error }) => {
-                if (error) console.error("[DIAMONDS_PLAYER] Immediate slot sync failed:", error);
+        if (myPlayer) {
+            syncMyPlayerToState({
+                ...myPlayer,
+                slots: newSlots
             });
         }
     };
@@ -1164,39 +779,72 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
         newSlots[index] = null;
         setMySlots(newSlots);
 
-        // USER REQUEST: Persistent slots for better admin visibility/auto-pick
-        if (user?.id && gameState?.current_round) {
-            supabase.from('diamonds_slots').upsert({
-                game_id: GAME_ID,
-                player_id: user.id,
-                round: gameState.current_round,
-                slots: newSlots,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'game_id,player_id,round' }).then(({ error }) => {
-                if (error) console.error("[DIAMONDS_PLAYER] Immediate unslot sync failed:", error);
+        if (myPlayer) {
+            syncMyPlayerToState({
+                ...myPlayer,
+                slots: newSlots
             });
         }
     };
 
-    const handleDragEnd = (_: any, info: any, card: DiamondsCard) => {
+    const handleDragEnd = (e: any, info: any, card: DiamondsCard) => {
         if (gameState?.phase !== 'slotting' || isLocked) return;
 
-        // Find which slot the card was dropped on
-        const dropPoint = info.point;
-        let targetSlotIndex = -1;
+        // Extract pointer coordinates with full event fallback
+        const px = info?.point?.x ?? e?.clientX ?? e?.changedTouches?.[0]?.clientX ?? e?.touches?.[0]?.clientX ?? 0;
+        const py = info?.point?.y ?? e?.clientY ?? e?.changedTouches?.[0]?.clientY ?? e?.touches?.[0]?.clientY ?? 0;
 
-        slotRefs.current.forEach((ref, idx) => {
-            if (!ref) return;
+        let targetSlotIndex = -1;
+        const validRefs = (slotRefs.current || []).filter((r): r is HTMLDivElement => r !== null);
+
+        // 1. Direct Hit Check with 40px Horizontal & 60px Vertical Padding
+        validRefs.forEach((ref, idx) => {
             const rect = ref.getBoundingClientRect();
             if (
-                dropPoint.x >= rect.left &&
-                dropPoint.x <= rect.right &&
-                dropPoint.y >= rect.top &&
-                dropPoint.y <= rect.bottom
+                px >= (rect.left - 40) &&
+                px <= (rect.right + 40) &&
+                py >= (rect.top - 60) &&
+                py <= (rect.bottom + 60)
             ) {
                 targetSlotIndex = idx;
             }
         });
+
+        // 2. Distance-Based Match (Radius up to 180px)
+        if (targetSlotIndex === -1) {
+            let minDistance = Infinity;
+            validRefs.forEach((ref, idx) => {
+                const rect = ref.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                const dist = Math.hypot(px - centerX, py - centerY);
+                if (dist < minDistance && dist < 180) {
+                    minDistance = dist;
+                    targetSlotIndex = idx;
+                }
+            });
+        }
+
+        // 3. Upward Drag Fallback: If dragged upwards towards slot area
+        if (targetSlotIndex === -1 && validRefs.length > 0 && validRefs[0]) {
+            const firstRect = validRefs[0].getBoundingClientRect();
+            const slotAreaBottom = firstRect.bottom + 120;
+            const offsetUp = info?.offset?.y && info.offset.y < -20;
+
+            if (py <= slotAreaBottom || offsetUp) {
+                let minXDist = Infinity;
+                validRefs.forEach((ref, idx) => {
+                    if (!ref) return;
+                    const rect = ref.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const xDist = Math.abs(px - centerX);
+                    if (xDist < minXDist) {
+                        minXDist = xDist;
+                        targetSlotIndex = idx;
+                    }
+                });
+            }
+        }
 
         if (targetSlotIndex !== -1) {
             handleSlotCard(card, targetSlotIndex);
@@ -1208,40 +856,29 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
         const slottedCount = mySlots.filter(s => s !== null).length;
         if (slottedCount === 0) {
-            alert("MUST DEPLOY AT LEAST 1 ASSET FOR BATTLE");
+            triggerAlert("DEPLOYMENT REQUIREMENT", "MUST DEPLOY AT LEAST 1 ASSET FOR BATTLE");
             return;
         }
 
         if (slottedCount === 5) {
             if (powerUsage.hasUsedFiveSlots) {
-                alert("CRITICAL: FULL ARRAY ALREADY DEPLOYED ONCE. YOU ALREADY USED 5 SLOTTED. REDUCE DEPLOYMENT ARRAY.");
+                triggerAlert("OVERLOAD PRINCIPLE", "CRITICAL: FULL ARRAY ALREADY DEPLOYED ONCE. YOU ALREADY USED 5 SLOTTED. REDUCE DEPLOYMENT ARRAY.");
                 return;
             }
         }
 
         console.log("[DIAMONDS_PLAYER] Confirming Slots:", mySlots);
-        const { error } = await supabase.from('diamonds_slots').upsert({
-            game_id: GAME_ID,
-            player_id: user.id,
-            round: gameState.current_round,
-            slots: mySlots,
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'game_id,player_id,round' });
+        setIsLocked(true);
+        if (slottedCount === 5) {
+            setPowerUsage(prev => ({ ...prev, hasUsedFiveSlots: true }));
+        }
 
-        if (error) {
-            console.error("[DIAMONDS_PLAYER] Slot Error:", error);
-            alert("FAILED TO SUBMIT SLOTS. TRY AGAIN.");
-        } else {
-            console.log("[DIAMONDS_PLAYER] Slots Submitted Successfully.");
-            if (slottedCount === 5) {
-                await supabase.from('diamonds_participants')
-                    .update({ hasUsedFiveSlots: true })
-                    .eq('id', user.id);
-
-                // USER REQUEST: Persistent lock for power limits
-                setTimeout(fetchMyParticipantStatus, 500);
-            }
-            setIsLocked(true);
+        if (myPlayer) {
+            syncMyPlayerToState({
+                ...myPlayer,
+                slots: mySlots,
+                hasUsedFiveSlots: slottedCount === 5 ? true : myPlayer.hasUsedFiveSlots
+            });
         }
     };
 
@@ -1276,18 +913,22 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             }
 
             const newHand = [...specialCards, ...newStandardHand];
-
-            await supabase.from('diamonds_hands').update({ cards: newHand }).eq('game_id', GAME_ID).eq('player_id', user.id);
-            await supabase.from('diamonds_participants').update({ hasUsedRefresh: true }).eq('id', user.id);
-
+            setPowerUsage(prev => ({ ...prev, hasUsedRefresh: true }));
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(`diamonds_refresh_used_${user?.id}`, 'true');
+            }
             setMyHand(newHand);
             setMySlots([null, null, null, null, null]);
-            await supabase.from('diamonds_slots').upsert({ game_id: GAME_ID, player_id: user.id, round: gameState.current_round, slots: [null, null, null, null, null] });
 
-            // USER REQUEST: Core limit enforcement
-            setTimeout(fetchMyParticipantStatus, 500);
+            if (myPlayer) {
+                syncMyPlayerToState({
+                    ...myPlayer,
+                    cards: newHand,
+                    slots: [null, null, null, null, null]
+                });
+            }
 
-            addToast("ASSETS REGENERATED. SPECIAL PROTOCOLS PRESERVED.", "success");
+            addToast("ASSETS SHUFFLED & REGENERATED. SPECIAL PROTOCOLS PRESERVED.", "success");
         } catch (err) {
             console.error("Refresh failed:", err);
             addToast("PROTOCOL CARRIER LOST. REFRESH FAILED.", "error");
@@ -1298,27 +939,26 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     const handleUseDetector = async () => {
         if (!user || gameState?.phase !== 'slotting' || isLocked) return;
-        if (powerUsage.hasUsedDetector) {
-            addToast("PROTOCOL ERROR: DETECTOR CHARGE DEPLETED", "error");
+        if (powerUsage.hasUsedDetector || (typeof window !== 'undefined' && localStorage.getItem(`diamonds_detector_used_${user?.id}`) === 'true')) {
+            addToast("PROTOCOL ERROR: DETECTOR CHARGE DEPLETED (1 USE PER TRIAL)", "error");
             return;
         }
 
         setIsLoading(true);
 
         try {
-            const { data: hands } = await supabase.from('diamonds_hands').select('player_id, cards').eq('game_id', GAME_ID);
-            if (hands) {
-                const counts: Record<string, number> = {};
-                hands.forEach(h => { counts[h.player_id] = (h.cards as any[]).length; });
-                setOpponentHandCounts(counts);
-                setDetectorActive(true);
-                await supabase.from('diamonds_participants').update({ hasUsedDetector: true }).eq('id', user.id);
-
-                // USER REQUEST: Core limit enforcement
-                setTimeout(fetchMyParticipantStatus, 500);
-
-                addToast("SENSOR SWEEP COMPLETE. ASSET COUNTS ACQUIRED.", "success");
+            const counts: Record<string, number> = {};
+            (gameState?.participants || []).forEach(p => {
+                counts[p.id] = (p.cards || []).length;
+            });
+            setOpponentHandCounts(counts);
+            setDetectorActive(true);
+            setPowerUsage(prev => ({ ...prev, hasUsedDetector: true }));
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(`diamonds_detector_used_${user?.id}`, 'true');
             }
+
+            addToast("SENSOR SWEEP COMPLETE. ASSET COUNTS ACQUIRED.", "success");
         } catch (err) {
             console.error("Detector failed:", err);
             addToast("SENSOR LINK INTERRUPTED.", "error");
@@ -1339,46 +979,76 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
 
     // --- RENDER ---
     return (
-        <div className="relative w-full min-h-screen bg-black/40 backdrop-blur-md flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30">
+        <div
+            className={`relative w-full h-full ${gameState?.phase === 'end' ? 'bg-black' : 'bg-transparent'} flex flex-col font-sans overflow-y-auto text-white selection:bg-purple-500/30`}
+            onScroll={(e) => {
+                const target = e.target as HTMLDivElement;
+                setIsScrolled(target.scrollTop > 20);
+            }}
+        >
             {/* Background Texture - Using Hub atmosphere but keeping protocol noise */}
-            <div className="absolute inset-0 bg-black/40 pointer-events-none"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 pointer-events-none"></div>
 
-            {/* Header / HUD */}
-            <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-md border-b border-purple-500/20 px-4 py-3 sm:px-8 sm:py-4">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <header className={`fixed top-0 left-0 right-0 z-[100] border-b border-white/10 px-3 py-2 sm:px-8 sm:py-4 transition-all duration-300 ${gameState?.phase === 'end' ? 'bg-black' : isScrolled ? 'bg-black/95 backdrop-blur-2xl shadow-2xl' : 'bg-black/20 backdrop-blur-md'}`}>
+                <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
                     {/* Left: Brand / Title */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 sm:gap-4">
                         <div className="hidden sm:flex flex-col border-r border-white/10 pr-4">
                             <span className="text-[10px] font-black text-white/40 tracking-[0.4em] uppercase leading-none mb-1">NETWORK</span>
                             <span className="text-xs font-black text-purple-500 uppercase tracking-widest leading-none">BORDERLAND</span>
                         </div>
                         <div className="flex flex-col">
-                            <h2 className="text-[10px] sm:text-xs font-cinzel font-black text-purple-500 tracking-[0.3em] uppercase leading-none mb-1">
+                            <h2 className="text-[9px] sm:text-xs font-cinzel font-black text-purple-500 tracking-[0.2em] sm:tracking-[0.3em] uppercase leading-none mb-0.5 sm:mb-1">
                                 DIAMONDS TRIAL
                             </h2>
-                            <h1 className="text-sm sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
+                            <h1 className="text-xs sm:text-lg font-black font-oswald text-white tracking-widest uppercase leading-none">
                                 LOGIC PROTOCOL
                             </h1>
                         </div>
                     </div>
 
-                    {/* Right: Actions (Rules/Close) */}
-                    <div className="flex items-center gap-2">
+                    {/* Right: Actions (Timer/Rules/Close) */}
+                    <div className="flex items-center gap-1.5 sm:gap-3">
+                        {/* TIMER AT RIGHT TOP */}
+                        <div className="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 bg-purple-950/40 border border-purple-500/30 rounded-lg shadow-sm">
+                            <Timer size={12} className="text-purple-400 animate-pulse sm:w-3.5 sm:h-3.5" />
+                            <span className="text-[11px] sm:text-sm font-black font-oswald tabular-nums text-purple-400">
+                                {timeLeft}s
+                            </span>
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                const next = !skipVideos;
+                                setSkipVideos(next);
+                                if (typeof window !== 'undefined') {
+                                    localStorage.setItem('skipVideos', String(next));
+                                    window.dispatchEvent(new CustomEvent('skip-videos-toggled', { detail: next }));
+                                }
+                            }}
+                            title="Toggle Skip Intro"
+                            className={`p-1.5 sm:px-3 sm:py-1.5 border text-[9px] sm:text-[10px] font-mono font-bold uppercase tracking-widest transition-all rounded flex items-center justify-center ${skipVideos ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'border-white/20 bg-white/5 hover:bg-white/10 text-white/80'}`}
+                        >
+                            <FastForward size={14} className="sm:hidden text-green-400" />
+                            <span className="hidden sm:inline">Skip Intro: {skipVideos ? 'ON' : 'OFF'}</span>
+                        </button>
+
                         <button
                             onClick={() => setShowRulesModal(true)}
-                            className="p-2 sm:px-4 sm:py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded text-purple-500 transition-all active:scale-95"
+                            title="Rules"
+                            className="p-1.5 sm:px-4 sm:py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded text-purple-500 transition-all active:scale-95 flex items-center gap-1.5"
                         >
-                            <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">SYNOPSIS</span>
-                            <Info size={18} className="sm:hidden" />
+                            <HelpCircle size={15} />
+                            <span className="hidden sm:inline font-mono text-[11px] tracking-widest uppercase">RULES</span>
                         </button>
 
                         <button
                             onClick={() => setShowPlayerCard(true)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded transition-all active:scale-95 group"
+                            title="Player Profile"
+                            className="flex items-center gap-1.5 px-2 py-1.5 sm:px-3 sm:py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded transition-all active:scale-95 group"
                         >
                             <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
-                            <span className="text-[10px] font-mono tracking-[0.2em] text-gray-300 uppercase group-hover:text-white transition-colors">
+                            <span className="hidden sm:inline text-[10px] font-mono tracking-[0.2em] text-gray-300 uppercase group-hover:text-white transition-colors">
                                 {user?.username?.toUpperCase() || 'PLAYER'}
                             </span>
                             <User size={14} className="text-gray-500 group-hover:text-purple-400 transition-colors" />
@@ -1387,32 +1057,45 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 </div>
 
                 {/* Sub-Header HUD */}
-                <div className="max-w-7xl mx-auto mt-3 pt-3 border-t border-white/5 flex items-center justify-around sm:justify-end sm:gap-8">
+                <div className="max-w-7xl mx-auto mt-2 pt-2 border-t border-white/10 flex items-center justify-around sm:justify-end sm:gap-6">
                     <div className="flex flex-col items-center sm:items-end">
                         <p className="text-[7px] sm:text-[9px] text-purple-300/40 font-mono uppercase tracking-[0.2em]">ROUND</p>
-                        <p className="text-sm sm:text-xl font-black font-oswald text-white">
-                            {gameState?.current_round || 1}<span className="text-purple-900 text-[10px] sm:text-sm">/5</span>
+                        <p className="text-xs sm:text-xl font-black font-oswald text-white">
+                            {gameState?.current_round || 1}<span className="text-purple-900 text-[9px] sm:text-sm">/5</span>
                         </p>
                     </div>
 
-                    <div className="w-px h-6 bg-white/10 sm:hidden" />
+                    <div className="w-px h-5 bg-white/10 sm:hidden" />
 
                     <div className="flex flex-col items-center sm:items-end">
                         <p className="text-[7px] sm:text-[9px] text-purple-300/40 font-mono uppercase tracking-[0.2em]">TIMER</p>
-                        <div className="flex items-center gap-1.5">
-                            <Timer size={12} className="text-purple-500 animate-pulse sm:w-4 sm:h-4" />
-                            <p className="text-sm sm:text-xl font-black font-oswald tabular-nums text-purple-500">
+                        <div className="flex items-center gap-1">
+                            <Timer size={11} className="text-purple-500 animate-pulse sm:w-4 sm:h-4" />
+                            <p className="text-xs sm:text-xl font-black font-oswald tabular-nums text-purple-500">
                                 {timeLeft}s
                             </p>
                         </div>
                     </div>
 
-                    <div className="w-px h-6 bg-white/10 sm:hidden" />
+                    <div className="w-px h-5 bg-white/10 sm:hidden" />
 
-                    <div className="flex flex-col items-center sm:items-end bg-purple-500/10 px-3 py-1 sm:px-4 sm:py-1.5 rounded border border-purple-500/20">
+                    <div className="flex flex-col items-center sm:items-end bg-purple-500/10 px-2.5 py-0.5 sm:px-4 sm:py-1.5 rounded border border-purple-500/20">
                         <p className="text-[7px] sm:text-[9px] text-purple-400/70 font-mono uppercase tracking-[0.2em]">CREDITS</p>
-                        <p className="text-sm sm:text-xl font-black font-oswald text-purple-400">
-                            {myPlayer?.score || 0}
+                        <p className="text-xs sm:text-xl font-black font-oswald text-purple-400">
+                            {(() => {
+                                const pAny = myPlayer as any;
+                                const baseVisa = user?.visa_points ?? user?.points ?? user?.visaDays ?? pAny?.visa_points ?? pAny?.points ?? pAny?.visaDays;
+                                
+                                if (myPlayer?.score !== undefined && myPlayer?.score !== null && myPlayer?.score > 0 && myPlayer?.score !== 1000) {
+                                    return myPlayer.score;
+                                }
+                                
+                                if (baseVisa !== undefined && baseVisa !== null && baseVisa > 0) {
+                                    return baseVisa;
+                                }
+                                
+                                return (myPlayer?.score && myPlayer.score > 0) ? myPlayer.score : 1000;
+                            })()}
                         </p>
                     </div>
                 </div>
@@ -1545,7 +1228,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[1000] bg-[#050508]/98 backdrop-blur-2xl overflow-y-auto custom-scrollbar p-6 lg:p-12"
+                        className="fixed inset-0 z-[1000] bg-[#050508]/98 backdrop-blur-2xl overflow-y-auto custom-scrollbar p-3 sm:p-6"
                     >
                         <div className="min-h-full w-full flex items-start justify-center">
                             {/* High-Tech Background Elements */}
@@ -1566,30 +1249,32 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                 />
                             </div>
 
-                            <div className="relative max-w-[1600px] w-full mx-auto space-y-8 sm:space-y-12 pt-16 pb-24 px-4 sm:px-6">
+                            <div className="relative max-w-[1600px] w-full mx-auto space-y-4 sm:space-y-6 pt-2 sm:pt-4 pb-12 px-4 sm:px-6">
                                 {/* Header Section */}
                                 <motion.div
                                     initial={{ y: -30, opacity: 0 }}
                                     animate={{ y: 0, opacity: 1 }}
-                                    className="text-center space-y-4 relative mb-16"
+                                    className="text-center space-y-3 relative mb-6 sm:mb-8"
                                 >
                                     {/* Decorative Ring */}
                                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-                                    <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full border border-purple-400/20 bg-purple-950/40 text-[10px] font-black text-purple-300 uppercase tracking-[0.4em] mb-4 backdrop-blur-md">
-                                        <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping" />
-                                        <span>Security Update: Advanced Asset Protocol</span>
-                                        <span className="ml-4 pl-4 border-l border-purple-500/30 text-white animate-pulse">
+                                    <div className="inline-flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 px-5 py-3 sm:py-2.5 rounded-xl border border-purple-400/30 bg-black/80 text-[9px] sm:text-[10px] font-black text-purple-300 uppercase tracking-[0.2em] sm:tracking-[0.3em] mb-3 backdrop-blur-md w-full max-w-xs sm:max-w-md sm:w-auto mx-auto shadow-[0_0_30px_rgba(168,85,247,0.15)]">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-ping shrink-0" />
+                                            <span className="text-center">Security Update: Advanced Asset Protocol</span>
+                                        </div>
+                                        <span className="sm:ml-4 sm:pl-4 sm:border-l border-t sm:border-t-0 border-purple-500/30 pt-1.5 sm:pt-0 text-white animate-pulse">
                                             System Ready: {timeLeft}s
                                         </span>
                                     </div>
 
-                                    <h1 className="font-cinzel text-3xl md:text-8xl text-white uppercase tracking-tighter leading-none relative z-10 transition-all">
+                                    <h1 className="font-cinzel text-3xl sm:text-5xl lg:text-6xl text-white uppercase tracking-tighter leading-none relative z-10 transition-all">
                                         LOGIC <span className="text-transparent bg-clip-text bg-gradient-to-b from-purple-300 via-purple-500 to-purple-800 drop-shadow-[0_0_20px_rgba(168,85,247,0.5)] animate-pulse">PROTOCOL</span>
                                         <motion.div
                                             animate={{ opacity: [0, 0.05, 0], x: [-5, 5, -2, 0] }}
                                             transition={{ duration: 0.2, repeat: Infinity, repeatDelay: 5 }}
-                                            className="absolute inset-0 text-purple-500 blur-sm -z-10 select-none font-cinzel text-3xl md:text-8xl"
+                                            className="absolute inset-0 text-purple-500 blur-sm -z-10 select-none font-cinzel text-3xl sm:text-5xl lg:text-6xl"
                                         >
                                             LOGIC PROTOCOL
                                         </motion.div>
@@ -1615,25 +1300,25 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                     >
                                         <TerminalBox title="Array Constraints" icon={<Scan size={16} />}>
                                             <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/40 h-full">
-                                                <table className="w-full text-left font-cinzel text-[11px] border-collapse h-full">
+                                                <table className="w-full text-left font-cinzel text-[9px] sm:text-[10px] border-collapse h-full">
                                                     <thead>
                                                         <tr className="bg-purple-500/10 border-b border-purple-500/20">
-                                                            <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest border-r border-purple-500/10">Protocol</th>
-                                                            <th className="px-3 py-4 text-purple-400 font-black uppercase tracking-widest">Constraint</th>
+                                                            <th className="px-2.5 py-3 text-purple-400 font-black uppercase tracking-widest border-r border-purple-500/10 text-[8px] sm:text-[9px]">Protocol</th>
+                                                            <th className="px-2.5 py-3 text-purple-400 font-black uppercase tracking-widest text-[8px] sm:text-[9px]">Constraint</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-purple-500/10">
                                                         <tr className="hover:bg-purple-500/5 transition-colors">
-                                                            <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold leading-tight">VARIABLE DEPLOYMENT</td>
-                                                            <td className="px-3 py-4 text-white/50 leading-tight">1-5 ASSETS PER ROUND REQ.</td>
+                                                            <td className="px-2.5 py-3 text-purple-300/80 border-r border-purple-500/10 font-bold leading-tight text-[8px] sm:text-[9px]">VARIABLE DEPLOYMENT</td>
+                                                            <td className="px-2.5 py-3 text-white/50 leading-tight text-[8px] sm:text-[9px]">1-5 ASSETS PER ROUND REQ.</td>
                                                         </tr>
                                                         <tr className="hover:bg-orange-500/5 transition-colors">
-                                                            <td className="px-3 py-4 text-orange-400/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Overload Principle</td>
-                                                            <td className="px-3 py-4 text-white/50 uppercase leading-tight">ONE 5-CARD DEPLOYMENT SESSION.</td>
+                                                            <td className="px-2.5 py-3 text-orange-400/80 border-r border-purple-500/10 font-bold uppercase leading-tight text-[8px] sm:text-[9px]">Overload Principle</td>
+                                                            <td className="px-2.5 py-3 text-white/50 uppercase leading-tight text-[8px] sm:text-[9px]">ONE 5-CARD DEPLOYMENT SESSION.</td>
                                                         </tr>
                                                         <tr className="hover:bg-purple-500/5 transition-colors">
-                                                            <td className="px-3 py-4 text-purple-300/80 border-r border-purple-500/10 font-bold uppercase leading-tight">Asset Recovery</td>
-                                                            <td className="px-3 py-4 text-white/50 uppercase leading-tight">WINNERS STEAL 1 FROM DEFEATED.</td>
+                                                            <td className="px-2.5 py-3 text-purple-300/80 border-r border-purple-500/10 font-bold uppercase leading-tight text-[8px] sm:text-[9px]">Asset Recovery</td>
+                                                            <td className="px-2.5 py-3 text-white/50 uppercase leading-tight text-[8px] sm:text-[9px]">WINNERS STEAL 1 FROM DEFEATED.</td>
                                                         </tr>
                                                     </tbody>
                                                 </table>
@@ -1671,8 +1356,8 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         {/* Point Table Reference - Tightly packed */}
                                         <div className="mt-0">
                                             <TerminalBox title="Numeric Asset Reference Matrix" icon={<Activity size={16} />}>
-                                                <div className="overflow-hidden border border-purple-500/10 rounded-lg bg-black/60">
-                                                    <div className="flex divide-x divide-purple-500/10">
+                                                <div className="overflow-x-auto custom-scrollbar border border-purple-500/10 rounded-lg bg-black/60">
+                                                    <div className="flex divide-x divide-purple-500/10 min-w-[340px] sm:min-w-0">
                                                         {[
                                                             { rank: '2-10', val: 'FACE VALUE' },
                                                             { rank: 'J', val: '11 PT' },
@@ -1680,11 +1365,11 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                             { rank: 'K', val: '13 PT' },
                                                             { rank: 'A', val: '14 PT' }
                                                         ].map((item, idx) => (
-                                                            <div key={idx} className="flex-1 flex flex-col items-center justify-center py-4 px-2 group hover:bg-purple-500/5 transition-all">
-                                                                <span className="text-[7px] font-mono text-purple-500/40 mb-1 group-hover:text-purple-400 uppercase tracking-widest">ASSET_CLASS</span>
-                                                                <span className="font-cinzel text-xl text-white font-black mb-1">{item.rank}</span>
-                                                                <div className="h-[1px] w-4 bg-purple-500/20 mb-2 group-hover:w-8 transition-all" />
-                                                                <span className="text-[10px] font-cinzel font-black text-white/60 group-hover:text-purple-400">{item.val}</span>
+                                                            <div key={idx} className="flex-1 flex flex-col items-center justify-center py-3 px-1.5 group hover:bg-purple-500/5 transition-all min-w-[60px]">
+                                                                <span className="text-[6px] font-mono text-purple-500/40 mb-0.5 group-hover:text-purple-400 uppercase tracking-widest">ASSET_CLASS</span>
+                                                                <span className="font-cinzel text-sm sm:text-lg text-white font-black mb-0.5">{item.rank}</span>
+                                                                <div className="h-[1px] w-3 bg-purple-500/20 mb-1 group-hover:w-6 transition-all" />
+                                                                <span className="text-[7px] sm:text-[8px] font-cinzel font-black text-white/60 group-hover:text-purple-400 whitespace-nowrap">{item.val}</span>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1701,18 +1386,18 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         className="w-full xl:w-[320px] shrink-0 self-stretch"
                                     >
                                         <TerminalBox title="Conflict Summary" icon={<Info size={16} />}>
-                                            <div className="space-y-3 p-2 h-full flex flex-col">
+                                            <div className="space-y-2.5 p-1.5 h-full flex flex-col">
                                                 {[
                                                     { label: "WINNER", value: "SUM(ASSETS) > OPPONENT SUM", accent: "purple" },
                                                     { label: "ZOMBIE", value: "VALUE 999. OVERRIDES ALL SLOTS", accent: "purple" },
                                                     { label: "LIMITS", value: "EXACTLY 1 SPECIAL PER PLAYER", accent: "orange" },
                                                     { label: "SCORING", value: "SURVIVAL: +200CR | LOSS: -100CR", accent: "purple" }
                                                 ].map((item, idx) => (
-                                                    <div key={idx} className="flex items-center gap-4 bg-white/[0.02] border border-white/5 p-3 rounded-lg group hover:border-purple-500/30 transition-all flex-1">
+                                                    <div key={idx} className="flex items-center gap-3 bg-white/[0.02] border border-white/5 p-2.5 rounded-lg group hover:border-purple-500/30 transition-all flex-1">
                                                         <div className={`w-1 h-full bg-${item.accent === 'purple' ? 'purple-500' : 'orange-500'} rounded-full opacity-50 group-hover:opacity-100 transition-opacity`} />
                                                         <div className="flex-1">
-                                                            <p className={`font-cinzel text-[10px] font-black uppercase tracking-[0.2em] text-${item.accent === 'purple' ? 'purple-400' : 'orange-400'} mb-1`}>{item.label}</p>
-                                                            <p className="font-cinzel text-[11px] text-white/50 group-hover:text-white/80 transition-colors uppercase leading-tight">{item.value}</p>
+                                                            <p className={`font-cinzel text-[8px] font-black uppercase tracking-[0.15em] text-${item.accent === 'purple' ? 'purple-400' : 'orange-400'} mb-0.5`}>{item.label}</p>
+                                                            <p className="font-cinzel text-[9px] text-white/50 group-hover:text-white/80 transition-colors uppercase leading-tight">{item.value}</p>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -1758,63 +1443,144 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="fixed inset-0 z-[6000] bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center overscroll-none"
+                        className="fixed inset-0 z-[6000] bg-black flex items-center justify-center p-4 sm:p-6 overflow-hidden text-center"
                     >
+                        {/* Futuristic Cyber Background Atmosphere */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-purple-950/40 via-black to-black pointer-events-none" />
+                        <div className="absolute inset-0 bg-[radial-gradient(#c084fc_1.3px,transparent_1.3px)] [background-size:26px_26px] opacity-35 pointer-events-none" />
+                        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-600/20 blur-[130px] rounded-full pointer-events-none animate-pulse" />
+                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-indigo-600/15 blur-[150px] rounded-full pointer-events-none" />
+
                         <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            className="max-w-4xl w-full space-y-12"
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            transition={{ duration: 0.5 }}
+                            className="max-w-3xl w-full space-y-6 py-8 px-6 sm:px-10 relative z-10 bg-black/90 border border-purple-500/40 rounded-3xl backdrop-blur-2xl shadow-[0_0_80px_rgba(168,85,247,0.3)] my-auto"
                         >
-                            <div className="space-y-4">
+                            {/* Sci-Fi Frame HUD Brackets */}
+                            <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-purple-500/70 rounded-tl-sm pointer-events-none" />
+                            <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-purple-500/70 rounded-tr-sm pointer-events-none" />
+                            <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-purple-500/70 rounded-bl-sm pointer-events-none" />
+                            <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-purple-500/70 rounded-br-sm pointer-events-none" />
+
+                            {/* Header Title Section */}
+                            <div className="space-y-2.5">
+                                <div className="inline-flex items-center justify-center gap-2.5 px-3.5 py-1 bg-purple-950/70 border border-purple-500/40 rounded-full shadow-[0_0_15px_rgba(168,85,247,0.25)]">
+                                    <Gem size={14} className="text-purple-400 animate-pulse" />
+                                    <span className="text-[9px] sm:text-[10px] font-mono text-purple-300 tracking-[0.3em] uppercase font-bold">
+                                        PROTOCOL TRIAL COMPLETE
+                                    </span>
+                                    <Gem size={14} className="text-purple-400 animate-pulse" />
+                                </div>
+
                                 <motion.div
                                     animate={{
-                                        textShadow: ["0 0 20px rgba(168,85,247,0)", "0 0 20px rgba(168,85,247,0.5)", "0 0 20px rgba(168,85,247,0)"]
+                                        textShadow: ["0 0 25px rgba(168,85,247,0.2)", "0 0 40px rgba(168,85,247,0.7)", "0 0 25px rgba(168,85,247,0.2)"]
                                     }}
                                     transition={{ duration: 3, repeat: Infinity }}
                                 >
-                                    <h1 className="text-5xl sm:text-7xl font-black text-white tracking-[0.3em] uppercase italic">CONGRATULATIONS</h1>
+                                    <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black font-cinzel tracking-[0.15em] sm:tracking-[0.2em] uppercase italic bg-gradient-to-r from-purple-200 via-white to-purple-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(168,85,247,0.6)] leading-none">
+                                        {myPlayer?.status === 'eliminated' ? 'TRIAL FAILED' : 'VICTORY ACHIEVED'}
+                                    </h1>
                                 </motion.div>
-                                <div className="h-1 w-48 bg-gradient-to-r from-transparent via-purple-500 to-transparent mx-auto" />
-                                <p className="text-purple-400 font-display text-[10px] sm:text-xs tracking-[0.5em] uppercase">Trial of Diamonds :: Concluded</p>
+
+                                <div className="h-0.5 w-36 bg-gradient-to-r from-transparent via-purple-500 to-transparent mx-auto" />
+                                <p className="text-purple-300/50 font-mono text-[8px] sm:text-[9px] tracking-[0.3em] uppercase font-semibold">
+                                    DIAMONDS TRIAL :: OFFICIAL CLASSIFIED LEADERBOARD
+                                </p>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {gameState.participants.sort((a, b) => (b.score || 0) - (a.score || 0)).map((p, idx) => (
-                                    <motion.div
-                                        key={p.id}
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: 0.5 + idx * 0.1 }}
-                                        className={`relative p-6 border rounded-[30px] transition-all bg-white/[0.02] ${idx === 0 ? 'border-purple-500 bg-purple-500/5' : 'border-white/10'}`}
-                                    >
-                                        {idx === 0 && (
-                                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-purple-500 text-black font-black text-[8px] uppercase tracking-widest rounded-full shadow-[0_0_20px_#a855f7]">
-                                                VICTOR
-                                            </div>
-                                        )}
-                                        <p className="text-[10px] text-white/30 font-mono mb-2 uppercase tracking-tighter">RANK 0{idx + 1}</p>
-                                        <h3 className="text-2xl font-black text-white mb-2 leading-none uppercase truncate">{playerIdMap[p.id] || p.username}</h3>
-                                        <div className="flex items-center justify-center gap-2">
-                                            <span className="text-3xl font-black text-purple-400">{p.score || 0}</span>
-                                            <span className="text-[10px] text-white/20 font-mono uppercase">CR</span>
-                                        </div>
-                                    </motion.div>
-                                ))}
-                            </div>
+                            {/* Leaderboard Cards Grid */}
+                            {(() => {
+                                const sorted = [...(gameState.participants || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
+                                const top2 = sorted.slice(0, 2);
+                                const myRankIdx = sorted.findIndex(p => p.id === user?.id || (user?.username && p.username?.toLowerCase() === user.username.toLowerCase()));
+                                const myRankPlayer = (myRankIdx >= 2 && sorted[myRankIdx]) ? sorted[myRankIdx] : null;
 
-                            <button
-                                onClick={() => {
-                                    localStorage.removeItem('diamonds_game_id');
-                                    if (onClose) onClose();
-                                }}
-                                className="group relative px-20 py-6 bg-purple-600 hover:bg-purple-500 text-black font-black uppercase tracking-[0.5em] transition-all duration-500 shadow-[0_0_40px_rgba(168,85,247,0.4)]"
-                                style={{ clipPath: 'polygon(10% 0, 100% 0, 90% 100%, 0% 100%)' }}
-                            >
-                                <span className="flex items-center gap-4 text-xs">
-                                    Return to Citadel
-                                    <ChevronRight size={20} className="group-hover:translate-x-2 transition-transform" />
-                                </span>
-                            </button>
+                                const displayList = myRankPlayer
+                                    ? [...top2.map((p, idx) => ({ ...p, rankDisplay: idx + 1 })), { ...myRankPlayer, rankDisplay: myRankIdx + 1 }]
+                                    : top2.map((p, idx) => ({ ...p, rankDisplay: idx + 1 }));
+
+                                return (
+                                    <div className={`grid grid-cols-1 ${displayList.length === 2 ? 'sm:grid-cols-2 max-w-xl' : 'sm:grid-cols-2 lg:grid-cols-3 max-w-3xl'} mx-auto gap-3 sm:gap-4 lg:gap-5 w-full`}>
+                                        {displayList.map((p) => {
+                                            const isTopWinner = p.rankDisplay === 1;
+                                            const isMe = p.id === user?.id || (user?.username && p.username?.toLowerCase() === user.username.toLowerCase());
+                                            return (
+                                                <motion.div
+                                                    key={p.id}
+                                                    initial={{ opacity: 0, y: 20 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    whileHover={{ y: -3, scale: 1.01 }}
+                                                    className={`relative p-3.5 sm:p-5 border-2 transition-all duration-300 rounded-2xl backdrop-blur-xl flex flex-col items-center justify-between min-h-[135px] sm:min-h-[155px] shadow-xl overflow-hidden group/card ${isTopWinner
+                                                        ? 'border-purple-500 shadow-[0_0_30px_rgba(168,85,247,0.35)] bg-gradient-to-b from-purple-950/70 via-purple-900/20 to-black'
+                                                        : isMe
+                                                            ? 'border-purple-400/60 bg-gradient-to-b from-purple-900/20 via-black to-black shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+                                                            : 'border-white/10 bg-black/80 hover:border-purple-500/30'
+                                                        }`}
+                                                >
+                                                    {/* Top Glow Accent Bar */}
+                                                    <div className={`absolute top-0 left-0 right-0 h-[2px] ${isTopWinner ? 'bg-gradient-to-r from-transparent via-purple-400 to-transparent' : 'bg-white/10'}`} />
+
+                                                    {isTopWinner && (
+                                                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 text-white font-black text-[8px] uppercase tracking-widest rounded-full shadow-[0_0_15px_#a855f7] flex items-center gap-1 border border-purple-300/50 z-20">
+                                                            <Crown size={11} className="text-amber-300 fill-current animate-pulse" />
+                                                            VICTOR
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex items-center justify-between w-full pt-0.5">
+                                                        <span className="text-[9px] sm:text-[10px] font-mono text-purple-400/80 font-bold uppercase tracking-widest">
+                                                            RANK 0{p.rankDisplay}
+                                                        </span>
+                                                        {isMe && (
+                                                            <span className="text-[7px] font-mono px-1.5 py-0.5 bg-purple-500/25 text-purple-200 border border-purple-400/40 rounded uppercase tracking-wider font-bold shadow-[0_0_8px_rgba(168,85,247,0.3)]">
+                                                                YOU
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="my-1.5 sm:my-2 text-center flex flex-col items-center gap-1">
+                                                        <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border ${isTopWinner ? 'bg-amber-950/60 border-amber-400/70 text-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'bg-white/5 border-white/10 text-white/60'}`}>
+                                                            {isTopWinner ? (
+                                                                <Crown size={15} className="text-amber-300 fill-amber-400/40 animate-pulse" />
+                                                            ) : (
+                                                                <User size={14} />
+                                                            )}
+                                                        </div>
+                                                        <h3 className="text-sm sm:text-lg font-black text-white uppercase tracking-wider leading-tight truncate max-w-[140px] sm:max-w-[170px]">
+                                                            {p.username || playerIdMap[p.id] || "PLAYER"}
+                                                        </h3>
+                                                    </div>
+
+                                                    <div className="w-full pt-2 border-t border-white/10 flex items-center justify-between">
+                                                        <span className="text-[8px] font-mono text-white/40 uppercase tracking-widest">VISA BALANCE</span>
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-base sm:text-xl font-black text-purple-400 font-oswald tracking-wide">{p.score || 0}</span>
+                                                            <span className="text-[8px] font-mono text-purple-300/50 uppercase font-bold">CR</span>
+                                                        </div>
+                                                    </div>
+                                                </motion.div>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })()}
+
+                            {/* Return Button */}
+                            <div className="pt-2 flex justify-center">
+                                <button
+                                    onClick={() => {
+                                        localStorage.removeItem('diamonds_game_id');
+                                        if (onClose) onClose();
+                                        window.location.href = '/home/card';
+                                    }}
+                                    className="group relative px-10 py-3 bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black uppercase tracking-[0.3em] transition-all duration-300 rounded-xl shadow-[0_0_25px_rgba(168,85,247,0.4)] hover:shadow-[0_0_45px_rgba(168,85,247,0.7)] active:scale-95 border border-purple-300/40 flex items-center justify-center gap-2.5 text-xs font-mono"
+                                >
+                                    <span>Return to Home</span>
+                                    <ChevronRight size={16} className="group-hover:translate-x-1.5 transition-transform text-purple-200" />
+                                </button>
+                            </div>
                         </motion.div>
                     </motion.div>
                 )}
@@ -1857,35 +1623,133 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 )}
             </AnimatePresence>
 
-            {/* SCORING OVERLAY */}
+            {/* EVALUATION OVERLAY */}
             <AnimatePresence>
-                {gameState?.phase === 'scoring' && (
+                {(gameState?.phase === 'evaluation') && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[2000] bg-black/95 backdrop-blur-3xl flex items-start justify-center p-4 lg:p-12 overflow-y-auto custom-scrollbar"
+                        className="fixed inset-0 z-[2000] bg-black flex items-start justify-center pt-4 sm:pt-6 pb-6 px-4 overflow-y-auto custom-scrollbar"
                     >
-                        <div className="max-w-xl w-full text-center space-y-10 py-12">
+                        <div className="max-w-md sm:max-w-lg w-full text-center space-y-3 py-1">
                             {(() => {
-                                const isWinner = gameState.round_data?.winners?.includes(user?.id) || gameState.round_data?.winners?.includes(myPlayer?.id);
-                                const isEliminated = myPlayer?.status === 'eliminated';
-                                const myEffects = gameState.round_data?.effects?.filter((e: any) => e.playerId === user?.id) || [];
+                                const myId = user?.id;
+                                const myUname = user?.username?.toLowerCase();
+                                const isWinner = gameState.round_data?.winners?.some((w: string) => w === myId || (myUname && w.toLowerCase() === myUname));
+                                const myEffects = gameState.round_data?.effects?.filter((e: any) => e.playerId === myId || (myUname && e.playerId?.toLowerCase() === myUname)) || [];
+                                
+                                const battle = gameState.round_data?.results?.find((r: any) => {
+                                    const matches = (id: string) => id && (id === myId || (myUname && id.toLowerCase() === myUname));
+                                    return (
+                                        r.winners?.some((w: string) => matches(w)) ||
+                                        r.losers?.some((l: string) => matches(l)) ||
+                                        r.eliminatedIds?.some((e: string) => matches(e)) ||
+                                        matches(r.p1Id) || matches(r.p2Id) || matches(r.p3Id)
+                                    );
+                                });
+
+                                const isP1 = battle?.p1Id === myId || (myUname && battle?.p1Id?.toLowerCase() === myUname);
+                                const isP2 = battle?.p2Id === myId || (myUname && battle?.p2Id?.toLowerCase() === myUname);
+                                const isP3 = battle?.p3Id === myId || (myUname && battle?.p3Id?.toLowerCase() === myUname);
+
+                                let pYouKey = 'p1';
+                                let pOpp1Key = 'p2';
+                                if (isP2) { pYouKey = 'p2'; pOpp1Key = 'p1'; }
+                                else if (isP3) { pYouKey = 'p3'; pOpp1Key = 'p1'; }
+
+                                const p1Tot = battle ? (battle.p1Total || 0) : 0;
+                                const p2Tot = battle ? (battle.p2Total || 0) : 0;
+                                const p3Tot = battle ? (battle.p3Total || 0) : 0;
+                                const hasP3 = Boolean(battle?.p3Id);
+
+                                const totalsInBattle = hasP3 ? [p1Tot, p2Tot, p3Tot] : [p1Tot, p2Tot];
+                                const maxScoreInBattle = Math.max(...totalsInBattle);
+
+                                let youTotal = 0;
+                                if (isP1) youTotal = p1Tot;
+                                else if (isP2) youTotal = p2Tot;
+                                else if (isP3) youTotal = p3Tot;
+
+                                const allPlayersTied = totalsInBattle.every(t => t === totalsInBattle[0]);
+                                const isTiedForHighest = (youTotal === maxScoreInBattle) && (totalsInBattle.filter(t => t === maxScoreInBattle).length > 1);
+
+                                // Total draw happens ONLY when ALL players in the battle have identical totals (e.g. 0-0 or 3-way tie)
+                                const isDraw = battle ? allPlayersTied : false;
+                                const isZeroDraw = isDraw && totalsInBattle.every(t => t === 0);
+
+                                // Victory if you have the max score and it's not a total 3-way draw (includes joint highest score ties!)
+                                const isPureWin = battle ? (youTotal === maxScoreInBattle && !isDraw) : false;
+
+                                const noCardsSubmitted = (mySlots || []).every(s => s === null) || (mySlots || []).filter(s => s !== null).length === 0;
+                                const hasPenaltyEffect = myEffects.some((e: any) => e.type === 'infected' || e.desc?.toLowerCase().includes('penalty'));
+                                const hasPenalty = !isPureWin && !isDraw && (noCardsSubmitted || hasPenaltyEffect);
+
+                                const duelPoints = isPureWin ? 200 : (isDraw ? 0 : (hasPenalty ? -200 : -100));
+                                const netAdjust = duelPoints;
+                                const displayBalance = (myPlayer?.score ?? 1000);
+
+                                const getConflictReason = () => {
+                                    const effects = battle?.effects || [];
+                                    const slotDetails = battle?.slotDetails || [];
+
+                                    const myEffectsInBattle = effects.filter((e: any) => e.playerId === myId || (myUname && e.playerId?.toLowerCase() === myUname));
+                                    const hasShotgunBonus = myEffectsInBattle.some((e: any) => e.desc?.includes('SHOTGUN BONUS'));
+                                    const hasInjectionBonus = myEffectsInBattle.some((e: any) => e.desc?.includes('INJECTION BONUS'));
+                                    const myZombieNeutralizedShotgun = myEffectsInBattle.some((e: any) => e.desc?.includes('BY SHOTGUN'));
+                                    const myZombieNeutralizedInjection = myEffectsInBattle.some((e: any) => e.desc?.includes('BY INJECTION'));
+
+                                    const allCardsInPlay = slotDetails.flatMap((s: any) => [s.p1Card, s.p2Card, s.p3Card].filter(Boolean));
+                                    const zombieInPlay = allCardsInPlay.some((c: any) => c.specialType === 'zombie');
+                                    const shotgunInPlay = allCardsInPlay.some((c: any) => c.specialType === 'shotgun');
+                                    const injectionInPlay = allCardsInPlay.some((c: any) => c.specialType === 'injection');
+
+                                    if (hasShotgunBonus) return "Zombie Removed by Gun / Shotgun (+100 CR)";
+                                    if (hasInjectionBonus) return "Zombie Cured & Removed by Injection (+200 CR)";
+                                    if (myZombieNeutralizedShotgun) return "Zombie Removed by Opponent Gun";
+                                    if (myZombieNeutralizedInjection) return "Zombie Cured & Removed by Opponent Injection";
+                                    if (zombieInPlay && (shotgunInPlay || injectionInPlay)) return "Special Collision (Zombie Removed by Anti-Special)";
+                                    if (zombieInPlay && isPureWin) return "Active Zombie Supremacy (+999 pt)";
+
+                                    if (isZeroDraw) {
+                                        return "Both 0 Points / Standstill (0 CR)";
+                                    } else if (isDraw) {
+                                        return "3-Way Point Tie / Standstill (0 CR)";
+                                    } else if (isPureWin) {
+                                        if (isTiedForHighest) return "Joint Victory / Tied High Score (+200 CR)";
+                                        return "Won by Higher Point Total (+200 CR)";
+                                    } else if (hasPenalty) {
+                                        if (noCardsSubmitted) return "Defeat + 0 Cards Penalty (-200 CR)";
+                                        return "Duel Defeat + Penalty (-200 CR)";
+                                    } else {
+                                        if (totalsInBattle.filter(t => t === youTotal).length > 1) {
+                                            return "Tied Defeat vs Higher Player (-100 CR)";
+                                        }
+                                        return "Lost by Lower Point Total (-100 CR)";
+                                    }
+                                };
+
+                                const dynamicReason = getConflictReason();
 
                                 return (
                                     <>
                                         <motion.div
-                                            initial={{ scale: 0.5, opacity: 0 }}
+                                            initial={{ scale: 0.8, opacity: 0 }}
                                             animate={{ scale: 1, opacity: 1 }}
-                                            className="space-y-6"
+                                            className="space-y-2"
                                         >
-                                            <h2 className={`text-4xl lg:text-6xl font-black italic uppercase tracking-tighter drop-shadow-[0_0_50px_rgba(0,0,0,1)] leading-none ${isWinner ? 'text-purple-400' : isEliminated ? 'text-red-600' : 'text-orange-500'}`}>
-                                                {isWinner ? "VICTORY" : isEliminated ? "TERMINATED" : "DEFEAT"}
+                                            <h2 className={`text-xl sm:text-2xl font-black italic uppercase tracking-wider leading-none ${isPureWin ? 'text-purple-400' : isDraw ? 'text-yellow-400' : 'text-orange-500'}`}>
+                                                {isPureWin ? "VICTORY" : isDraw ? "DRAW" : "DEFEAT"}
                                             </h2>
-                                            <div className="flex flex-col items-center gap-2">
-                                                <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-                                                <p className="text-white/40 font-mono text-xs tracking-[0.4em] font-black uppercase">ROUND {gameState.current_round} PROTOCOL SUMMARY</p>
-                                                <div className="h-px w-32 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <div className="h-px w-24 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                                                <p className="text-white/40 font-mono text-[9px] tracking-[0.3em] font-bold uppercase">ROUND {gameState.current_round} PROTOCOL SUMMARY</p>
+                                                {/* LIVE RESULT TIMER */}
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 font-mono text-[9px] sm:text-[10px] font-bold uppercase tracking-widest my-0.5">
+                                                    <Timer size={12} className="animate-spin text-purple-400" />
+                                                    <span>NEXT PHASE IN {timeLeft}s</span>
+                                                </div>
+                                                <div className="h-px w-24 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
                                             </div>
                                         </motion.div>
 
@@ -1908,14 +1772,38 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         )}
 
                                         {/* CONFLICT ANALYSIS TABLE */}
-                                        {(() => {
-                                            const battle = gameState.round_data?.results?.find((r: any) =>
-                                                r.winners.includes(user?.id) || r.losers.includes(user?.id) || r.eliminatedIds.includes(user?.id)
-                                            );
-
-                                            if (!battle) return null;
-
+                                        {battle && (() => {
                                             const is3Way = battle.slotDetails?.[0]?.p3Card !== undefined;
+
+                                            // Dynamically map columns so Column 1 is ALWAYS "YOU"
+                                            const isP1 = battle.p1Id === myId || (myUname && battle.p1Id?.toLowerCase() === myUname);
+                                            const isP2 = battle.p2Id === myId || (myUname && battle.p2Id?.toLowerCase() === myUname);
+                                            const isP3 = battle.p3Id === myId || (myUname && battle.p3Id?.toLowerCase() === myUname);
+
+                                            let pYouKey = 'p1';
+                                            let pOpp1Key = 'p2';
+                                            let pOpp2Key = 'p3';
+                                            let opp1Id = battle.p2Id;
+                                            let opp2Id = battle.p3Id;
+
+                                            if (isP2) {
+                                                pYouKey = 'p2';
+                                                pOpp1Key = 'p1';
+                                                opp1Id = battle.p1Id;
+                                            } else if (isP3) {
+                                                pYouKey = 'p3';
+                                                pOpp1Key = 'p1';
+                                                pOpp2Key = 'p2';
+                                                opp1Id = battle.p1Id;
+                                                opp2Id = battle.p2Id;
+                                            }
+
+                                            const opp1Player = gameState.participants?.find(p => p.id === opp1Id || (opp1Id && p.username?.toLowerCase() === opp1Id.toLowerCase()));
+                                            const opp2Player = gameState.participants?.find(p => p.id === opp2Id || (opp2Id && p.username?.toLowerCase() === opp2Id.toLowerCase()));
+
+                                            const youTotal = battle[`${pYouKey}Total`] || 0;
+                                            const opp1Total = battle[`${pOpp1Key}Total`] || 0;
+                                            const opp2Total = battle[`${pOpp2Key}Total`] || 0;
 
                                             return (
                                                 <motion.div
@@ -1938,49 +1826,50 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                 <th className="py-3 px-4 text-left font-normal uppercase">Slot</th>
                                                                 <th className="py-3 px-4 text-center font-bold text-purple-400 uppercase">YOU</th>
                                                                 <th className="py-3 px-4 text-center font-normal uppercase">
-                                                                    {(() => {
-                                                                        const oppId = battle.p2Id;
-                                                                        return playerIdMap[oppId] || "OPP 1";
-                                                                    })()}
+                                                                    {opp1Player?.username || "OPP 1"}
                                                                 </th>
                                                                 {is3Way && (
                                                                     <th className="py-3 px-4 text-center font-normal uppercase">
-                                                                        {(() => {
-                                                                            const opp2Id = battle.p3Id;
-                                                                            return playerIdMap[opp2Id] || "OPP 2";
-                                                                        })()}
+                                                                        {opp2Player?.username || "OPP 2"}
                                                                     </th>
                                                                 )}
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-white/[0.03]">
                                                             {battle.slotDetails?.map((slot: any, sIdx: number) => {
+                                                                const youCard = slot[`${pYouKey}Card`];
+                                                                const youVal = slot[`${pYouKey}Val`] || 0;
+                                                                const opp1Card = slot[`${pOpp1Key}Card`];
+                                                                const opp1Val = slot[`${pOpp1Key}Val`] || 0;
+                                                                const opp2Card = slot[`${pOpp2Key}Card`];
+                                                                const opp2Val = slot[`${pOpp2Key}Val`] || 0;
+
                                                                 return (
                                                                     <tr key={sIdx} className="hover:bg-white/[0.01] transition-colors">
                                                                         <td className="py-3 px-4 text-left text-white/20 font-light tracking-tighter">PKT-0{sIdx + 1}</td>
                                                                         <td className="py-3 px-4 text-center transition-all">
                                                                             <div className="flex flex-col">
                                                                                 <span className="text-white font-black text-xs leading-none mb-0.5">
-                                                                                    {slot.p1Card ? (slot.p1Card.specialType || `${slot.p1Card.rank}${slot.p1Card.suit?.charAt(0).toUpperCase()}`) : '-'}
+                                                                                    {youCard ? (youCard.specialType || `${youCard.rank}${youCard.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                 </span>
-                                                                                <span className={`text-[8px] font-black leading-none ${slot.p1Val > 0 ? 'text-green-500' : 'text-red-500 opacity-60'}`}>{slot.p1Val >= 999 ? 'MAX' : `${slot.p1Val}pt`}</span>
+                                                                                <span className={`text-[8px] font-black leading-none ${youVal > 0 ? 'text-green-500' : 'text-red-500 opacity-60'}`}>{youVal >= 999 ? 'MAX' : `${youVal}pt`}</span>
                                                                             </div>
                                                                         </td>
                                                                         <td className="py-3 px-4 text-center">
                                                                             <div className="flex flex-col">
                                                                                 <span className="text-white/40 font-bold text-xs leading-none mb-0.5">
-                                                                                    {slot.p2Card ? (slot.p2Card.specialType || `${slot.p2Card.rank}${slot.p2Card.suit?.charAt(0).toUpperCase()}`) : '-'}
+                                                                                    {opp1Card ? (opp1Card.specialType || `${opp1Card.rank}${opp1Card.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                 </span>
-                                                                                <span className={`text-[8px] font-bold leading-none ${slot.p2Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p2Val >= 999 ? 'MAX' : `${slot.p2Val}pt`}</span>
+                                                                                <span className={`text-[8px] font-bold leading-none ${opp1Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{opp1Val >= 999 ? 'MAX' : `${opp1Val}pt`}</span>
                                                                             </div>
                                                                         </td>
                                                                         {is3Way && (
                                                                             <td className="py-3 px-4 text-center">
                                                                                 <div className="flex flex-col">
                                                                                     <span className="text-white/40 font-bold text-xs leading-none mb-0.5">
-                                                                                        {slot.p3Card ? (slot.p3Card.specialType || `${slot.p3Card.rank}${slot.p3Card.suit?.charAt(0).toUpperCase()}`) : '-'}
+                                                                                        {opp2Card ? (opp2Card.specialType || `${opp2Card.rank}${opp2Card.suit?.charAt(0).toUpperCase()}`) : '-'}
                                                                                     </span>
-                                                                                    <span className={`text-[8px] font-bold leading-none ${slot.p3Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{slot.p3Val >= 999 ? 'MAX' : `${slot.p3Val}pt`}</span>
+                                                                                    <span className={`text-[8px] font-bold leading-none ${opp2Val > 0 ? 'text-green-500' : 'text-red-500 opacity-40'}`}>{opp2Val >= 999 ? 'MAX' : `${opp2Val}pt`}</span>
                                                                                 </div>
                                                                             </td>
                                                                         )}
@@ -1991,9 +1880,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                         <tfoot>
                                                             <tr className="bg-purple-500/10 font-mono">
                                                                 <td className="py-4 px-4 text-left text-purple-400 font-black text-[9px] tracking-widest uppercase">TOTAL ROUND SCORE</td>
-                                                                <td className="py-4 px-4 text-center text-purple-400 font-black text-base drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]">{battle.p1Total >= 999 ? 'MAX' : battle.p1Total}</td>
-                                                                <td className="py-4 px-4 text-center text-white/30 font-bold text-base">{battle.p2Total >= 999 ? 'MAX' : battle.p2Total}</td>
-                                                                {is3Way && <td className="py-4 px-4 text-center text-white/10 font-bold text-base">{battle.p3Total >= 999 ? 'MAX' : battle.p3Total}</td>}
+                                                                <td className="py-4 px-4 text-center text-purple-400 font-black text-base drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]">{youTotal >= 999 ? 'MAX' : youTotal}</td>
+                                                                <td className="py-4 px-4 text-center text-white/30 font-bold text-base">{opp1Total >= 999 ? 'MAX' : opp1Total}</td>
+                                                                {is3Way && <td className="py-4 px-4 text-center text-white/10 font-bold text-base">{opp2Total >= 999 ? 'MAX' : opp2Total}</td>}
                                                             </tr>
                                                         </tfoot>
                                                     </table>
@@ -2001,46 +1890,31 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             );
                                         })()}
 
-                                        <div className="flex flex-col gap-4 py-6 border-y border-white/10">
-                                            <div className="flex justify-between items-end">
+                                        <div className="flex flex-col gap-4 py-4 border-y border-white/10">
+                                            <div className="flex justify-between items-center gap-2">
                                                 <div className="text-left">
-                                                    <p className="text-[10px] text-gray-500 uppercase mb-1">Individual Duel</p>
-                                                    <p className={`text-sm font-bold ${isWinner ? 'text-purple-400' : 'text-red-500'}`}>
-                                                        {isWinner ? "+200" : isEliminated ? "-500" : "-100"} <span className="text-[8px] opacity-40">CR</span>
+                                                    <p className="text-[9px] text-gray-500 uppercase mb-1 font-mono">Individual Duel</p>
+                                                    <p className={`text-sm sm:text-base font-bold ${isPureWin ? 'text-purple-400' : isDraw ? 'text-yellow-400' : 'text-red-500'}`}>
+                                                        {isPureWin ? "+200" : isDraw ? "0" : (hasPenalty ? "-200" : "-100")} <span className="text-[8px] opacity-40">CR</span>
                                                     </p>
                                                 </div>
-                                                {(() => {
-                                                    const duelPoints = isWinner ? 200 : isEliminated ? -500 : -100;
-                                                    const synergyPoints = (myPlayer?.roundAdjustment ?? 0) - duelPoints;
-                                                    // USER REQUEST: Only show synergy box in the final round (Round 5)
-                                                    if ((gameState?.current_round || 0) < 5) return null;
-                                                    if (synergyPoints === 0) return null;
-
-                                                    return (
-                                                        <div className="text-center bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                                                            <p className="text-[10px] text-gray-500 uppercase mb-1">Team Synergy</p>
-                                                            <p className={`text-sm font-bold ${synergyPoints >= 0 ? 'text-green-500' : 'text-orange-500'}`}>
-                                                                {synergyPoints > 0 ? '+' : ''}{synergyPoints} <span className="text-[8px] opacity-40 font-mono">CR</span>
-                                                            </p>
-                                                        </div>
-                                                    );
-                                                })()}
+                                                <div className="text-center px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl max-w-[200px]">
+                                                    <p className="text-[7px] text-purple-400/80 uppercase font-mono tracking-widest font-bold">Reason</p>
+                                                    <p className="text-[9px] sm:text-[10px] text-purple-200 font-black uppercase tracking-wider leading-tight">
+                                                        {dynamicReason}
+                                                    </p>
+                                                </div>
                                                 <div className="text-right">
-                                                    <p className="text-[14px] text-gray-400 uppercase mb-2 font-bold tracking-widest">Net Visa Adjust</p>
-                                                    <p className={`text-2xl lg:text-3xl font-black ${(myPlayer?.roundAdjustment ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                        {(myPlayer?.roundAdjustment ?? 0) >= 0 ? '+' : ''}{myPlayer?.roundAdjustment ?? 0}
+                                                    <p className="text-[9px] text-gray-400 uppercase mb-1 font-bold tracking-widest font-mono">Net Visa Adjust</p>
+                                                    <p className={`text-lg sm:text-xl font-black ${netAdjust > 0 ? 'text-green-400' : isDraw ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                        {netAdjust > 0 ? '+' : ''}{netAdjust}
                                                     </p>
                                                 </div>
                                             </div>
-                                            <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                                                <span className="text-[10px] text-gray-500 uppercase tracking-widest">Protocol Balance</span>
-                                                <span className="text-base font-black text-white">{myPlayer?.score || 0} <span className="text-[10px] text-gray-600">CR</span></span>
+                                            <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                                                <span className="text-[9px] text-gray-500 uppercase tracking-widest">Protocol Balance</span>
+                                                <span className="text-sm font-black text-white">{displayBalance} <span className="text-[9px] text-gray-600">CR</span></span>
                                             </div>
-                                        </div>
-
-                                        <div className="flex items-center justify-center gap-2 text-purple-500/50 animate-pulse">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-ping" />
-                                            <span className="text-[10px] uppercase tracking-[0.3em] font-mono">Awaiting Next Round Assignment</span>
                                         </div>
                                     </>
                                 );
@@ -2053,7 +1927,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
             {/* UI CLEANUP: Redundant Header Removed */}
 
             {/* MAIN GAME AREA */}
-            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-32 sm:pt-40 pb-56 relative z-10 flex flex-col items-center">
+            <main className="flex-1 overflow-y-auto p-2 sm:p-4 pt-36 sm:pt-40 pb-56 relative z-10 flex flex-col items-center">
 
                 {/* PHASE INDICATOR */}
                 <div className="mb-4 text-center px-4" >
@@ -2065,7 +1939,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                     >
                         {gameState?.phase !== 'dealing' && (
                             <>
-                                <h2 className="text-3xl font-black text-white uppercase tracking-widest font-mono">
+                                <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-widest font-mono">
                                     {gameState?.phase === 'slotting' ? "DEPLOYMENT PHASE" :
                                         gameState?.phase === 'evaluation' ? "COMBAT RESOLUTION" :
                                             gameState?.phase === 'shuffle' ? "TABLE ASSIGNMENTS" :
@@ -2080,14 +1954,15 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         )}
                     </motion.div>
 
-                    {/* POWERS UI - Deployment Phase Only */}
-                    {gameState?.phase === 'slotting' && (
+                    {/* POWERS & INTELLIGENCE UI - Deployment & Picking Phases */}
+                    {(gameState?.phase === 'slotting' || gameState?.phase === 'picking') && (
                         <>
                             {/* PLAYER STATUS DISPLAY BOX (LEFT MIDDLE) */}
+                            {/* Desktop Full View (1280px+) */}
                             <motion.div
                                 initial={{ x: -100, opacity: 0 }}
                                 animate={{ x: 0, opacity: 1 }}
-                                className="fixed left-4 xl:left-8 top-1/2 -translate-y-1/2 z-10 w-52 xl:w-60 flex flex-col gap-3 px-4 py-6 bg-black/60 border border-white/10 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-glow-purple"
+                                className="hidden xl:flex fixed left-4 xl:left-8 top-1/2 -translate-y-1/2 z-40 w-52 xl:w-60 flex-col gap-3 px-4 py-6 bg-black/80 border border-white/10 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-glow-purple"
                             >
                                 <div className="flex items-center gap-2 pb-4 border-b border-white/10">
                                     <Activity size={16} className="text-purple-500 animate-pulse" />
@@ -2135,62 +2010,78 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                 <div className="mt-2 pt-4 border-t border-white/5">
                                     <span className="text-[7px] font-mono text-white/10 uppercase tracking-[0.4em] animate-pulse">Scanning unit proximity...</span>
                                 </div>
-
-                                {/* Interactive corner detail */}
-                                <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-purple-500/40" />
-                                <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-purple-500/40" />
                             </motion.div>
 
-                            {/* POWERS UI BOX (RIGHT MIDDLE) */}
+                            {/* Mobile Icon Button for Table Intelligence (< 1280px) */}
+                            <div className="xl:hidden fixed left-2 top-24 z-50">
+                                <button
+                                    onClick={() => {
+                                        const myGroup = gameState?.participants?.find(p => p.id === user?.id || (user?.username && p.username?.toLowerCase() === user.username.toLowerCase()))?.groupId;
+                                        const otherGroupMembers = (gameState?.participants || []).filter(p => p.groupId === myGroup && p.id !== user?.id);
+                                        
+                                        const infoLines = otherGroupMembers.map(opp => {
+                                            const name = playerIdMap[opp.id] || opp.username || opp.id;
+                                            const badges = [
+                                                opp.isZombie ? 'ZOMBIE' : '',
+                                                opp.status === 'eliminated' ? 'OFFLINE' : ''
+                                            ].filter(Boolean).join(' | ');
+                                            const badgeStr = badges ? ` [${badges}]` : '';
+
+                                            if (detectorActive && opponentHandCounts[opp.id] !== undefined) {
+                                                return `${name}${badgeStr}: ${opponentHandCounts[opp.id]} ASSETS`;
+                                            } else {
+                                                return `${name}${badgeStr}: NO UPLINK (Detector Required)`;
+                                            }
+                                        });
+
+                                        const message = infoLines.length > 0 
+                                            ? infoLines.join('\n\n') 
+                                            : "Scanning unit proximity...\nNo opponent units detected in range.";
+
+                                        triggerAlert("TACTICAL TABLE INTELLIGENCE", message);
+                                    }}
+                                    className="p-2 bg-black/80 border border-purple-500/40 rounded-full text-purple-400 shadow-lg backdrop-blur-md active:scale-95 transition-all"
+                                    title="Unit Info"
+                                >
+                                    <Info size={16} />
+                                </button>
+                            </div>
+
+                            {/* POWERS UI BOX (RIGHT MIDDLE - ICON ONLY ON SCREENS < 1280px) */}
                             <motion.div
-                                initial={{ x: 100, opacity: 0 }}
+                                initial={{ x: 50, opacity: 0 }}
                                 animate={{ x: 0, opacity: 1 }}
-                                className="fixed right-4 xl:right-8 top-1/2 -translate-y-1/2 z-10 w-52 xl:w-60 flex flex-col gap-4 px-5 py-7 bg-black/60 border border-white/10 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-glow-purple"
+                                className="fixed right-2 xl:right-4 top-24 xl:top-1/2 xl:-translate-y-1/2 z-50 flex flex-col gap-2 p-1.5 xl:p-3 bg-black/80 border border-purple-500/30 rounded-2xl backdrop-blur-md shadow-lg"
                             >
-                                <div className="flex flex-col items-end gap-1 text-right pb-4 border-b border-white/5">
-                                    <span className="text-[10px] font-black text-purple-500 uppercase tracking-widest">TACTICAL_ASSETS</span>
-                                    <span className="text-[8px] font-mono text-white/20 uppercase tracking-widest">DEPLOYMENT_MODULES</span>
+                                <div className="hidden xl:flex flex-col items-center gap-0.5 text-center pb-2 border-b border-white/10">
+                                    <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest">TACTICAL ASSETS</span>
                                 </div>
 
-                                <div className="flex flex-col gap-4">
+                                <div className="flex flex-col gap-2">
                                     <button
                                         onClick={handleRefreshHand}
+                                        title="Refresh Array"
                                         disabled={gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked}
-                                        className={`group relative flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-purple-900/20 border-purple-500/30 hover:bg-purple-500 hover:border-purple-400 hover:shadow-[0_0_30px_#a855f7]'}`}
+                                        className={`group relative flex items-center justify-center p-2 xl:p-2.5 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-purple-900/20 border-purple-500/30 hover:bg-purple-500 hover:border-purple-400 hover:shadow-[0_0_15px_#a855f7]'}`}
                                     >
-                                        <Activity size={24} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'} />
-                                        <span className={`mt-2 text-[9px] font-black uppercase tracking-widest ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'}`}>
-                                            {powerUsage.hasUsedRefresh ? "REFRESH_VOID" : "REFRESH_ARRAY"}
+                                        <Activity size={16} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'} />
+                                        <span className={`hidden xl:inline mt-1 text-[8px] font-black uppercase tracking-wider ${gameState?.phase !== 'slotting' || powerUsage.hasUsedRefresh || isLocked ? 'text-white/20' : 'text-purple-400 group-hover:text-black'}`}>
+                                            {powerUsage.hasUsedRefresh ? "VOID" : "REFRESH"}
                                         </span>
-                                        <div className="absolute top-2 right-2 flex gap-0.5">
-                                            <div className={`w-1 h-1 rounded-full ${powerUsage.hasUsedRefresh ? 'bg-white/20' : 'bg-purple-400 animate-pulse'}`} />
-                                        </div>
                                     </button>
 
                                     <button
                                         onClick={handleUseDetector}
+                                        title="Engage Detector"
                                         disabled={gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked}
-                                        className={`group relative flex flex-col items-center justify-center p-4 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-emerald-900/20 border-emerald-500/30 hover:bg-emerald-500 hover:border-emerald-400 hover:shadow-[0_0_30px_#10b981]'}`}
+                                        className={`group relative flex items-center justify-center p-2 xl:p-2.5 rounded-xl border transition-all duration-300 ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'bg-white/5 border-white/5 opacity-40 cursor-not-allowed' : 'bg-emerald-900/20 border-emerald-500/30 hover:bg-emerald-500 hover:border-emerald-400 hover:shadow-[0_0_15px_#10b981]'}`}
                                     >
-                                        <Scan size={24} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'} />
-                                        <span className={`mt-2 text-[9px] font-black uppercase tracking-widest ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'}`}>
-                                            {powerUsage.hasUsedDetector ? "DETECT_DEPLETED" : "ENGAGE_DETECTOR"}
+                                        <Scan size={16} className={gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'} />
+                                        <span className={`hidden xl:inline mt-1 text-[8px] font-black uppercase tracking-wider ${gameState?.phase !== 'slotting' || powerUsage.hasUsedDetector || isLocked ? 'text-white/20' : 'text-emerald-400 group-hover:text-black'}`}>
+                                            {powerUsage.hasUsedDetector ? "DEPLETED" : "DETECTOR"}
                                         </span>
-                                        <div className="absolute top-2 right-2 flex gap-0.5">
-                                            <div className={`w-1 h-1 rounded-full ${powerUsage.hasUsedDetector ? 'bg-white/20' : 'bg-emerald-400 animate-pulse'}`} />
-                                        </div>
                                     </button>
                                 </div>
-
-                                <div className="mt-2 text-center">
-                                    <span className="text-[7px] font-mono text-white/10 uppercase tracking-[0.4em] animate-pulse">
-                                        {gameState?.phase === 'slotting' ? "Awaiting command input..." : "Modules standby..."}
-                                    </span>
-                                </div>
-
-                                {/* Interactive corner detail */}
-                                <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-purple-500/40" />
-                                <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-purple-500/40" />
                             </motion.div>
                         </>
                     )}
@@ -2205,8 +2096,9 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                             className="w-full max-w-2xl px-4"
                         >
                             {(() => {
-                                const myGroup = gameState.participants.find(p => p.id === user?.id)?.groupId;
-                                const groupMembers = gameState.participants.filter(p => p.groupId === myGroup && p.status === 'active');
+                                const meInState = gameState.participants.find(p => p.id === user?.id || (user?.username && p.username?.toLowerCase() === user.username.toLowerCase()));
+                                const myGroup = meInState?.groupId;
+                                const groupMembers = myGroup ? gameState.participants.filter(p => p.groupId === myGroup && p.status === 'active') : [];
 
                                 if (!myGroup) return (
                                     <div className="p-12 text-center bg-black/40 border border-white/5 rounded-[40px] backdrop-blur-xl">
@@ -2229,39 +2121,50 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                         </h3>
 
                                         <div className="space-y-6">
-                                            {groupMembers.map(m => (
-                                                <div key={m.id} className="flex items-center gap-6 group/item">
-                                                    <div className={`w-4 h-4 rounded-full transition-all duration-500 ${m.id === user?.id ? 'bg-purple-400 shadow-[0_0_15px_#a855f7] scale-110' : 'bg-white/10'}`} />
-                                                    <div className="flex flex-col">
-                                                        <div className="flex items-center gap-3">
-                                                            <span className={`font-display text-4xl leading-none uppercase tracking-tighter transition-colors ${m.id === user?.id ? 'text-white font-black' : 'text-white/20'}`}>
-                                                                {playerIdMap[m.id] || m.username || 'AGENT'}
-                                                            </span>
-                                                            {m.id === user?.id && (
-                                                                m.isZombie ? (
-                                                                    <div className="flex items-center gap-1.5 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded-full">
-                                                                        <Biohazard size={12} className="text-red-500" />
-                                                                        <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">ZOMBIE</span>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 border border-emerald-500/50 rounded-full">
-                                                                        <Shield size={12} className="text-emerald-500" />
-                                                                        <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">SURVIVOR</span>
-                                                                    </div>
-                                                                )
+                                            {groupMembers.map(m => {
+                                                const isMe = m.id === user?.id || (user?.username && m.username?.toLowerCase() === user.username.toLowerCase());
+                                                return (
+                                                    <div key={m.id} className="flex items-center gap-6 group/item">
+                                                        <div className={`w-4 h-4 rounded-full transition-all duration-500 ${isMe ? 'bg-purple-400 shadow-[0_0_15px_#a855f7] scale-110' : 'bg-white/10'}`} />
+                                                        <div className="flex flex-col">
+                                                            <div className="flex items-center gap-3">
+                                                                <span className={`font-display text-4xl leading-none uppercase tracking-tighter transition-colors ${isMe ? 'text-white font-black' : 'text-white/20'}`}>
+                                                                    {(() => {
+                                                                        if (isMe && user?.username && !user.username.startsWith('Player #') && !user.username.startsWith('#PLAYER_')) {
+                                                                            return user.username;
+                                                                        }
+                                                                        if (m.username && !m.username.startsWith('Player #') && !m.username.startsWith('#PLAYER_')) {
+                                                                            return m.username;
+                                                                        }
+                                                                        return m.username || 'AGENT';
+                                                                    })()}
+                                                                </span>
+                                                                {isMe && (
+                                                                    m.isZombie ? (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded-full">
+                                                                            <Biohazard size={12} className="text-red-500" />
+                                                                            <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">ZOMBIE</span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/20 border border-emerald-500/50 rounded-full">
+                                                                            <Shield size={12} className="text-emerald-500" />
+                                                                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">SURVIVOR</span>
+                                                                        </div>
+                                                                    )
+                                                                )}
+                                                            </div>
+                                                            {detectorActive && opponentHandCounts[m.id] !== undefined && !isMe && (
+                                                                <span className="text-[10px] font-mono text-emerald-400/60 uppercase tracking-widest mt-1">
+                                                                    Detected Assets: {opponentHandCounts[m.id]} Units
+                                                                </span>
+                                                            )}
+                                                            {isMe && (
+                                                                <span className="text-[10px] font-mono text-purple-500/60 tracking-[0.3em] uppercase mt-1">Target ID</span>
                                                             )}
                                                         </div>
-                                                        {detectorActive && opponentHandCounts[m.id] !== undefined && m.id !== user?.id && (
-                                                            <span className="text-[10px] font-mono text-emerald-400/60 uppercase tracking-widest mt-1">
-                                                                Detected Assets: {opponentHandCounts[m.id]} Units
-                                                            </span>
-                                                        )}
-                                                        {m.id === user?.id && (
-                                                            <span className="text-[10px] font-mono text-purple-500/60 tracking-[0.3em] uppercase mt-1">Target ID</span>
-                                                        )}
                                                     </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
 
                                         <div className="mt-12 pt-8 border-t border-white/5">
@@ -2293,47 +2196,63 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                     className="absolute inset-0 bg-purple-500/5 blur-3xl rounded-full"
                                 />
 
-                                <div className="w-full overflow-x-auto scrollbar-hide px-4 py-8 relative z-10 flex flex-nowrap items-center justify-start sm:justify-center gap-4 sm:gap-6">
-                                    <AnimatePresence>
-                                        {myHand.map((card, idx) => (
-                                            <motion.div
-                                                key={card.id}
-                                                initial={{
-                                                    opacity: 0,
-                                                    scale: 0.2,
-                                                    rotateX: 90,
-                                                    rotateY: 90,
-                                                    y: 100,
-                                                    z: -500
-                                                }}
-                                                animate={{
-                                                    opacity: 1,
-                                                    scale: 1,
-                                                    rotateX: 0,
-                                                    rotateY: 0,
-                                                    y: 0,
-                                                    z: 0
-                                                }}
-                                                whileHover={{
-                                                    scale: 1.1,
-                                                    rotateY: 15,
-                                                    rotateX: 5,
-                                                    z: 50,
-                                                    transition: { duration: 0.3 }
-                                                }}
-                                                transition={{
-                                                    delay: idx * 0.15,
-                                                    type: "spring",
-                                                    stiffness: 80,
-                                                    damping: 15
-                                                }}
-                                                className="perspective-1000 mb-6"
-                                            >
-                                                <div className="absolute -inset-2 bg-purple-500/10 blur-xl opacity-0 hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                                                <CardVisual card={card} />
-                                            </motion.div>
-                                        ))}
-                                    </AnimatePresence>
+                                <div className="w-full relative z-10 flex flex-wrap items-center justify-center gap-2 sm:gap-6 px-2 py-4 max-w-full mx-auto">
+                                    {(() => {
+                                        const meInState = findMyParticipant(gameState.participants || [], user);
+                                        const cardsToDisplay = (meInState?.cards && meInState.cards.length > 0) ? meInState.cards : (myHand.length > 0 ? myHand : generateFreshHandForPlayer(meInState?.id || user?.id || 'player'));
+
+                                        if (cardsToDisplay.length === 0) {
+                                            return (
+                                                <div className="py-8 flex flex-col items-center justify-center gap-4">
+                                                    <div className="w-10 h-10 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
+                                                    <p className="text-purple-400 font-mono text-xs uppercase tracking-[0.3em] font-black">DISPENSING TACTICAL ASSETS...</p>
+                                                </div>
+                                            );
+                                        }
+
+                                        return (
+                                            <AnimatePresence>
+                                                {cardsToDisplay.map((card: any, idx: number) => (
+                                                    <motion.div
+                                                        key={card.id}
+                                                        initial={{
+                                                            opacity: 0,
+                                                            scale: 0.2,
+                                                            rotateX: 90,
+                                                            rotateY: 90,
+                                                            y: 100,
+                                                            z: -500
+                                                        }}
+                                                        animate={{
+                                                            opacity: 1,
+                                                            scale: 1,
+                                                            rotateX: 0,
+                                                            rotateY: 0,
+                                                            y: 0,
+                                                            z: 0
+                                                        }}
+                                                        whileHover={{
+                                                            scale: 1.1,
+                                                            rotateY: 15,
+                                                            rotateX: 5,
+                                                            z: 50,
+                                                            transition: { duration: 0.3 }
+                                                        }}
+                                                        transition={{
+                                                            delay: idx * 0.15,
+                                                            type: "spring",
+                                                            stiffness: 80,
+                                                            damping: 15
+                                                        }}
+                                                        className="perspective-1000 mb-6"
+                                                    >
+                                                        <div className="absolute -inset-2 bg-purple-500/10 blur-xl opacity-0 hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                                                        <CardVisual card={card} />
+                                                    </motion.div>
+                                                ))}
+                                            </AnimatePresence>
+                                        );
+                                    })()}
                                 </div>
 
                                 {myHand.length === 5 && (
@@ -2358,7 +2277,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                         <div className="mb-6 w-full max-w-5xl">
                             {/* SLOT DISPLAY (MY ARRAY) */}
                             <div className="flex justify-center gap-3 sm:gap-6">
-                                {(gameState?.phase === 'picking' && hasPicked) ? null : (
+                                {gameState?.phase === 'picking' ? null : (
 
                                     mySlots.map((slot, i) =>
                                         <motion.div
@@ -2367,7 +2286,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             initial={false}
                                             animate={{ opacity: 1, scale: 1 }}
                                             className={`
-                                            relative w-16 h-24 sm:w-24 sm:h-32 rounded-xl border-2 flex items-center justify-center transition-all duration-300
+                                            relative w-[52px] h-[78px] xs:w-16 xs:h-24 sm:w-24 sm:h-36 rounded-xl border-2 flex items-center justify-center transition-all duration-300 shrink-0
                                             ${slot
                                                     ? 'border-purple-500 bg-purple-900/20 shadow-[0_0_20px_rgba(168,85,247,0.2)]'
                                                     : 'border-white/10 bg-white/5 hover:border-white/20'
@@ -2393,9 +2312,6 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                     <span className="text-[7px] font-black uppercase tracking-widest text-purple-500">Signal...</span>
                                                 </div>
                                             )}
-                                            <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] text-white/10 font-mono tracking-tighter">
-                                                PKT-0{i + 1}
-                                            </div>
                                         </motion.div>
                                     )
                                 )}
@@ -2430,21 +2346,26 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                         <div className="flex items-center gap-4 mb-6">
                                                             <div className="w-2 h-2 bg-purple-500 rounded-full shadow-[0_0_10px_#a855f7]" />
                                                             <h4 className="font-display text-purple-400 text-[10px] uppercase tracking-[0.4em] font-black">
-                                                                {playerIdMap[opp.playerId] || opp.username || "AGENT"} :: Neutralized
+                                                                {opp.username || playerIdMap[opp.playerId] || "AGENT"} :: Neutralized
                                                             </h4>
                                                         </div>
                                                         <div className="flex flex-wrap justify-center gap-4">
-                                                            {/* USER REQUEST: Show all slotted cards (filled slots) */}
-                                                            {displaySlots.filter((s: any) => s !== null).map((card: any) => {
+                                                            {/* USER REQUEST: Show non-special slotted cards (special cards cannot be picked) */}
+                                                            {displaySlots.filter((s: any) => s !== null && s.type !== 'special' && !s.specialType).map((card: any) => {
                                                                 const isSelected = selectedSteal?.card.id === card.id;
                                                                 return (
                                                                     <motion.div
                                                                         key={card.id}
-                                                                        whileHover={{ y: -10, scale: 1.05 }}
-                                                                        className={`cursor-pointer relative group/card rounded-xl p-1 transition-all ${isSelected ? 'bg-purple-500/20 ring-2 ring-purple-500 shadow-[0_0_20px_#a855f7]' : ''}`}
-                                                                        onClick={() => handleStealCard(opp.playerId, card)}
+                                                                        drag={!hasPicked}
+                                                                        dragSnapToOrigin
+                                                                        dragElastic={0.2}
+                                                                        whileDrag={{ scale: 1.15, zIndex: 100, boxShadow: "0 20px 40px rgba(168,85,247,0.5)" }}
+                                                                        whileHover={!hasPicked ? { y: -10, scale: 1.05 } : {}}
+                                                                        onDragEnd={(e, info) => handlePickingDragEnd(e, info, opp.playerId, card)}
+                                                                        className={`relative group/card rounded-xl p-1 transition-all ${!hasPicked ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isSelected && !hasPicked ? 'bg-purple-500/20 ring-2 ring-purple-500 shadow-[0_0_20px_#a855f7]' : ''}`}
+                                                                        onClick={() => !hasPicked && handleStealCard(opp.playerId, card)}
                                                                     >
-                                                                        {isSelected && (
+                                                                        {isSelected && !hasPicked && (
                                                                             <button
                                                                                 onClick={(e) => { e.stopPropagation(); setSelectedSteal(null); }}
                                                                                 className="absolute -top-3 -right-3 w-8 h-8 bg-black border-2 border-purple-500 rounded-full flex items-center justify-center text-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.4)] hover:bg-purple-500 hover:text-white hover:scale-110 transition-all z-[60] animate-in zoom-in spin-in"
@@ -2452,10 +2373,10 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                                                                 <X size={14} strokeWidth={3} />
                                                                             </button>
                                                                         )}
-                                                                        <div className="scale-75 sm:scale-90">
+                                                                        <div>
                                                                             <CardVisual card={card} size="small" />
                                                                         </div>
-                                                                        {!isSelected && (
+                                                                        {!isSelected && !hasPicked && (
                                                                             <div className="absolute inset-x-0 -bottom-6 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-all">
                                                                                 <div className="bg-purple-500 text-black px-4 py-1.5 rounded-full font-display font-black text-[8px] uppercase tracking-widest">
                                                                                     Select
@@ -2545,24 +2466,22 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 {/* HAND AREA - Gated to relevant phases */}
                 {
                     ['slotting', 'evaluation', 'scoring'].includes(gameState?.phase || '') && gameState?.phase !== 'idle' && (
-                        <div className="w-full -mt-4 flex flex-col items-center">
-                            {/* Label Section - Still constrained to 6xl for alignment */}
-                            <div className="w-full max-w-6xl px-4 flex items-center gap-6 mb-2">
-                                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                        <div className="w-full mt-3 flex flex-col items-center">
+                            {/* Label Section */}
+                            <div className="w-full max-w-6xl px-4 flex items-center justify-center gap-6 mb-2">
                                 <span className="text-[10px] font-display font-black text-white/20 uppercase tracking-[0.5em] flex items-center gap-3">
                                     <Swords size={14} className="text-purple-500/50" />
                                     Tactical Assets Available :: {myHand.filter(c => !mySlots.some(s => s?.id === c.id)).length}
                                 </span>
-                                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                             </div>
 
-                            {/* Cards Row - Robust Centering + Scroll */}
+                            {/* Cards Container - Vertical Wrapped Rows on Mobile, Centered Flex on Desktop */}
                             <div
                                 ref={handScrollerRef}
-                                className="w-full max-w-full overflow-x-auto custom-scrollbar touch-pan-x pb-4 pt-12 mt-4 scroll-smooth block relative z-[30] border-y border-white/5 bg-black/5 pointer-events-auto"
-                                style={{ WebkitOverflowScrolling: 'touch', minHeight: '180px' }}
+                                className="w-full max-w-6xl mx-auto overflow-y-auto max-h-[45vh] sm:max-h-none sm:overflow-x-auto custom-scrollbar pb-6 pt-2 mt-1 relative z-[30] bg-black/5 pointer-events-auto px-2 sm:px-12"
+                                style={{ WebkitOverflowScrolling: 'touch' }}
                             >
-                                <div className="flex flex-nowrap justify-center sm:justify-center items-end gap-6 sm:gap-10 px-12 py-6 min-w-full w-fit mx-auto h-full">
+                                <div className="flex flex-wrap justify-center items-center gap-2.5 sm:gap-4 lg:gap-5 px-1 sm:px-4 py-2 w-full max-w-full sm:w-fit mx-auto">
                                     <AnimatePresence mode="popLayout">
                                         {myHand.map(card => {
                                             const isSlotted = mySlots.some(s => s?.id === card.id);
@@ -2571,7 +2490,6 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                             return (
                                                 <motion.div
                                                     key={card.id}
-                                                    layoutId={card.id}
                                                     drag={!isLocked && gameState?.phase === 'slotting'}
                                                     dragSnapToOrigin
                                                     dragListener={!isLocked}
@@ -2612,7 +2530,7 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                                 <button
                                     onClick={handleConfirmSlots}
                                     disabled={isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots)}
-                                    className={`group relative px-16 py-5 font-black uppercase tracking-[0.2em] text-sm overflow-hidden transition-all duration-500 ${isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots) ? 'bg-gray-800 cursor-not-allowed opacity-50' : 'bg-purple-600 hover:bg-purple-400 shadow-[0_0_30px_rgba(168,85,247,0.3)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] text-black'}`}
+                                    className={`group relative px-6 py-3 sm:px-16 sm:py-5 font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] text-xs sm:text-sm overflow-hidden transition-all duration-500 ${isLocked || (mySlots.filter(s => s !== null).length === 5 && powerUsage.hasUsedFiveSlots) ? 'bg-gray-800 cursor-not-allowed opacity-50' : 'bg-purple-600 hover:bg-purple-400 shadow-[0_0_30px_rgba(168,85,247,0.3)] hover:shadow-[0_0_50px_rgba(168,85,247,0.6)] text-black'}`}
                                     style={{ clipPath: 'polygon(10% 0, 100% 0, 90% 100%, 0% 100%)' }}
                                 >
                                     {/* Scanner Sweep Effect */}
@@ -2652,8 +2570,60 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                 )
             }
 
+            {/* HIGH-TECH ALERT MODAL CARD */}
+            <AnimatePresence>
+                {alertModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[5000] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-4 sm:p-6"
+                        onClick={() => setAlertModal(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.85, y: 30, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            exit={{ scale: 0.85, y: 30, opacity: 0 }}
+                            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                            className="max-w-[92vw] sm:max-w-md w-full bg-zinc-950 border border-purple-500/40 p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] shadow-[0_0_60px_rgba(168,85,247,0.3)] text-center relative overflow-hidden space-y-4 sm:space-y-6 max-h-[85vh] flex flex-col justify-between"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Background ambient glow */}
+                            <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                            {/* Top Diamond Icon */}
+                            <div className="relative inline-block shrink-0">
+                                <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full animate-pulse" />
+                                <div className="w-10 h-10 sm:w-14 sm:h-14 bg-purple-950/60 border border-purple-500/40 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                                    <Gem size={22} className="text-purple-400 sm:w-7 sm:h-7" />
+                                </div>
+                            </div>
+
+                            {/* Title & Message */}
+                            <div className="space-y-2 sm:space-y-3 overflow-y-auto custom-scrollbar px-1 max-h-[50vh]">
+                                <h2 className="text-xs sm:text-base font-black font-cinzel text-white uppercase tracking-[0.2em] sm:tracking-[0.25em] drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
+                                    {alertModal.title}
+                                </h2>
+                                <div className="h-px w-16 bg-gradient-to-r from-transparent via-purple-500/40 to-transparent mx-auto" />
+                                <p className="text-gray-300 font-mono text-[11px] sm:text-xs leading-relaxed uppercase tracking-wider whitespace-pre-line pt-1">
+                                    {alertModal.message}
+                                </p>
+                            </div>
+
+                            {/* Confirm Button */}
+                            <button
+                                onClick={() => setAlertModal(null)}
+                                className="w-full py-3 sm:py-4 bg-gradient-to-r from-purple-900/40 via-purple-700/40 to-purple-900/40 hover:from-purple-600 hover:to-purple-500 border border-purple-500/50 text-purple-200 hover:text-black font-mono font-black uppercase tracking-[0.2em] sm:tracking-[0.25em] rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg active:scale-95 text-[10px] sm:text-xs shrink-0"
+                            >
+                                + ACKNOWLEDGE
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* HOLOGRAPHIC TOAST SYSTEM */}
-            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-3 pointer-events-none">
+            <div className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2.5 pointer-events-none w-[92vw] max-w-sm sm:max-w-lg px-2 items-center">
                 <AnimatePresence>
                     {protocolToasts.map(toast => (
                         <motion.div
@@ -2661,16 +2631,16 @@ export const DiamondsGame: React.FC<{ user: any; onClose?: () => void }> = ({ us
                             initial={{ opacity: 0, y: 20, scale: 0.9, filter: 'blur(10px)' }}
                             animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                             exit={{ opacity: 0, scale: 0.8, filter: 'blur(10px)' }}
-                            className={`px-12 py-5 rounded-none border backdrop-blur-3xl flex items-center gap-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] ${toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-100' :
-                                toast.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-300' :
-                                    'bg-purple-500/10 border-purple-500/50 text-purple-300'
+                            className={`w-full px-4 sm:px-6 py-2.5 sm:py-3.5 rounded-xl border backdrop-blur-3xl flex items-center gap-3 sm:gap-4 shadow-[0_0_30px_rgba(0,0,0,0.95)] bg-zinc-950 ${toast.type === 'error' ? 'border-red-500 text-red-100' :
+                                toast.type === 'success' ? 'border-emerald-500/80 text-emerald-300' :
+                                    'border-purple-500/80 text-purple-300'
                                 }`}
-                            style={{ clipPath: 'polygon(5% 0, 100% 0, 95% 100%, 0% 100%)' }}
+                            style={{ clipPath: 'polygon(3% 0, 100% 0, 97% 100%, 0% 100%)' }}
                         >
-                            <div className={`w-1.5 h-8 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse shadow-[0_0_15px_currentColor]`} />
-                            <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-mono opacity-50 uppercase tracking-[0.4em]">Protocol Notification</span>
-                                <span className="text-base lg:text-xl font-black uppercase tracking-[0.1em] font-mono whitespace-nowrap">
+                            <div className={`w-1.5 h-6 sm:h-8 shrink-0 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse shadow-[0_0_15px_currentColor]`} />
+                            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                <span className="text-[7px] sm:text-[8px] font-mono opacity-50 uppercase tracking-[0.3em]">Protocol Notification</span>
+                                <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider font-mono leading-tight break-words text-left">
                                     {toast.message}
                                 </span>
                             </div>
@@ -2707,15 +2677,15 @@ const BriefingCard: React.FC<{ title: string; desc: string; delay: number; id?: 
             animate={{ scale: 1, opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay }}
             whileHover={{ y: -5, scale: 1.01 }}
-            className="w-48 xl:w-56 group relative"
+            className="w-full sm:w-48 xl:w-56 group relative"
         >
-            <div className={`relative p-6 border ${colorClasses[color as keyof typeof colorClasses]} bg-black/90 backdrop-blur-xl group-hover:bg-black/80 transition-all flex flex-col items-center justify-center min-h-[320px] shadow-2xl rounded-none`}
+            <div className={`relative p-4 sm:p-6 border ${colorClasses[color as keyof typeof colorClasses]} bg-black/90 backdrop-blur-xl group-hover:bg-black/80 transition-all flex flex-col items-center justify-center min-h-[220px] sm:min-h-[320px] shadow-2xl rounded-xl sm:rounded-none`}
             >
                 {/* Visual tech line across top */}
                 <div className={`absolute top-0 left-0 right-0 h-[1px] bg-${mainColor}-500/30 opacity-20 group-hover:opacity-100 transition-opacity`} />
 
                 {/* ID Label */}
-                <div className="absolute top-4 left-6 right-6 flex items-center justify-between opacity-40 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-3 left-4 right-4 sm:top-4 sm:left-6 sm:right-6 flex items-center justify-between opacity-40 group-hover:opacity-100 transition-opacity">
                     <span className="text-[6px] font-black uppercase tracking-[0.2em] font-mono text-white">X-RAY STREAM</span>
                     <span className="text-[7px] font-mono text-white tracking-widest leading-none">
                         {id || Math.random().toString(16).substring(2, 8).toUpperCase()}
@@ -2723,29 +2693,29 @@ const BriefingCard: React.FC<{ title: string; desc: string; delay: number; id?: 
                 </div>
 
                 {/* Central Iconography */}
-                <div className="relative mb-8 group-hover:scale-110 transition-transform duration-500">
+                <div className="relative mb-3 sm:mb-8 mt-3 sm:mt-0 group-hover:scale-110 transition-transform duration-500">
                     <div className={`absolute inset-0 bg-${mainColor}-500/10 blur-xl rounded-full scale-125`} />
-                    <div className={`relative p-4 border border-white/5 bg-gradient-to-br ${colorClasses[color as keyof typeof colorClasses]} rounded-xl`}>
-                        {color === 'purple' && <Biohazard size={24} className="text-purple-400" />}
-                        {color === 'red' && <Biohazard size={24} className="text-red-400" />}
-                        {color === 'green' && <Syringe size={24} className="text-emerald-400" />}
-                        {color === 'orange' && <Skull size={24} className="text-orange-400" />}
-                        {color === 'cyan' && <Shield size={24} className="text-purple-400" />}
+                    <div className={`relative p-2.5 sm:p-4 border border-white/5 bg-gradient-to-br ${colorClasses[color as keyof typeof colorClasses]} rounded-xl`}>
+                        {color === 'purple' && <Biohazard size={20} className="text-purple-400 sm:w-6 sm:h-6" />}
+                        {color === 'red' && <Biohazard size={20} className="text-red-400 sm:w-6 sm:h-6" />}
+                        {color === 'green' && <Syringe size={20} className="text-emerald-400 sm:w-6 sm:h-6" />}
+                        {color === 'orange' && <Skull size={20} className="text-orange-400 sm:w-6 sm:h-6" />}
+                        {color === 'cyan' && <Shield size={20} className="text-purple-400 sm:w-6 sm:h-6" />}
                     </div>
                 </div>
 
-                <h4 className={`font-cinzel text-base uppercase tracking-[0.2em] mb-4 text-white text-center leading-none`}>
+                <h4 className={`font-cinzel text-xs sm:text-sm uppercase tracking-[0.15em] mb-1.5 sm:mb-2.5 text-white text-center leading-none`}>
                     {title}
                 </h4>
 
-                <div className={`h-[1px] w-8 bg-${mainColor}-500/40 mb-5 rounded-full`} />
+                <div className={`h-[1px] w-6 bg-${mainColor}-500/40 mb-2 sm:mb-3.5 rounded-full`} />
 
-                <p className="text-[11px] font-cinzel text-gray-400 group-hover:text-white/80 leading-relaxed font-bold uppercase tracking-[0.05em] text-center px-1">
+                <p className="text-[9px] sm:text-[10px] font-cinzel text-gray-400 group-hover:text-white/80 leading-relaxed font-semibold uppercase tracking-[0.04em] text-center px-1">
                     {desc}
                 </p>
 
                 {/* Technical lines at bottom */}
-                <div className="absolute bottom-4 left-6 right-6 flex items-center gap-1 opacity-20 group-hover:opacity-100 transition-opacity">
+                <div className="absolute bottom-3 left-4 right-4 sm:bottom-4 sm:left-6 sm:right-6 flex items-center gap-1 opacity-20 group-hover:opacity-100 transition-opacity">
                     <div className={`flex-1 h-[1px] bg-${mainColor}-500/30`} />
                     <div className={`w-1 h-1 rounded-full bg-${mainColor}-400`} />
                     <div className={`w-1 h-1 rounded-full bg-${mainColor}-400/50`} />

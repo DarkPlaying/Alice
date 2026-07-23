@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3, MessageSquare } from 'lucide-react';
+import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3, MessageSquare, ArrowUpDown } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
@@ -52,6 +52,7 @@ import { VisaManagement } from './admin/VisaManagement';
 import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { SpadesGameMaster } from './games/SpadesGameMaster';
 import { ClubsGameMaster } from './games/ClubsGameMaster';
+import { DiamondsGameMaster } from './games/DiamondsGameMaster';
 import { GameSettingsModal } from './admin/GameSettingsModal';
 import { HeartsGameSettingsModal } from './admin/HeartsGameSettingsModal';
 import { generateGameId } from '../utils/gameId';
@@ -608,6 +609,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [showStartModal, setShowStartModal] = useState(false);
     const [selectedSuitForModal, setSelectedSuitForModal] = useState<string | null>(null);
     const [waitingPlayers, setWaitingPlayers] = useState<any[]>([]);
+    const [waitingListSort, setWaitingListSort] = useState<{ field: 'name' | 'visa' | 'id' | null; direction: 'asc' | 'desc' }>({ field: null, direction: 'asc' });
+    const [waitingListFilter, setWaitingListFilter] = useState('');
     const [bannedPlayers, setBannedPlayers] = useState<any[]>([]);
     const bannedPlayersRef = useRef<any[]>([]);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -974,25 +977,28 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 });
                 if (response.ok) {
                     const data = await response.json();
-                    if (data && Object.keys(data).length > 0) {
-                        setDiamondsGameStatus((prev: any) => {
-                            if (data.phase_started_at && prev.phase_started_at) {
-                                let newDStr = data.phase_started_at.replace(' ', 'T');
-                                if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
+                    if (data) {
+                        const rawState = Array.isArray(data) ? data[0] : data;
+                        if (rawState && Object.keys(rawState).length > 0) {
+                            setDiamondsGameStatus((prev: any) => {
+                                if (rawState.phase_started_at && prev.phase_started_at) {
+                                    let newDStr = rawState.phase_started_at.replace(' ', 'T');
+                                    if (newDStr.match(/[+-]\d{2}$/)) newDStr += ':00';
 
-                                if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
+                                    if (!newDStr.endsWith('Z') && !newDStr.match(/[+-]\d{2}:?\d{2}$/)) newDStr += 'Z';
 
-                                let oldDStr = prev.phase_started_at.replace(' ', 'T');
-                                if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
+                                    let oldDStr = prev.phase_started_at.replace(' ', 'T');
+                                    if (oldDStr.match(/[+-]\d{2}$/)) oldDStr += ':00';
 
-                                if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
+                                    if (!oldDStr.endsWith('Z') && !oldDStr.match(/[+-]\d{2}:?\d{2}$/)) oldDStr += 'Z';
 
-                                if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
-                                    return prev;
+                                    if (new Date(newDStr).getTime() < new Date(oldDStr).getTime()) {
+                                        return prev;
+                                    }
                                 }
-                            }
-                            return data;
-                        });
+                                return rawState;
+                            });
+                        }
                     }
                 }
             } catch (err) {
@@ -2130,8 +2136,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
                                 <span className="flex items-center gap-2">
                                     <span className="text-xl font-bold text-purple-500">♦</span>
-                                    <span className={diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'text-yellow-400' : 'text-purple-500') : 'text-purple-500'}>
-                                        {diamondsGameStatus.is_active ? (diamondsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    <span className={diamondsGameStatus.system_start ? (diamondsGameStatus.is_paused ? 'text-yellow-400' : 'text-purple-500') : 'text-purple-500'}>
+                                        {diamondsGameStatus.system_start ? (diamondsGameStatus.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
                                     </span>
                                 </span>
                                 <span className="text-gray-600">|</span>
@@ -2271,7 +2277,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 type: 'Intellect',
                                                 active: !!diamondsGameStatus?.system_start,
                                                 players: getGamePlayerCount('diamonds'),
-                                                gameState: diamondsGameStatus?.is_active ? (diamondsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                gameState: diamondsGameStatus?.system_start ? (diamondsGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
                                                 currentPhase: (diamondsGameStatus?.phase || 'IDLE').toUpperCase(),
                                                 round: diamondsGameStatus?.current_round || 0,
                                                 totalRounds: 5,
@@ -2891,7 +2897,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         <div className="text-left">
                                                             <p className="text-[9px] text-purple-300/60 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
                                                             <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none" style={{ color: diamondsGameStatus?.system_start ? (diamondsGameStatus?.is_paused ? '#eab308' : '#a855f7') : '#a855f7' }}>
-                                                                {diamondsGameStatus.is_active ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
+                                                                {diamondsGameStatus.system_start ? (diamondsGameStatus.phase || 'SYNCED') : 'IDLE'}
                                                             </div>
                                                         </div>
                                                         <div className="text-right">
@@ -2903,7 +2909,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     </div>
 
                                                     <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
-                                                        <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_#a855f7]" style={{ width: diamondsGameStatus.is_active ? '100%' : '0%' }} />
+                                                        <div className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_#a855f7]" style={{ width: diamondsGameStatus.system_start ? '100%' : '0%' }} />
                                                     </div>
                                                 </div>
 
@@ -2925,23 +2931,41 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         </button>
                                                         <button
                                                             onClick={async () => {
-                                                                const { data, error: fetchError } = await supabase.from('diamonds_game_state').select('is_paused, phase_started_at, phase_duration_sec').eq('id', 'diamonds_king').single();
-                                                                if (fetchError) { showToast(`SYNC ERROR: ${fetchError.message}`, 'error'); return; }
-                                                                const currentPaused = data?.is_paused;
-                                                                const phaseStartedAt = data?.phase_started_at;
-                                                                const currentDuration = data?.phase_duration_sec || 0;
+                                                                const currentPaused = !!diamondsGameStatus?.is_paused;
+                                                                const phaseStartedAt = diamondsGameStatus?.phase_started_at;
+                                                                const currentDuration = diamondsGameStatus?.phase_duration_sec || 0;
                                                                 let updatePayload: any = {};
+                                                                const nowIso = new Date().toISOString();
+
                                                                 if (!currentPaused) {
                                                                     const now = new Date();
                                                                     const start = phaseStartedAt ? new Date(phaseStartedAt) : new Date();
                                                                     const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
-                                                                    updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed) };
+                                                                    updatePayload = { is_paused: true, phase_duration_sec: Math.max(0, currentDuration - elapsed), updated_at: nowIso };
                                                                 } else {
-                                                                    updatePayload = { is_paused: false, phase_started_at: new Date().toISOString() };
+                                                                    updatePayload = { is_paused: false, phase_started_at: nowIso, updated_at: nowIso };
                                                                 }
-                                                                const { error } = await supabase.from('diamonds_game_state').update(updatePayload).eq('id', 'diamonds_king');
-                                                                if (error) { showToast(`ERROR: ${error.message}`, 'error'); }
-                                                                else { showToast(!currentPaused ? "DIAMONDS HALTED." : "DIAMONDS RESUMED.", 'info'); }
+
+                                                                // Optimistic local UI update (Instant response < 1ms)
+                                                                setDiamondsGameStatus((prev: any) => ({ ...prev, ...updatePayload }));
+
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const res = await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.diamonds_king`, {
+                                                                        method: 'PATCH',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Prefer': 'return=minimal'
+                                                                        },
+                                                                        body: JSON.stringify(updatePayload)
+                                                                    });
+                                                                    if (!res.ok) console.warn("Pause PATCH error:", await res.text());
+                                                                } catch (e) {
+                                                                    console.error("Pause PATCH exception:", e);
+                                                                }
+                                                                showToast(!currentPaused ? "DIAMONDS HALTED." : "DIAMONDS RESUMED.", 'info');
                                                             }}
                                                             className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${diamondsGameStatus.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
                                                         >
@@ -2957,14 +2981,59 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             onClick={async () => {
                                                                 const confirmed = await showConfirm('RESET DIAMONDS PROTOCOL', 'This will wipe the current Diamonds game state. All in-game progress will be lost.');
                                                                 if (!confirmed) return;
-                                                                const { error: sbError } = await supabase.from('diamonds_game_state').upsert({
-                                                                    id: 'diamonds_king', system_start: false, is_paused: false, current_round: 0, phase: 'idle', participants: [], updated_at: new Date().toISOString()
-                                                                });
-                                                                if (sbError) { showToast("RESET FAILED: DATABASE REJECTION.", 'error'); return; }
+
+                                                                const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
+
+                                                                let newParticipants: any[] = [];
+                                                                if (diamondsGameStatus?.participants && diamondsGameStatus.participants.length > 0) {
+                                                                    newParticipants = diamondsGameStatus.participants.map((p: any) => ({
+                                                                        ...p,
+                                                                        status: 'active',
+                                                                        isZombie: false,
+                                                                        groupId: null,
+                                                                        roundAdjustment: 0,
+                                                                        score: keepPoints ? (p.score || 0) : 0
+                                                                    }));
+                                                                }
+
+                                                                const nowIso = new Date().toISOString();
+                                                                const resetPayload: any = {
+                                                                    id: 'diamonds_king',
+                                                                    system_start: false,
+                                                                    is_paused: false,
+                                                                    current_round: 0,
+                                                                    phase: 'idle',
+                                                                    phase_started_at: nowIso,
+                                                                    phase_duration_sec: 0,
+                                                                    participants: newParticipants,
+                                                                    round_data: {},
+                                                                    updated_at: nowIso
+                                                                };
+
+                                                                // Optimistic local UI update (Instant response < 1ms)
+                                                                setDiamondsGameStatus(resetPayload);
+
+                                                                try {
+                                                                    const accessToken = await getAccessToken();
+                                                                    const res = await fetch(`${supabaseUrl}/rest/v1/diamonds_game_state?id=eq.diamonds_king`, {
+                                                                        method: 'PATCH',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'Authorization': `Bearer ${accessToken}`,
+                                                                            'apikey': supabaseKey,
+                                                                            'Prefer': 'return=minimal'
+                                                                        },
+                                                                        body: JSON.stringify(resetPayload)
+                                                                    });
+                                                                    if (!res.ok) console.warn("Reset PATCH error:", await res.text());
+                                                                } catch (e) {
+                                                                    console.error("Reset PATCH exception:", e);
+                                                                }
+
                                                                 if (diamondsControlChannelRef.current) {
                                                                     await diamondsControlChannelRef.current.send({ type: 'broadcast', event: 'force_exit', payload: { reason: 'ADMIN_RESET', timestamp: Date.now() } });
+                                                                    showToast("DIAMONDS RESET (PLAYERS EJECTED).", 'success');
                                                                 }
-                                                                showToast("DIAMONDS RESET (PLAYERS EJECTED).", 'success');
                                                             }}
                                                             className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
                                                         >
@@ -2974,7 +3043,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
                                         )}
-
                                         {suit.id === 'hearts' && (
                                             <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
                                                 <div className="bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
@@ -3680,78 +3748,185 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         </button>
                                     </div>
 
+                                    {/* Search Filter Bar */}
+                                    <div className="px-3 sm:px-6 py-2.5 border-b border-white/10 bg-white/[0.02] flex items-center justify-between gap-3">
+                                        <div className="relative flex-1">
+                                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                                            <input
+                                                type="text"
+                                                value={waitingListFilter}
+                                                onChange={(e) => setWaitingListFilter(e.target.value)}
+                                                placeholder="Filter roster by player name, ID or visa days..."
+                                                className="w-full pl-9 pr-8 py-1.5 bg-black/60 border border-white/10 rounded-lg text-xs font-mono text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50"
+                                            />
+                                            {waitingListFilter && (
+                                                <button
+                                                    onClick={() => setWaitingListFilter('')}
+                                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs font-bold"
+                                                >
+                                                    ✕
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
                                     {/* List */}
                                     <div className="flex-1 overflow-y-auto p-0 admin-scrollbar">
                                         <table className="w-full text-left border-collapse">
                                             <thead className="bg-white/[0.02] sticky top-0 z-10 backdrop-blur-md">
                                                 <tr>
-                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">ID</th>
-                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Player Name</th>
+                                                    <th
+                                                        onClick={() => {
+                                                            setWaitingListSort(prev => ({
+                                                                field: 'id',
+                                                                direction: prev.field === 'id' && prev.direction === 'asc' ? 'desc' : 'asc'
+                                                            }));
+                                                        }}
+                                                        className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell cursor-pointer hover:text-white transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span>ID</span>
+                                                            <ArrowUpDown size={11} className={waitingListSort.field === 'id' ? 'text-purple-400' : 'opacity-40'} />
+                                                        </div>
+                                                    </th>
+                                                    <th
+                                                        onClick={() => {
+                                                            setWaitingListSort(prev => ({
+                                                                field: 'name',
+                                                                direction: prev.field === 'name' && prev.direction === 'asc' ? 'desc' : 'asc'
+                                                            }));
+                                                        }}
+                                                        className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-white/10 cursor-pointer hover:text-white transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span>PLAYER NAME</span>
+                                                            <ArrowUpDown size={11} className={waitingListSort.field === 'name' ? 'text-purple-400' : 'opacity-40'} />
+                                                            {waitingListSort.field === 'name' && (
+                                                                <span className="text-[7px] text-purple-400 font-mono">({waitingListSort.direction.toUpperCase()})</span>
+                                                            )}
+                                                        </div>
+                                                    </th>
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 hidden sm:table-cell">Status</th>
-                                                    <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10">Visa</th>
+                                                    <th
+                                                        onClick={() => {
+                                                            setWaitingListSort(prev => ({
+                                                                field: 'visa',
+                                                                direction: prev.field === 'visa' && prev.direction === 'desc' ? 'asc' : 'desc'
+                                                            }));
+                                                        }}
+                                                        className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-white/10 cursor-pointer hover:text-white transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span>VISA</span>
+                                                            <ArrowUpDown size={11} className={waitingListSort.field === 'visa' ? 'text-purple-400' : 'opacity-40'} />
+                                                            {waitingListSort.field === 'visa' && (
+                                                                <span className="text-[7px] text-purple-400 font-mono">({waitingListSort.direction === 'desc' ? 'HIGH-LOW' : 'LOW-HIGH'})</span>
+                                                            )}
+                                                        </div>
+                                                    </th>
                                                     <th className="p-2 sm:p-4 text-[8px] sm:text-[9px] lg:text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/10 text-right">Action</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-white/5">
-                                                {waitingPlayers.length > 0 ? (
-                                                    waitingPlayers
-                                                        .filter(player => {
-                                                            const modalSuit = (selectedSuitForModal || '').toLowerCase();
-                                                            const pType = (player.game_type || '').toLowerCase();
+                                                {(() => {
+                                                    let filtered = waitingPlayers.filter(player => {
+                                                        const modalSuit = (selectedSuitForModal || '').toLowerCase();
+                                                        const pType = (player.game_type || '').toLowerCase();
 
-                                                            if (!modalSuit) return true;
+                                                        if (modalSuit && pType && pType !== modalSuit) return false;
+                                                        if (modalSuit && !pType && modalSuit !== 'clubs') return false;
 
-                                                            // Legacy fallback
-                                                            if (!pType) return modalSuit === 'clubs';
-
-                                                            return pType === modalSuit;
-                                                        })
-                                                        .map((player, idx) => {
+                                                        if (waitingListFilter.trim()) {
+                                                            const q = waitingListFilter.toLowerCase().trim();
                                                             const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
-                                                            return (
-                                                                <tr key={getPlayerElementKey(player, idx, 'waiting')} className="hover:bg-white/[0.02] transition-colors">
-                                                                    <td className={`p-2 sm:p-4 font-mono text-xs font-bold hidden sm:table-cell ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
-                                                                        {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
-                                                                    </td>
-                                                                    <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
-                                                                        {player.username}
-                                                                    </td>
-                                                                    <td className="p-2 sm:p-4 hidden sm:table-cell">
-                                                                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider ${selectedSuitForModal === 'hearts' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                                                            selectedSuitForModal === 'spades' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
-                                                                                selectedSuitForModal === 'diamonds' ? 'bg-purple-400/10 text-purple-400 border-purple-400/20' :
-                                                                                    'bg-green-500/10 text-green-500 border-green-500/20'
-                                                                            }`}>
-                                                                            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${selectedSuitForModal === 'hearts' ? 'bg-red-500' :
-                                                                                selectedSuitForModal === 'spades' ? 'bg-blue-500' :
-                                                                                    selectedSuitForModal === 'diamonds' ? 'bg-purple-400' :
-                                                                                        'bg-green-500'
-                                                                                }`} />
-                                                                            READY
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="p-2 sm:p-4 font-mono text-[10px] sm:text-xs text-gray-500">
-                                                                        {dbUser?.visa_points ?? '???'} Days
-                                                                    </td>
-                                                                    <td className="p-4 text-right">
-                                                                        <button
-                                                                            onClick={() => handleKickPlayer(player.user_id, player.username)}
-                                                                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
-                                                                            title="Remove from Queue"
-                                                                        >
-                                                                            <Trash2 size={14} />
-                                                                        </button>
-                                                                    </td>
-                                                                </tr>
-                                                            );
-                                                        })
-                                                ) : (
-                                                    <tr>
-                                                        <td colSpan={4} className="p-8 text-center text-gray-500 font-mono text-xs uppercase tracking-widest">
-                                                            Running Scan... No Active Players Detected.
-                                                        </td>
-                                                    </tr>
-                                                )}
+                                                            const visa = String(dbUser?.visa_points ?? dbUser?.visaDays ?? '');
+                                                            const name = String(player.username || '').toLowerCase();
+                                                            const pid = String(clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || '').toLowerCase();
+                                                            return name.includes(q) || visa.includes(q) || pid.includes(q);
+                                                        }
+
+                                                        return true;
+                                                    });
+
+                                                    if (waitingListSort.field) {
+                                                        filtered = [...filtered].sort((a, b) => {
+                                                            const dbUserA = players.find(p => p.username === a.username || p.id === a.user_id);
+                                                            const dbUserB = players.find(p => p.username === b.username || p.id === b.user_id);
+
+                                                            if (waitingListSort.field === 'name') {
+                                                                const nameA = (a.username || '').toLowerCase();
+                                                                const nameB = (b.username || '').toLowerCase();
+                                                                const cmp = nameA.localeCompare(nameB);
+                                                                return waitingListSort.direction === 'asc' ? cmp : -cmp;
+                                                            }
+
+                                                            if (waitingListSort.field === 'visa') {
+                                                                const visaA = Number(dbUserA?.visa_points ?? dbUserA?.visaDays ?? 0);
+                                                                const visaB = Number(dbUserB?.visa_points ?? dbUserB?.visaDays ?? 0);
+                                                                return waitingListSort.direction === 'asc' ? visaA - visaB : visaB - visaA;
+                                                            }
+
+                                                            if (waitingListSort.field === 'id') {
+                                                                const idA = clubsIDMap[a.username] || a.user_id || '';
+                                                                const idB = clubsIDMap[b.username] || b.user_id || '';
+                                                                const cmp = idA.localeCompare(idB);
+                                                                return waitingListSort.direction === 'asc' ? cmp : -cmp;
+                                                            }
+
+                                                            return 0;
+                                                        });
+                                                    }
+
+                                                    if (filtered.length === 0) {
+                                                        return (
+                                                            <tr>
+                                                                <td colSpan={5} className="p-8 text-center text-gray-500 font-mono text-xs uppercase tracking-widest">
+                                                                    {waitingListFilter.trim() ? `No matching candidates found for "${waitingListFilter}".` : 'Running Scan... No Active Players Detected.'}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    }
+
+                                                    return filtered.map((player, idx) => {
+                                                        const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
+                                                        return (
+                                                            <tr key={getPlayerElementKey(player, idx, 'waiting')} className="hover:bg-white/[0.02] transition-colors">
+                                                                <td className={`p-2 sm:p-4 font-mono text-xs font-bold hidden sm:table-cell ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
+                                                                    {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
+                                                                </td>
+                                                                <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
+                                                                    {player.username}
+                                                                </td>
+                                                                <td className="p-2 sm:p-4 hidden sm:table-cell">
+                                                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider ${selectedSuitForModal === 'hearts' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                                                                        selectedSuitForModal === 'spades' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
+                                                                            selectedSuitForModal === 'diamonds' ? 'bg-purple-400/10 text-purple-400 border-purple-400/20' :
+                                                                                'bg-green-500/10 text-green-500 border-green-500/20'
+                                                                        }`}>
+                                                                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${selectedSuitForModal === 'hearts' ? 'bg-red-500' :
+                                                                            selectedSuitForModal === 'spades' ? 'bg-blue-500' :
+                                                                                selectedSuitForModal === 'diamonds' ? 'bg-purple-400' :
+                                                                                    'bg-green-500'
+                                                                            }`} />
+                                                                        READY
+                                                                    </span>
+                                                                </td>
+                                                                <td className="p-2 sm:p-4 font-mono text-[10px] sm:text-xs text-gray-500">
+                                                                    {dbUser?.visa_points ?? '???'} Days
+                                                                </td>
+                                                                <td className="p-4 text-right">
+                                                                    <button
+                                                                        onClick={() => handleKickPlayer(player.user_id, player.username)}
+                                                                        className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                                                                        title="Remove from Queue"
+                                                                    >
+                                                                        <Trash2 size={14} />
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    });
+                                                })()}
                                             </tbody>
                                         </table>
                                     </div>
@@ -3944,8 +4119,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             is_paused: false
                                                         };
 
-                                                        if (!isHearts) {
+                                                        if (!isHearts && suit !== 'diamonds') {
                                                             updateData.is_active = true;
+                                                        }
+                                                        if (!isHearts) {
                                                             updateData.allowed_players = allowedIds;
                                                         }
 
@@ -4124,11 +4301,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     console.warn("[GAME TRACKING] Failed to create session exception:", trackErr);
                                                                 }
                                                             } else if (suit === 'diamonds') {
-                                                                updateData.phase = 'idle';
+                                                                updateData.phase = 'briefing';
                                                                 updateData.current_round = 1;
                                                                 updateData.system_start = true;
                                                                 updateData.phase_started_at = now.toISOString();
-                                                                updateData.phase_duration_sec = 0;
+                                                                updateData.phase_duration_sec = 30;
                                                                 updateData.updated_at = now.toISOString();
                                                             }
                                                         }
@@ -4228,6 +4405,15 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 spadesGameStatus?.system_start && (
                     <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
                         <SpadesGameMaster isEngine={true} />
+                    </div>
+                )
+            }
+
+            {/* DIAMONDS HEADLESS ENGINE */}
+            {
+                diamondsGameStatus?.system_start && (
+                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
+                        <DiamondsGameMaster isEngine={true} />
                     </div>
                 )
             }

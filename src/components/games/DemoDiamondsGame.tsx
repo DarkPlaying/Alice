@@ -547,8 +547,13 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                                     {botSlots.filter(s => s !== null).map((card, idx) => (
                                         <motion.div
                                             key={idx}
+                                            drag
+                                            dragSnapToOrigin
+                                            dragElastic={0.2}
+                                            whileDrag={{ scale: 1.15, zIndex: 100, boxShadow: "0 20px 40px rgba(168,85,247,0.5)" }}
                                             whileHover={{ y: -5, scale: 1.05 }}
-                                            className={`cursor-pointer rounded-2xl p-1 transition-all ${selectedSteal?.id === card?.id ? 'ring-2 ring-purple-500 bg-purple-500/20' : ''}`}
+                                            onDragEnd={() => card && handleStealCard(card)}
+                                            className={`cursor-grab active:cursor-grabbing rounded-2xl p-1 transition-all ${selectedSteal?.id === card?.id ? 'ring-2 ring-purple-500 bg-purple-500/20' : ''}`}
                                             onClick={() => card && handleStealCard(card)}
                                         >
                                             {card && <CardVisual card={card} size="default" />}
@@ -662,13 +667,35 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                                     <p className="text-zinc-500 font-mono text-[10px] sm:text-xs uppercase tracking-[0.4em] mb-2 relative z-10">NET MERIT</p>
                                     <p className="text-5xl sm:text-7xl font-black font-oswald text-white relative z-10">{myScore}</p>
                                 </div>
-                                
+
                                 {/* Condition */}
-                                <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-4">
-                                    <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
                                         <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">CONDITION</span>
                                         <span className="text-sm sm:text-xs font-bold font-mono tracking-[0.2em] uppercase text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]">
                                             SURVIVED
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                        <span className="text-zinc-500 text-xs sm:text-[10px] font-mono tracking-widest uppercase">VICTORY REASON</span>
+                                        <span className="text-xs font-bold font-mono text-purple-300 uppercase tracking-wider text-right max-w-[200px]">
+                                            {(() => {
+                                                const hasMyZombie = mySlots.some(s => s?.specialType === 'zombie');
+                                                const hasMyShotgun = mySlots.some(s => s?.specialType === 'shotgun');
+                                                const hasMyInjection = mySlots.some(s => s?.specialType === 'injection');
+                                                const hasBotZombie = botSlots.some(s => s?.specialType === 'zombie');
+                                                const hasBotShotgun = botSlots.some(s => s?.specialType === 'shotgun');
+                                                const hasBotInjection = botSlots.some(s => s?.specialType === 'injection');
+
+                                                if (hasMyShotgun && hasBotZombie) return "Zombie Neutralized by Shotgun (+100 CR)";
+                                                if (hasMyInjection && hasBotZombie) return "Zombie Cured by Injection (+200 CR)";
+                                                if (hasMyZombie && hasBotShotgun) return "Zombie Destroyed by Shotgun";
+                                                if (hasMyZombie && hasBotInjection) return "Zombie Cured by Injection";
+                                                if ((hasMyZombie || hasBotZombie) && (hasMyShotgun || hasBotShotgun || hasMyInjection || hasBotInjection)) return "Special Array Collision (Zombie vs Anti-Special)";
+                                                if (hasMyZombie) return "Active Zombie Supremacy (+999 pt)";
+
+                                                return "Higher Array Points (+200 CR)";
+                                            })()}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
@@ -711,7 +738,7 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
             </main>
 
             {/* Holographic Toast UI */}
-            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-3 pointer-events-none">
+            <div className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2.5 pointer-events-none w-[92vw] max-w-sm sm:max-w-lg px-2 items-center">
                 <AnimatePresence>
                     {protocolToasts.map(toast => (
                         <motion.div
@@ -719,16 +746,16 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
                             initial={{ opacity: 0, y: 20, scale: 0.9, filter: 'blur(10px)' }}
                             animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                             exit={{ opacity: 0, scale: 0.8, filter: 'blur(10px)' }}
-                            className={`px-12 py-5 rounded-none border backdrop-blur-3xl flex items-center gap-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] ${toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-100' :
-                                toast.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-300' :
-                                    'bg-purple-500/10 border-purple-500/50 text-purple-300'
+                            className={`w-full px-4 sm:px-6 py-2.5 sm:py-3.5 rounded-xl border backdrop-blur-3xl flex items-center gap-3 sm:gap-4 shadow-[0_0_30px_rgba(0,0,0,0.95)] bg-zinc-950 ${toast.type === 'error' ? 'border-red-500 text-red-100' :
+                                toast.type === 'success' ? 'border-emerald-500/80 text-emerald-300' :
+                                    'border-purple-500/80 text-purple-300'
                                 }`}
-                            style={{ clipPath: 'polygon(5% 0, 100% 0, 95% 100%, 0% 100%)' }}
+                            style={{ clipPath: 'polygon(3% 0, 100% 0, 97% 100%, 0% 100%)' }}
                         >
-                            <div className={`w-1.5 h-8 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]`} />
-                            <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-mono opacity-50 uppercase tracking-[0.4em]">Protocol Notification</span>
-                                <span className="text-base lg:text-xl font-black uppercase tracking-[0.1em] font-mono whitespace-nowrap">
+                            <div className={`w-1.5 h-6 sm:h-8 shrink-0 ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-purple-500'} animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]`} />
+                            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                <span className="text-[7px] sm:text-[8px] font-mono opacity-50 uppercase tracking-[0.3em]">Protocol Notification</span>
+                                <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider font-mono leading-tight break-words text-left">
                                     {toast.message}
                                 </span>
                             </div>

@@ -59,6 +59,7 @@ export interface DiamondsPlayer {
     hasUsedRefresh?: boolean;
     hasUsedDetector?: boolean;
     roundAdjustment?: number;
+    roundBonus?: number;
 }
 
 export interface DiamondsGameState {
