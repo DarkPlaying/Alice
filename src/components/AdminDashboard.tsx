@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3, MessageSquare, ArrowUpDown } from 'lucide-react';
+import { Users, User, Activity, Shield, LogOut, Database, Clock, Spade, Club, Diamond, Heart, Grid, Radio, AlertTriangle, Upload, FileText, Download, Trash2, RotateCcw, CheckSquare, Square, Crown, Menu, X, ArrowLeft, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings, PieChart as PieChartIcon, BarChart3, MessageSquare, ArrowUpDown, RefreshCw } from 'lucide-react';
 import Papa from 'papaparse';
 
 import { createClient } from '@supabase/supabase-js';
@@ -10,7 +10,8 @@ import { supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
 import { PlayerCardModal } from './PlayerCardModal';
 import { MiniChart } from './ui/mini-chart';
 import { PieChart } from './ui/pie-chart';
-import { Line, LineChart, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
+import { Line, LineChart, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, PolarAngleAxis, PolarGrid, Radar, RadarChart } from 'recharts';
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from './ui/radar-chart';
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
@@ -48,11 +49,15 @@ const getAdminAuthClient = () => {
 
 import { PlayerCache } from '../lib/playerCache';
 import { VisaManagement } from './admin/VisaManagement';
+import { JokerMapGrid } from './games/joker/JokerMapGrid';
+import { generateRotatedMap, ensureTwentyFourSpecialCards, getEntryCell, getRotationFromMatrix, parseMapMatrix } from './games/joker/jokerMapData';
+import { getDefaultStartingInventory } from './games/joker/jokerInventoryConfig';
 
 import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { SpadesGameMaster } from './games/SpadesGameMaster';
 import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { DiamondsGameMaster } from './games/DiamondsGameMaster';
+import { JokerGameMaster } from './games/joker/JokerGameMaster';
 import { GameSettingsModal } from './admin/GameSettingsModal';
 import { HeartsGameSettingsModal } from './admin/HeartsGameSettingsModal';
 import { generateGameId } from '../utils/gameId';
@@ -116,26 +121,27 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     };
 
     // Game-specific default view modes
-    const getViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' => {
+    const getViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' | 'radar' => {
         switch (suitId) {
             case 'spades': return 'line';
             case 'clubs': return 'chat';
             case 'diamonds': return 'pie';
             case 'hearts': return 'bar';
-            default: return 'chat';
+            case 'joker': return 'radar';
+            default: return 'line';
         }
     };
 
     // Track view mode overrides per suit
-    const [viewModeOverrides, setViewModeOverrides] = useState<Record<string, 'chat' | 'bar' | 'pie' | 'line'>>({});
-    const setViewMode = (suitId: string, mode: 'chat' | 'bar' | 'pie' | 'line') => {
+    const [viewModeOverrides, setViewModeOverrides] = useState<Record<string, 'chat' | 'bar' | 'pie' | 'line' | 'radar'>>({});
+    const setViewMode = (suitId: string, mode: 'chat' | 'bar' | 'pie' | 'line' | 'radar') => {
         setViewModeOverrides(prev => ({ ...prev, [suitId]: mode }));
     };
-    const getEffectiveViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' => {
+    const getEffectiveViewMode = (suitId: string): 'chat' | 'bar' | 'pie' | 'line' | 'radar' => {
         return viewModeOverrides[suitId] || getViewMode(suitId);
     };
     const navigateToView = (view: typeof activeView) => {
-        if (['spades', 'clubs', 'diamonds', 'hearts'].includes(activeView)) {
+        if (['spades', 'clubs', 'diamonds', 'hearts', 'joker'].includes(activeView)) {
             setViewModeOverrides(prev => {
                 const next = { ...prev };
                 delete next[activeView];
@@ -162,6 +168,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [networkPing, setNetworkPing] = useState<number | null>(null);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [adminSettings, setAdminSettings] = useState<any>(null);
+    const [jokerDemoModeEnabled, setJokerDemoModeEnabled] = useState<boolean>(false);
     const [showAdminCard, setShowAdminCard] = useState(false);
     const [systemLogs, setSystemLogs] = useState<string[]>([
         `[${new Date(Date.now() - 90000).toLocaleTimeString()}] CRITICAL: Arena Hearts security handshake established`,
@@ -175,7 +182,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         `[${new Date(Date.now() - 10000).toLocaleTimeString()}] Admin session heartbeat: DETECTED`,
         `[${new Date().toLocaleTimeString()}] Ready for deployment. All systems NOMINAL.`
     ]);
-    const [activeView, setActiveView] = useState<'dashboard' | 'players' | 'masters' | 'spades' | 'clubs' | 'diamonds' | 'hearts'>('dashboard');
+    const [activeView, setActiveView] = useState<'dashboard' | 'players' | 'masters' | 'spades' | 'clubs' | 'diamonds' | 'hearts' | 'joker'>('dashboard');
     const [roundMonitorPage, setRoundMonitorPage] = useState<Record<string, number>>({});
     const [players, setPlayers] = useState<any[]>([]);
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -197,7 +204,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     } as const;
 
     const suitHexColor = (id: string) =>
-        id === 'clubs' ? '#22c55e' : id === 'spades' ? '#3b82f6' : id === 'diamonds' ? '#a855f7' : '#ef4444';
+        id === 'clubs' ? '#22c55e' : id === 'spades' ? '#3b82f6' : id === 'diamonds' ? '#a855f7' : id === 'joker' ? '#e2e8f0' : '#ef4444';
 
     const sectionRise = {
         initial: { opacity: 0, y: 20 },
@@ -362,18 +369,27 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     // Load admin settings and subscribe in real-time
     useEffect(() => {
         const fetchSettings = async () => {
-            const { data } = await supabase.from('profiles').select('*').eq('id', '00000000-0000-0000-0000-000000000000').maybeSingle();
-            if (data) {
-                setAdminSettings(data);
-            } else {
-                const { data: newRow } = await supabase.from('profiles').insert({
+            try {
+                const { data } = await supabase.from('profiles').select('*').eq('id', '00000000-0000-0000-0000-000000000000').maybeSingle();
+                if (data) {
+                    setAdminSettings(data);
+                } else {
+                    setAdminSettings({
+                        id: '00000000-0000-0000-0000-000000000000',
+                        username: 'sanjay',
+                        email: 'sanjay@borderland.app',
+                        role: 'admin',
+                        visa_points: 0
+                    });
+                }
+            } catch (err) {
+                setAdminSettings({
                     id: '00000000-0000-0000-0000-000000000000',
-                    username: 'admin_settings',
-                    email: 'admin_settings@borderland.app',
+                    username: 'sanjay',
+                    email: 'sanjay@borderland.app',
                     role: 'admin',
                     visa_points: 0
-                }).select().maybeSingle();
-                if (newRow) setAdminSettings(newRow);
+                });
             }
         };
         fetchSettings();
@@ -442,10 +458,12 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             // Update the admin_settings row so players can pick it up via postgres_changes
             const { error } = await supabase
                 .from('profiles')
-                .update({
-                    email: `broadcast:${msg}:${Date.now()}` // encode message in email field as trigger
-                })
-                .eq('id', '00000000-0000-0000-0000-000000000000');
+                .upsert({
+                    id: '00000000-0000-0000-0000-000000000000',
+                    email: `broadcast:${msg}:${Date.now()}`,
+                    username: 'system_broadcast',
+                    role: 'admin'
+                });
             if (error) throw error;
 
             // Also fire a Supabase Realtime broadcast for instant delivery
@@ -505,6 +523,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const suits = [
         { name: 'SPADES', type: 'Physical', id: 'spades', icon: Spade, color: 'text-blue-400', dotColor: 'bg-blue-400', status: 'Active', description: "Strength, endurance, and physical agility are tested." },
         { name: 'CLUBS', type: 'Team', id: 'clubs', icon: Club, color: 'text-green-400', dotColor: 'bg-green-400', status: 'Stable', description: "Cooperation and balancing individual vs group needs." },
+        { name: 'JOKER', type: 'Luck Based', id: 'joker', icon: Shield, color: 'text-slate-300', dotColor: 'bg-slate-300', status: 'Unknown', description: "The ultimate rotated maze protocol across 14 rounds." },
         { name: 'DIAMONDS', type: 'Intellect', id: 'diamonds', icon: Diamond, color: 'text-purple-400', dotColor: 'bg-purple-400', status: 'Analyzing', description: "Logic, mathematics, and strategy are essential." },
         { name: 'HEARTS', type: 'Psychological', id: 'hearts', icon: Heart, color: 'text-red-500', dotColor: 'bg-red-500', status: 'Critical', description: "Trust, betrayal, and emotional manipulation." },
     ];
@@ -524,6 +543,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     const [lastActionType, setLastActionType] = useState<'delete' | 'create'>('delete');
     const [showUndo, setShowUndo] = useState(false);
     const [isPurging, setIsPurging] = useState(false); // Visual effect state
+    const [waitingListPage, setWaitingListPage] = useState(1);
 
     // TOAST STATE
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -842,6 +862,122 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         return () => clearInterval(interval);
     }, [spadesGameStatus]);
+
+    const [showMapInspector, setShowMapInspector] = useState(false);
+    const [adminMapViewMode, setAdminMapViewMode] = useState<'old' | 'new'>('old');
+    const [jokerTimerDisplay, setJokerTimerDisplay] = useState('0:00');
+    const [jokerGameStatus, setJokerGameStatus] = useState<any>({
+        current_round: 1,
+        phase: 'idle',
+        is_paused: false,
+        system_start: false,
+        map_rotation: 0,
+        participants: []
+    });
+
+    // JOKER: Realtime State Sync
+    useEffect(() => {
+        const channel = supabase.channel('admin_joker_cx')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'joker_game_state', filter: 'id=eq.joker_main' }, (payload) => {
+                if (payload.new) setJokerGameStatus((prev: any) => ({ ...prev, ...payload.new }));
+            })
+            .subscribe();
+
+        const fetchJokerState = async () => {
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey
+                    },
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const row = Array.isArray(data) ? data[0] : data;
+                    if (row && row.id) setJokerGameStatus(row);
+                }
+            } catch (err) {
+                console.warn("[JOKER_ADMIN] Fetch state error:", err);
+            }
+        };
+
+        fetchJokerState();
+        const poll = setInterval(fetchJokerState, 2000);
+        return () => {
+            supabase.removeChannel(channel);
+            clearInterval(poll);
+        };
+    }, []);
+
+    // JOKER: Timer countdown effect
+    useEffect(() => {
+        if (!jokerGameStatus?.system_start || !jokerGameStatus?.phase_started_at || !jokerGameStatus?.phase_duration_sec) {
+            setJokerTimerDisplay('0:00');
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (jokerGameStatus.is_paused) return;
+
+            const now = new Date();
+            let dStr = jokerGameStatus.phase_started_at.replace(' ', 'T');
+            if (dStr.match(/[+-]\d{2}$/)) dStr += ':00';
+            if (!dStr.endsWith('Z') && !dStr.match(/[+-]\d{2}:?\d{2}$/)) dStr += 'Z';
+            const startedAt = new Date(dStr);
+            const elapsed = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+            const remaining = Math.max(0, jokerGameStatus.phase_duration_sec - elapsed);
+
+            const fmt = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
+            setJokerTimerDisplay(fmt);
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [jokerGameStatus]);
+
+    // Sync Joker (Global Realtime & Polling for Admin Dashboard & Map Inspector)
+    useEffect(() => {
+        const fetchJokerStatus = async () => {
+            try {
+                const accessToken = await getAccessToken();
+                const response = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main&select=*`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'apikey': supabaseKey
+                    },
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data) {
+                        const rawState = Array.isArray(data) ? data[0] : data;
+                        if (rawState && Object.keys(rawState).length > 0) {
+                            setJokerGameStatus(rawState);
+                        }
+                    }
+                }
+            } catch (err) {
+                // Ignore
+            }
+        };
+        fetchJokerStatus();
+
+        const channel = supabase.channel('admin_joker_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'joker_game_state', filter: 'id=eq.joker_main' }, (payload) => {
+                if (payload.new) {
+                    setJokerGameStatus((prev: any) => ({ ...prev, ...payload.new }));
+                }
+            })
+            .subscribe();
+
+        const interval = setInterval(fetchJokerStatus, 3000);
+
+        return () => {
+            supabase.removeChannel(channel);
+            clearInterval(interval);
+        };
+    }, []);
 
     // HEARTS: Local Countdown Timer Effect
     const [heartsTimerDisplay, setHeartsTimerDisplay] = useState('0:00');
@@ -1537,7 +1673,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         });
 
         if (safeIds.length === 0) {
-            alert("SYSTEM ALERT: CANNOT DELETE SYSTEM ARCHITECT OR NO TARGETS SELECTED.");
+            showToast("SYSTEM ALERT: CANNOT DELETE SYSTEM ARCHITECT OR NO TARGETS SELECTED.", 'error');
             return;
         }
 
@@ -1560,7 +1696,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
 
         } catch (error) {
             console.error("Deletion failed:", error);
-            alert("DELETION FAILED: SYSTEM ERROR");
+            showToast("DELETION FAILED: SYSTEM ERROR", 'error');
         }
     };
 
@@ -1574,13 +1710,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             } else {
                 const { error } = await supabase.from('profiles').delete().in('id', deletedBackup.map(u => u.id));
                 if (error) throw error;
-                alert("BATCH UPLOAD REVERTED. IDENTITIES PURGED.");
+                showToast("BATCH UPLOAD REVERTED. IDENTITIES PURGED.", 'info');
             }
             setShowUndo(false);
             setDeletedBackup([]);
         } catch (error) {
             console.error("Undo action failed:", error);
-            alert("UNDO FAILED: LINK BROKEN.");
+            showToast("UNDO FAILED: LINK BROKEN.", 'error');
         }
     };
 
@@ -1736,25 +1872,44 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
     };
 
 
+    // Helper to sanitize and deduplicate player profiles
+    const sanitizeProfiles = (raw: any[]) => {
+        if (!Array.isArray(raw)) return [];
+        const filtered = raw.filter((p: any) =>
+            p &&
+            p.username !== 'admin_settings' &&
+            p.email !== 'admin_settings@borderland.app' &&
+            p.id !== '00000000-0000-0000-0000-000000000000'
+        );
+        const map = new Map<string, any>();
+        filtered.forEach((p: any) => {
+            const key = p.id || p.username;
+            if (key && !map.has(key)) {
+                map.set(key, p);
+            }
+        });
+        return Array.from(map.values()).sort((a: any, b: any) => {
+            const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin' || a.username === 'sanjay';
+            const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin' || b.username === 'sanjay';
+            if (isMasterA && !isMasterB) return -1;
+            if (!isMasterA && isMasterB) return 1;
+            return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+        });
+    };
+
     // Real-time User Listener with Smart Caching
     useEffect(() => {
         // 1. Try cache first (instant load)
         const cached = PlayerCache.get();
         if (cached) {
             console.log('[ADMIN] Using cached player data');
-            setPlayers(cached);
+            setPlayers(sanitizeProfiles(cached));
         }
 
         const fetchProfiles = async () => {
             const { data, error } = await supabase.from('profiles').select('*');
             if (!error && data) {
-                const playersData = data.sort((a: any, b: any) => {
-                    const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
-                    const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
-                    if (isMasterA && !isMasterB) return -1;
-                    if (!isMasterA && isMasterB) return 1;
-                    return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
-                });
+                const playersData = sanitizeProfiles(data);
                 setPlayers(playersData);
                 PlayerCache.set(playersData);
             }
@@ -1765,25 +1920,19 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload: any) => {
                 if (payload.eventType === 'INSERT') {
                     setPlayers(prev => {
-                        const newPlayers = [payload.new, ...prev].sort((a: any, b: any) => {
-                            const isMasterA = a.role === 'master' || a.role === 'admin' || a.username === 'admin';
-                            const isMasterB = b.role === 'master' || b.role === 'admin' || b.username === 'admin';
-                            if (isMasterA && !isMasterB) return -1;
-                            if (!isMasterA && isMasterB) return 1;
-                            return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
-                        });
+                        const newPlayers = sanitizeProfiles([payload.new, ...prev]);
                         PlayerCache.set(newPlayers);
                         return newPlayers;
                     });
                 } else if (payload.eventType === 'UPDATE') {
                     setPlayers(prev => {
-                        const newPlayers = prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p);
+                        const newPlayers = sanitizeProfiles(prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p));
                         PlayerCache.set(newPlayers);
                         return newPlayers;
                     });
                 } else if (payload.eventType === 'DELETE') {
                     setPlayers(prev => {
-                        const newPlayers = prev.filter(p => p.id !== payload.old.id);
+                        const newPlayers = sanitizeProfiles(prev.filter(p => p.id !== payload.old.id));
                         PlayerCache.set(newPlayers);
                         return newPlayers;
                     });
@@ -1823,7 +1972,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         );
 
         if (visibleUsers.length === 0) {
-            alert("SYSTEM ERROR: NO DATA TO EXPORT.");
+            showToast("SYSTEM ERROR: NO DATA TO EXPORT.", 'error');
             return;
         }
 
@@ -1980,7 +2129,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             onClick={() => { navigateToView(item.id as any); setSelectedPlayers([]); setIsSidebarOpen(false); }}
                             title={item.label}
                             whileTap={{ scale: 0.97 }}
-                            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} px-4 py-3 rounded text-base tracking-wider border transition-colors duration-200 ${activeView === item.id ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}` : 'text-gray-400 hover:bg-white/5 hover:text-white border-transparent'}`}
+                            className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'} px-4 py-2 rounded text-base tracking-wider border transition-colors duration-200 ${activeView === item.id ? `${item.activeBg} ${item.activeColor} ${item.activeBorder}` : 'text-gray-400 hover:bg-white/5 hover:text-white border-transparent'}`}
                         >
                             <item.icon size={18} />
                             {!isSidebarCollapsed && item.label}
@@ -2029,22 +2178,18 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     {!isSidebarCollapsed && 'BROADCAST'}
                 </button>
 
-                {/* Admin Profile */}
-                <div className="flex flex-col gap-1">
-                    <button
-                        onClick={() => setShowAdminCard(true)}
-                        title={adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}
-                        className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'} gap-2 px-2 py-2.5 sm:px-3 sm:py-3 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer`}
-                    >
-                        <User size={18} className="text-gray-400 shrink-0" />
-                        {!isSidebarCollapsed && (
-                            <>
-                                <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'ADMIN_SETTINGS'}</span>
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
-                            </>
-                        )}
-                    </button>
-                </div>
+                {/* Admin Profile (Collapsed Mode Only) */}
+                {isSidebarCollapsed && (
+                    <div className="flex flex-col gap-1 mt-auto">
+                        <button
+                            onClick={() => setShowAdminCard(true)}
+                            title={adminSettings?.username?.toUpperCase() || 'SANJAY'}
+                            className="flex items-center justify-center gap-2 px-2 py-2.5 sm:px-3 sm:py-3 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer"
+                        >
+                            <User size={18} className="text-gray-400 shrink-0" />
+                        </button>
+                    </div>
+                )}
             </aside>
 
             {/* Main Content Area */}
@@ -2095,6 +2240,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     <>
                                         <span className="text-4xl text-red-500 font-bold">♥</span>
                                         HEARTS PROTOCOL
+                                    </>
+                                ) : activeView === 'joker' ? (
+                                    <>
+                                        <Shield size={24} className="text-slate-300 font-bold" />
+                                        JOKER PROTOCOL
                                     </>
                                 ) : (
                                     `PROTOCOL: ${String(activeView).toUpperCase()}`
@@ -2154,6 +2304,18 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 </span>
                             </div>
                         )}
+                        {activeView === 'joker' && (
+                            <div className="flex items-center gap-2 border-r border-white/10 pr-4 mr-2">
+                                <span className="flex items-center gap-2">
+                                    <Shield size={18} className="text-slate-300" />
+                                    <span className={jokerGameStatus?.system_start ? (jokerGameStatus?.is_paused ? 'text-yellow-400' : 'text-slate-200') : 'text-slate-400'}>
+                                        {jokerGameStatus?.system_start ? (jokerGameStatus?.is_paused ? 'HALTED' : 'ACTIVE') : 'IDLE'}
+                                    </span>
+                                </span>
+                                <span className="text-gray-600">|</span>
+                                <span className="text-slate-300">ROUND {jokerGameStatus?.current_round || 1}/14</span>
+                            </div>
+                        )}
                         {/* Header Command Buttons */}
                         <div className="flex items-center flex-wrap justify-center sm:justify-end gap-1.5 sm:gap-2 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-4 w-full sm:w-auto">
                             <span className="flex items-center gap-1.5 text-[8px] sm:text-[12px] lg:text-[13px] font-mono">
@@ -2173,6 +2335,15 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                             >
                                 <ArrowLeft size={11} className="sm:size-3" />
                                 <span>BACK</span>
+                            </button>
+                            <button
+                                onClick={() => setShowAdminCard(true)}
+                                title={adminSettings?.username?.toUpperCase() || 'SANJAY'}
+                                className="flex items-center gap-2 px-2 sm:px-4 py-1 sm:py-2 bg-white/5 border border-white/10 rounded text-[9px] sm:text-[12px] hover:bg-white/10 transition-all cursor-pointer shadow-[0_0_10px_rgba(255,255,255,0.05)] whitespace-nowrap"
+                            >
+                                <User size={11} className="sm:size-3 text-gray-400 shrink-0" />
+                                <span className="text-white font-bold">{adminSettings?.username?.toUpperCase() || 'SANJAY'}</span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
                             </button>
                             <button
                                 onClick={handleEmergencyPurgeToggle}
@@ -2298,6 +2469,22 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 round: heartsGameStatus?.current_round || 0,
                                                 totalRounds: 7,
                                                 extra: `phase ${heartsGameStatus?.phase || 'idle'}`
+                                            },
+                                            {
+                                                suit: 'Joker',
+                                                icon: Shield,
+                                                color: 'text-slate-300',
+                                                borderColor: 'border-slate-400/30',
+                                                glowColor: 'shadow-[0_0_20px_rgba(226,232,240,0.05)]',
+                                                difficulty: 'Unknown',
+                                                type: 'Labyrinth',
+                                                active: !!jokerGameStatus?.system_start,
+                                                players: getGamePlayerCount('joker'),
+                                                gameState: jokerGameStatus?.system_start ? (jokerGameStatus?.is_paused ? 'PAUSED' : 'ACTIVE') : 'IDLE',
+                                                currentPhase: (jokerGameStatus?.phase || 'IDLE').toUpperCase(),
+                                                round: jokerGameStatus?.current_round || 1,
+                                                totalRounds: 14,
+                                                extra: `${jokerGameStatus?.participants?.length || 0} subjects`
                                             }
                                         ].map((arena, arenaIdx) => (
                                             <div
@@ -2372,7 +2559,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     const message = log.replace(/^\[.*?\]\s*/, '');
                                                     const isWarning = /warning|critical/i.test(log);
                                                     return (
-                                                        <tr key={getStableKey(`${time}-${message.slice(0, 50)}`, `system-log-${i}`)} className="group hover:bg-white/[0.02] transition-colors">
+                                                        <tr key={`syslog-${i}-${time}`} className="group hover:bg-white/[0.02] transition-colors">
                                                             <td className="py-2 px-1 text-gray-500">[{time}]</td>
                                                             <td className={`py-2 px-1 ${isWarning ? 'text-red-400' : 'text-green-400'}`}>
                                                                 {message}
@@ -3163,6 +3350,146 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             </div>
                                         )}
+                                        {suit.id === 'joker' && (
+                                            <div className="w-full xl:w-auto xl:ml-auto flex flex-col xl:flex-row items-center gap-4 sm:gap-6 relative z-20 self-center">
+                                                <div className="bg-white/5 border border-slate-300/30 rounded-xl p-4 sm:p-6 text-center backdrop-blur-md w-full sm:w-64 shrink-0 flex flex-col justify-center h-auto sm:h-[110px] relative overflow-hidden">
+                                                    <div className="absolute inset-0 bg-slate-300/5 mix-blend-overlay pointer-events-none" />
+
+                                                    <div className="flex justify-between items-end mb-2 relative z-10">
+                                                        <div className="text-left">
+                                                            <p className="text-[9px] text-slate-400 uppercase tracking-[0.2em] font-bold mb-0.5">Phase</p>
+                                                            <div className="text-lg sm:text-xl xl:text-lg 2xl:text-xl font-display font-black uppercase leading-none tracking-wider truncate max-w-[130px] sm:max-w-none text-slate-200">
+                                                                {jokerGameStatus?.system_start ? (jokerGameStatus?.is_paused ? 'PAUSED' : (jokerGameStatus?.phase?.toUpperCase() || 'ACTIVE')) : 'IDLE'}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[9px] text-slate-400 uppercase tracking-[0.2em] font-bold mb-0.5">Timer</p>
+                                                            <div className="text-xl sm:text-2xl xl:text-xl 2xl:text-2xl font-mono font-bold text-white tracking-widest leading-none drop-shadow-md">
+                                                                {jokerTimerDisplay}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden relative z-10">
+                                                        <div className="h-full bg-gradient-to-r from-slate-400 to-slate-200 transition-all duration-1000 shadow-[0_0_10px_rgba(226,232,240,0.5)]" style={{ width: jokerGameStatus?.system_start ? '100%' : '0%' }} />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 w-full sm:min-w-0 max-w-full justify-center">
+                                                    <p className="text-[9px] font-mono text-slate-400 uppercase tracking-[0.2em] mb-1 text-center">Trial Command Unit</p>
+                                                    <div className="flex flex-wrap items-stretch gap-2 w-full">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (jokerGameStatus?.system_start) {
+                                                                    showToast("Joker is already active. Use GATE RESET to restart.", "info");
+                                                                    return;
+                                                                }
+                                                                setSelectedSuitForModal('joker');
+                                                                setShowStartModal(true);
+                                                            }}
+                                                            className={`group flex-1 px-2 py-2 sm:px-4 sm:py-3 ${jokerGameStatus?.system_start ? 'bg-slate-300/30 cursor-not-allowed text-white/50' : 'bg-slate-200 hover:bg-white text-black shadow-[0_0_20px_rgba(226,232,240,0.6)]'} text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1`}
+                                                        >
+                                                            {jokerGameStatus?.system_start ? 'ACTIVE' : 'START'} <Radio size={8} className="sm:size-[10px] lg:size-[12px]" />
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const token = await getAccessToken();
+                                                                await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main`, {
+                                                                    method: 'PATCH',
+                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                                                                    body: JSON.stringify({ is_paused: !jokerGameStatus?.is_paused })
+                                                                });
+                                                                showToast(!jokerGameStatus?.is_paused ? "JOKER HALTED." : "JOKER RESUMED.", 'info');
+                                                            }}
+                                                            className={`flex-1 px-2 py-2 sm:px-4 sm:py-3 border text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded transition-all flex items-center justify-center gap-0.5 sm:gap-1 ${jokerGameStatus?.is_paused ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'}`}
+                                                        >
+                                                            <AlertTriangle size={8} className="sm:size-[10px] lg:size-[12px]" /> {jokerGameStatus?.is_paused ? 'RESUME' : 'HALT'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowMapInspector(true)}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-slate-800 text-slate-200 border border-slate-400/60 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-slate-700 hover:text-white transition-all flex items-center justify-center gap-0.5 sm:gap-1 shadow-[0_0_10px_rgba(226,232,240,0.2)]"
+                                                        >
+                                                            <Grid size={8} className="sm:size-[10px] lg:size-[12px]" /> MAP
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const confirmed = await showConfirm('RESET JOKER PROTOCOL', 'This will wipe the current Maze game state. All progress will be lost.');
+                                                                if (!confirmed) return;
+
+                                                                const keepPoints = await showConfirm('PRESERVE SCORES', 'Do you want players to KEEP their currently earned points?\n\nConfirm = KEEP points. Cancel = WIPE and revert to starting balance.');
+
+                                                                const availableRotations = [0, 90, 180, 270].filter(r => r !== (jokerGameStatus?.map_matrix ? getRotationFromMatrix(jokerGameStatus.map_matrix) : -1));
+                                                                const newRotation = availableRotations[Math.floor(Math.random() * availableRotations.length)];
+                                                                const activeMap = ensureTwentyFourSpecialCards(generateRotatedMap(newRotation));
+
+                                                                let resetParticipants: any[] = [];
+                                                                if (jokerGameStatus?.participants && jokerGameStatus.participants.length > 0) {
+                                                                    const token = await getAccessToken();
+                                                                    const visaMap: Record<string, number> = {};
+
+                                                                    if (!keepPoints) {
+                                                                        try {
+                                                                            const allIds = jokerGameStatus.participants.map((p: any) => p.id).filter(Boolean);
+                                                                            if (allIds.length > 0) {
+                                                                                const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allIds.join(',')})&select=id,visa_points`, {
+                                                                                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Accept': 'application/json' }
+                                                                                });
+                                                                                if (profileRes.ok) {
+                                                                                    const pData = await profileRes.json();
+                                                                                    if (Array.isArray(pData)) pData.forEach(p => visaMap[p.id] = p.visa_points);
+                                                                                }
+                                                                            }
+                                                                        } catch (e) { console.warn('Failed to fetch visa points', e); }
+                                                                    }
+
+                                                                    resetParticipants = jokerGameStatus.participants.map((p: any, idx: number) => {
+                                                                        const entryIdx = p.entryIndex || ((idx % 3) + 1);
+                                                                        const entryCell = getEntryCell(activeMap, entryIdx);
+                                                                        return {
+                                                                            ...p,
+                                                                            currentR: entryCell.r,
+                                                                            currentC: entryCell.c,
+                                                                            entryIndex: entryIdx,
+                                                                            targetExitIndex: entryIdx,
+                                                                            status: 'active',
+                                                                            pendingDoorChoice: undefined,
+                                                                            lastDoorChoice: undefined,
+                                                                            inventory: getDefaultStartingInventory(jokerGameStatus?.is_demo_mode),
+                                                                            hasUsedGreenCard: false,
+                                                                            hasUsedSkipCard: false,
+                                                                            nextRoundCostMultiplier: 1,
+                                                                            frozenBy: undefined,
+                                                                            frozenByPlayerId: undefined,
+                                                                            hasReachedExit: false,
+                                                                            score: keepPoints ? (p.score ?? 1000) : (visaMap[p.id] ?? 1000)
+                                                                        };
+                                                                    });
+                                                                }
+
+                                                                const token = await getAccessToken();
+                                                                await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main`, {
+                                                                    method: 'PATCH',
+                                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                                                                    body: JSON.stringify({
+                                                                        system_start: false,
+                                                                        phase: 'idle',
+                                                                        current_round: 1,
+                                                                        map_rotation: newRotation,
+                                                                        map_matrix: activeMap,
+                                                                        participants: resetParticipants,
+                                                                        winner_id: null
+                                                                    })
+                                                                });
+                                                                showToast(keepPoints ? "JOKER SESSION RESTARTED (POINTS KEPT)." : "JOKER SESSION RESTARTED (POINTS WIPED).", 'success');
+                                                            }}
+                                                            className="flex-1 px-2 py-2 sm:px-4 sm:py-3 bg-white/5 text-gray-400 border border-white/10 text-[8px] sm:text-[9px] lg:text-[9px] font-black uppercase rounded hover:bg-white/10 transition-all flex items-center justify-center gap-0.5 sm:gap-1"
+                                                        >
+                                                            <RotateCcw size={8} className="sm:size-[10px] lg:size-[12px]" /> GATE RESET
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Active Games & Communication Intelligence */}
@@ -3184,11 +3511,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     <button
                                                         onClick={() => setRoundMonitorPage(prev => ({ ...prev, [suit.id]: (prev[suit.id] || 0) + 1 }))}
                                                         disabled={(() => {
-                                                            const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                            const totalRounds = suit.id === 'joker' ? 14 : (suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5));
                                                             return (roundMonitorPage[suit.id] || 0) >= Math.ceil(totalRounds / 4) - 1;
                                                         })()}
                                                         className={`p-1.5 rounded bg-white/5 border border-white/10 ${(() => {
-                                                            const totalRounds = suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5);
+                                                            const totalRounds = suit.id === 'joker' ? 14 : (suit.id === 'hearts' ? 7 : (suit.id === 'clubs' ? 6 : 5));
                                                             return (roundMonitorPage[suit.id] || 0) < Math.ceil(totalRounds / 4) - 1;
                                                         })() ? 'hover:bg-white/10 text-white cursor-pointer' : 'opacity-30 cursor-not-allowed'}`}
                                                     >
@@ -3216,33 +3543,30 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         );
                                                     }).slice((roundMonitorPage[suit.id] || 0) * 4, ((roundMonitorPage[suit.id] || 0) + 1) * 4)
                                                 ) : (
-                                                    // MODIFIED: Show 6 Rounds for Clubs, 5 for Spades and Diamonds
-                                                    [1, 2, 3, 4, 5, 6].slice(0, suit.id === 'clubs' ? 6 : 5).map(roundNum => {
-                                                        const gameStatus = suit.id === 'clubs' ? clubsGameStatus : suit.id === 'spades' ? spadesGameStatus : diamondsGameStatus;
-                                                        // For Spades: Active if current matches roundNum AND is_active is true (or ignored because Spades always active if started)
-                                                        // Spades uses 'system_start' which is mapped to 'is_active' in state
-                                                        const isCurrentRound = roundNum === gameStatus.current_round && gameStatus.system_start;
-                                                        const isCompleted = roundNum < gameStatus.current_round;
+                                                    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].slice(0, suit.id === 'joker' ? 14 : (suit.id === 'clubs' ? 6 : 5)).map(roundNum => {
+                                                        const gameStatus = suit.id === 'joker' ? jokerGameStatus : (suit.id === 'clubs' ? clubsGameStatus : (suit.id === 'spades' ? spadesGameStatus : diamondsGameStatus));
+                                                        const isCurrentRound = roundNum === (gameStatus?.current_round || 1) && gameStatus?.system_start;
+                                                        const isCompleted = roundNum < (gameStatus?.current_round || 1);
 
                                                         return (
-                                                            <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? (suit.id === 'spades' ? 'border-blue-500/50 bg-blue-500/5' : suit.id === 'diamonds' ? 'border-purple-400/50 bg-purple-400/5' : 'border-green-500/50 bg-green-500/5') : 'border-white/10 hover:border-white/20'}`}>
+                                                            <div key={roundNum} className={`bg-white/5 border rounded-lg p-5 min-h-[120px] transition-all group flex-1 flex flex-col justify-center gap-2 ${isCurrentRound ? (suit.id === 'joker' ? 'border-slate-300/50 bg-slate-300/5' : suit.id === 'spades' ? 'border-blue-500/50 bg-blue-500/5' : suit.id === 'diamonds' ? 'border-purple-400/50 bg-purple-400/5' : 'border-green-500/50 bg-green-500/5') : 'border-white/10 hover:border-white/20'}`}>
                                                                 <div className="flex justify-between items-center">
-                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? (suit.id === 'spades' ? 'text-blue-500' : suit.id === 'diamonds' ? 'text-purple-400' : 'text-green-500') : 'text-gray-500'}`}>
+                                                                    <span className={`text-xs font-mono font-bold tracking-widest ${isCurrentRound ? (suit.id === 'joker' ? 'text-slate-300' : suit.id === 'spades' ? 'text-blue-500' : suit.id === 'diamonds' ? 'text-purple-400' : 'text-green-500') : 'text-gray-500'}`}>
                                                                         PHASE_{roundNum.toString().padStart(2, '0')}
                                                                     </span>
-                                                                    <div className={`px-2 py-0.5 rounded text-[7px] font-bold ${isCurrentRound ? `${suit.id === 'spades' ? 'bg-blue-500' : suit.id === 'diamonds' ? 'bg-purple-400' : 'bg-green-500'} text-black animate-pulse` : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
-                                                                        {isCurrentRound ? (gameStatus.is_paused ? 'PAUSED' : (gameStatus.phase?.toUpperCase() || 'ACTIVE')) : isCompleted ? 'CLEARED' : 'LOCKED'}
+                                                                    <div className={`px-2 py-0.5 rounded text-[7px] font-bold ${isCurrentRound ? `${suit.id === 'joker' ? 'bg-slate-200 text-black' : suit.id === 'spades' ? 'bg-blue-500 text-black' : suit.id === 'diamonds' ? 'bg-purple-400 text-black' : 'bg-green-500 text-black'} animate-pulse` : isCompleted ? 'bg-white/10 text-gray-400' : 'bg-white/5 text-gray-600'}`}>
+                                                                        {isCurrentRound ? (gameStatus?.is_paused ? 'PAUSED' : (gameStatus?.phase?.toUpperCase() || 'ACTIVE')) : isCompleted ? 'CLEARED' : 'LOCKED'}
                                                                     </div>
                                                                 </div>
 
                                                                 <div>
                                                                     <h4 className="text-lg font-display font-bold text-white tracking-wider">ROUND {roundNum}</h4>
                                                                     <div className="flex items-center gap-2 mt-1">
-                                                                        <div className={`h-full transition-all duration-1000 ${isCurrentRound ? (suit.id === 'spades' ? 'bg-blue-500' : suit.id === 'diamonds' ? 'bg-purple-400' : 'bg-green-500') : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
-                                                                            style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
+                                                                        <div className={`h-full transition-all duration-1000 ${isCurrentRound ? (suit.id === 'joker' ? 'bg-slate-300' : suit.id === 'spades' ? 'bg-blue-500' : suit.id === 'diamonds' ? 'bg-purple-400' : 'bg-green-500') : isCompleted ? 'bg-white/20 w-full' : 'w-0'}`}
+                                                                            style={{ width: isCurrentRound ? `${Math.min(100, ((gameStatus?.votes_submitted || 0) / 10) * 100)}%` : (isCompleted ? '100%' : '0%') }}
                                                                         />
-                                                                        <span className="text-[px] font-mono text-gray-500 uppercase tracking-tighter">
-                                                                            {isCurrentRound ? `${gameStatus.votes_submitted || 0} VOTES CAST` : isCompleted ? 'SYNC DONE' : 'WAITING'}
+                                                                        <span className="text-[9px] font-mono text-gray-500 uppercase tracking-tighter">
+                                                                            {isCurrentRound ? `${gameStatus?.phase?.toUpperCase() || 'ACTIVE'}` : isCompleted ? 'SYNC DONE' : 'WAITING'}
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -3256,7 +3580,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         {/* Right: Communication Intelligence (Chat) */}
                                         <div className="flex-1 w-full space-y-6 min-w-0">
                                             <div className="flex justify-between items-center mb-6">
-                                                <h3 className="text-sm font-bold tracking-widest uppercase flex items-center gap-2" style={{ color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444' }}>
+                                                <h3 className="text-sm font-bold tracking-widest uppercase flex items-center gap-2" style={{ color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : suit.id === 'joker' ? '#e2e8f0' : '#ef4444' }}>
                                                     <Radio size={16} className="animate-pulse" /> COM INTELLIGENCE
                                                     {(suit.id === 'clubs' ? clubsFilterUserId : null) && (
                                                         <button
@@ -3270,18 +3594,18 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 <button
                                                     onClick={() => {
                                                         const current = getEffectiveViewMode(suit.id);
-                                                        const modes = suit.id === 'clubs' ? ['chat', 'bar', 'pie', 'line'] : ['bar', 'pie', 'line'];
+                                                        const modes = suit.id === 'clubs' ? ['chat', 'bar', 'pie', 'line', 'radar'] : ['bar', 'pie', 'line', 'radar'];
                                                         const idx = modes.indexOf(current);
-                                                        const next = modes[(idx + 1) % modes.length] as 'chat' | 'bar' | 'pie' | 'line';
+                                                        const next = modes[(idx + 1) % modes.length] as 'chat' | 'bar' | 'pie' | 'line' | 'radar';
                                                         setViewMode(suit.id, next);
                                                     }}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-white/10"
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 border rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all hover:bg-white/10 font-mono"
                                                     style={{
-                                                        borderColor: `${suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444'}40`,
-                                                        color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444',
+                                                        borderColor: `${suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : suit.id === 'joker' ? '#e2e8f0' : '#ef4444'}40`,
+                                                        color: suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : suit.id === 'joker' ? '#e2e8f0' : '#ef4444',
                                                     }}
                                                 >
-                                                    {getEffectiveViewMode(suit.id) === 'chat' ? <><BarChart3 size={14} /> CHARTS</> : getEffectiveViewMode(suit.id) === 'bar' ? <><PieChartIcon size={14} /> PIE</> : getEffectiveViewMode(suit.id) === 'pie' ? <><Activity size={14} /> LINE</> : suit.id === 'clubs' ? <><MessageSquare size={14} /> CHAT</> : <><BarChart3 size={14} /> CHARTS</>}
+                                                    {getEffectiveViewMode(suit.id) === 'chat' ? <><BarChart3 size={14} /> BARS</> : getEffectiveViewMode(suit.id) === 'bar' ? <><PieChartIcon size={14} /> PIE</> : getEffectiveViewMode(suit.id) === 'pie' ? <><Activity size={14} /> LINE</> : getEffectiveViewMode(suit.id) === 'line' ? <><Shield size={14} /> RADAR</> : suit.id === 'clubs' ? <><MessageSquare size={14} /> CHAT</> : <><BarChart3 size={14} /> BARS</>}
                                                 </button>
 
                                                 <div className="flex flex-col xl:flex-row items-end xl:items-center gap-3">
@@ -3357,7 +3681,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     const gamePlayers = allPlayerProfiles.filter((p: any) => p.game_type?.toLowerCase() === suit.id);
                                                                     const displayPlayers = gamePlayers.length > 0 ? gamePlayers : allPlayerProfiles;
                                                                     if (mode === 'pie') return displayPlayers.length;
-                                                                    if (mode === 'bar') return Math.min(PLAYERS_PER_CHART_PAGE, Math.max(0, displayPlayers.length - getChartPlayerPage(suit.id) * PLAYERS_PER_CHART_PAGE));
+                                                                    if (mode === 'bar' || mode === 'radar') return Math.min(PLAYERS_PER_CHART_PAGE, Math.max(0, displayPlayers.length - getChartPlayerPage(suit.id) * PLAYERS_PER_CHART_PAGE));
                                                                     if (mode === 'line') return Math.min(PLAYERS_PER_CHART_PAGE, Math.max(0, allPlayerProfiles.filter((p: any) => (p.visa_points ?? 0) > 0).length - getChartPlayerPage(suit.id) * PLAYERS_PER_CHART_PAGE));
                                                                     return 0;
                                                                 })()}
@@ -3493,8 +3817,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                             ) : (
                                                 <div className="bg-black/40 border border-white/10 rounded-xl p-6 flex flex-col h-[400px] lg:h-[500px] overflow-y-auto admin-scrollbar">
                                                     {(() => {
-                                                        const suitColor = suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : '#ef4444';
-                                                        const suitGlow = suit.id === 'clubs' ? 'rgba(34,197,94,' : suit.id === 'spades' ? 'rgba(59,130,246,' : suit.id === 'diamonds' ? 'rgba(168,85,247,' : 'rgba(239,68,68,';
+                                                        const suitColor = suit.id === 'clubs' ? '#22c55e' : suit.id === 'spades' ? '#3b82f6' : suit.id === 'diamonds' ? '#a855f7' : suit.id === 'joker' ? '#e2e8f0' : '#ef4444';
+                                                        const suitGlow = suit.id === 'clubs' ? 'rgba(34,197,94,' : suit.id === 'spades' ? 'rgba(59,130,246,' : suit.id === 'diamonds' ? 'rgba(168,85,247,' : suit.id === 'joker' ? 'rgba(226,232,240,' : 'rgba(239,68,68,';
 
                                                         // Filter profiles to this game's players (show all players if none assigned to this game)
                                                         const allPlayerProfiles = players.filter(p => p.role === 'player');
@@ -3537,6 +3861,11 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 outer: ['#991b1b', '#dc2626', '#ef4444', '#fca5a5'],
                                                                 inner: ['#991b1b', '#ef4444', '#f87171'],
                                                                 glow: 'rgba(239,68,68,',
+                                                            },
+                                                            joker: {
+                                                                outer: ['#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0'],
+                                                                inner: ['#64748b', '#94a3b8', '#e2e8f0'],
+                                                                glow: 'rgba(226,232,240,',
                                                             },
                                                         };
                                                         const palette = suitPalettes[suit.id] || suitPalettes.clubs;
@@ -3608,8 +3937,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             <div className="flex flex-col items-center justify-center h-full gap-4">
                                                                 <div className="w-full flex items-center justify-between mb-2 min-h-[48px]">
                                                                     <h4 className="text-sm font-bold tracking-widest uppercase text-gray-400 flex items-center gap-2">
-                                                                        {getEffectiveViewMode(suit.id) === 'bar' ? <BarChart3 size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'pie' ? <PieChartIcon size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'line' ? <Activity size={16} className="text-gray-500" /> : <Radio size={16} className="text-gray-500" />}
-                                                                        PLAYER ANALYTICS
+                                                                        {getEffectiveViewMode(suit.id) === 'bar' ? <BarChart3 size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'pie' ? <PieChartIcon size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'line' ? <Activity size={16} className="text-gray-500" /> : getEffectiveViewMode(suit.id) === 'radar' ? <Shield size={16} className="text-gray-500" /> : <Radio size={16} className="text-gray-500" />}
+                                                                        PLAYER ANALYTICS {getEffectiveViewMode(suit.id) === 'radar' && '(RADAR STATS)'}
                                                                     </h4>
                                                                     {getEffectiveViewMode(suit.id) === 'pie' && selectedPieInfo[suit.id] && (
                                                                         <div className="flex items-center gap-2">
@@ -3700,6 +4029,82 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                             </LineChart>
                                                                         </ResponsiveContainer>
                                                                     </div>
+                                                                ) : getEffectiveViewMode(suit.id) === 'radar' ? (
+                                                                    <motion.div
+                                                                        key={`radar-visit-${suit.id}-${getEffectiveViewMode(suit.id)}-${currentPage}`}
+                                                                        initial={{ opacity: 0, scale: 0.88, y: 10 }}
+                                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                                                                        className="w-full h-full max-h-[440px] flex items-center justify-center pt-2"
+                                                                    >
+                                                                        {(() => {
+                                                                            const radarPagePlayers = barPagePlayers.length > 0 ? barPagePlayers : displayPlayers.slice(currentPage * PLAYERS_PER_CHART_PAGE, (currentPage + 1) * PLAYERS_PER_CHART_PAGE);
+                                                                            const maxVisa = Math.max(...radarPagePlayers.map(p => p.visa_points ?? 0), 1);
+                                                                            const maxWins = Math.max(...radarPagePlayers.map(p => p.wins ?? 0), 1);
+
+                                                                            const radarData = radarPagePlayers.map((p, i) => ({
+                                                                                player: p.username || `Player ${currentPage * PLAYERS_PER_CHART_PAGE + i + 1}`,
+                                                                                points: Math.max(0, p.visa_points ?? 0),
+                                                                                // Compare with wins: scale wins proportionally to points scale for inner polygon layer
+                                                                                wins: Math.max(1, Math.round(((p.wins ?? 0) / maxWins) * maxVisa * 0.65)),
+                                                                                rawWins: p.wins ?? 0,
+                                                                            }));
+
+                                                                            const radarConfig = {
+                                                                                points: {
+                                                                                    label: "Points",
+                                                                                    color: suitColor,
+                                                                                },
+                                                                                wins: {
+                                                                                    label: "Wins",
+                                                                                    color: "#a855f7",
+                                                                                },
+                                                                            } satisfies ChartConfig;
+
+                                                                            return (
+                                                                                <ChartContainer id={`radar-${suit.id}`} config={radarConfig} className="mx-auto aspect-square max-h-[420px] w-full">
+                                                                                    <RadarChart data={radarData} outerRadius="75%">
+                                                                                        <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                                                                                        <PolarAngleAxis
+                                                                                            dataKey="player"
+                                                                                            tick={({ x, y, textAnchor, payload }) => (
+                                                                                                <text
+                                                                                                    x={x}
+                                                                                                    y={y}
+                                                                                                    textAnchor={textAnchor}
+                                                                                                    fill="#e2e8f0"
+                                                                                                    fontSize={11}
+                                                                                                    fontWeight={600}
+                                                                                                    className="font-mono select-none"
+                                                                                                >
+                                                                                                    {payload.value}
+                                                                                                </text>
+                                                                                            )}
+                                                                                        />
+                                                                                        <PolarGrid stroke="#475569" strokeDasharray="3 3" />
+                                                                                        {/* Outer Layer: Points */}
+                                                                                        <Radar
+                                                                                            name="Points"
+                                                                                            dataKey="points"
+                                                                                            stroke={suitColor}
+                                                                                            fill={suitColor}
+                                                                                            fillOpacity={0.3}
+                                                                                            isAnimationActive={false}
+                                                                                        />
+                                                                                        {/* Inner Layer: Wins Comparison */}
+                                                                                        <Radar
+                                                                                            name="Wins"
+                                                                                            dataKey="wins"
+                                                                                            stroke="#a855f7"
+                                                                                            fill="#a855f7"
+                                                                                            fillOpacity={0.55}
+                                                                                            isAnimationActive={false}
+                                                                                        />
+                                                                                    </RadarChart>
+                                                                                </ChartContainer>
+                                                                            );
+                                                                        })()}
+                                                                    </motion.div>
                                                                 ) : (
                                                                     <div className="flex flex-col items-center justify-center h-full text-gray-500">
                                                                         <Radio size={32} className="opacity-20 mb-2" />
@@ -3727,16 +4132,16 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                     animate={sectionFloat.animate}
                                     exit={sectionFloat.exit}
                                     transition={sectionFloat.transition}
-                                    className={`w-full max-w-[95vw] sm:max-w-2xl bg-[#050508]/90 backdrop-blur-xl border rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh] ${selectedSuitForModal === 'hearts' ? 'border-red-500/30' : selectedSuitForModal === 'spades' ? 'border-blue-500/30' : selectedSuitForModal === 'diamonds' ? 'border-purple-500/30' : 'border-green-500/30'}`}
+                                    className={`w-full max-w-[95vw] sm:max-w-2xl bg-[#050508]/90 backdrop-blur-xl border rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh] ${selectedSuitForModal === 'hearts' ? 'border-red-500/30' : selectedSuitForModal === 'spades' ? 'border-blue-500/30' : selectedSuitForModal === 'diamonds' ? 'border-purple-500/30' : selectedSuitForModal === 'joker' ? 'border-slate-400/40' : 'border-green-500/30'}`}
                                 >
                                     {/* Header */}
                                     <div className="p-3 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
                                         <div>
                                             <h3 className="text-xl font-display font-bold text-white tracking-widest flex items-center gap-3">
-                                                <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'} size={24} />
+                                                <Users className={selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : selectedSuitForModal === 'joker' ? 'text-slate-300' : 'text-green-500'} size={24} />
                                                 WAITING LIST ({selectedSuitForModal?.toUpperCase()})
                                             </h3>
-                                            <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
+                                            <p className={`text-[10px] font-mono uppercase tracking-[0.2em] mt-1 ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : selectedSuitForModal === 'joker' ? 'text-slate-300' : 'text-green-500'}`}>
                                                 Active Player Roster // Ready for Deployment
                                             </p>
                                         </div>
@@ -3891,7 +4296,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         const dbUser = players.find(p => p.username === player.username || p.id === player.user_id);
                                                         return (
                                                             <tr key={getPlayerElementKey(player, idx, 'waiting')} className="hover:bg-white/[0.02] transition-colors">
-                                                                <td className={`p-2 sm:p-4 font-mono text-xs font-bold hidden sm:table-cell ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : 'text-green-500'}`}>
+                                                                <td className={`p-2 sm:p-4 font-mono text-xs font-bold hidden sm:table-cell ${selectedSuitForModal === 'hearts' ? 'text-red-500' : selectedSuitForModal === 'spades' ? 'text-blue-500' : selectedSuitForModal === 'diamonds' ? 'text-purple-400' : selectedSuitForModal === 'joker' ? 'text-slate-300' : 'text-green-500'}`}>
                                                                     {clubsIDMap[player.username] || clubsIDMap[player.username?.toLowerCase()] || `#UNK_${(player.user_id || '????').slice(0, 4)}`}
                                                                 </td>
                                                                 <td className="p-2 sm:p-4 font-mono text-xs text-gray-300">
@@ -3901,12 +4306,14 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider ${selectedSuitForModal === 'hearts' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
                                                                         selectedSuitForModal === 'spades' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
                                                                             selectedSuitForModal === 'diamonds' ? 'bg-purple-400/10 text-purple-400 border-purple-400/20' :
-                                                                                'bg-green-500/10 text-green-500 border-green-500/20'
+                                                                                selectedSuitForModal === 'joker' ? 'bg-slate-300/10 text-slate-200 border-slate-300/30' :
+                                                                                    'bg-green-500/10 text-green-500 border-green-500/20'
                                                                         }`}>
                                                                         <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${selectedSuitForModal === 'hearts' ? 'bg-red-500' :
                                                                             selectedSuitForModal === 'spades' ? 'bg-blue-500' :
                                                                                 selectedSuitForModal === 'diamonds' ? 'bg-purple-400' :
-                                                                                    'bg-green-500'
+                                                                                    selectedSuitForModal === 'joker' ? 'bg-slate-200' :
+                                                                                        'bg-green-500'
                                                                             }`} />
                                                                         READY
                                                                     </span>
@@ -4012,6 +4419,20 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                 </div>
                                             );
                                         })()}
+                                        {selectedSuitForModal === 'joker' && (
+                                            <div className="w-full flex items-center justify-start gap-2.5 p-3 bg-slate-900/90 border border-amber-500/50 rounded-xl text-xs font-mono font-bold text-amber-300 shadow-md mb-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="jokerDemoModeCheckbox"
+                                                    checked={jokerDemoModeEnabled}
+                                                    onChange={(e) => setJokerDemoModeEnabled(e.target.checked)}
+                                                    className="w-4 h-4 accent-amber-400 cursor-pointer rounded"
+                                                />
+                                                <label htmlFor="jokerDemoModeCheckbox" className="cursor-pointer select-none text-[11px] sm:text-xs">
+                                                    ENABLE DEMO MODE (START ALL PLAYERS WITH 1 OF EACH SPECIAL CARD: GREEN, SKIP, RED, FREEZE, TRUMP, GAME)
+                                                </label>
+                                            </div>
+                                        )}
                                         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center w-full gap-3 sm:gap-4">
                                             <div className="text-[10px] sm:text-xs font-mono text-gray-500 text-center sm:text-left">
                                                 <span className="text-white font-bold">
@@ -4070,7 +4491,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 console.warn("Failed to save allowed players:", await fetchRes.text());
                                                             }
                                                         } catch (err) {
-                                                            console.warn("Failed to save allowed players (Network or Timeout):", err);
                                                         }
 
                                                         console.log("=> STEP 2: Moving past allowed players block.");
@@ -4082,6 +4502,75 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                         const isHearts = suit === 'hearts';
                                                         const isSpades = suit === 'spades';
 
+                                                        if ((suit as string) === 'joker') {
+                                                            if (finalFiltered.length < 2) {
+                                                                showToast("WARNING: CANNOT START WITH 1 PLAYER. MUST HAVE AT LEAST 2 PLAYERS TO START.", 'error');
+                                                                return;
+                                                            }
+                                                            const prevRot = jokerGameStatus?.map_matrix ? getRotationFromMatrix(jokerGameStatus.map_matrix) : -1;
+                                                            const availRots = [0, 90, 180, 270].filter(r => r !== prevRot);
+                                                            const fixedRotation = availRots[Math.floor(Math.random() * availRots.length)];
+                                                            const freshMap = ensureTwentyFourSpecialCards(generateRotatedMap(fixedRotation));
+
+                                                            const token = await getAccessToken();
+
+                                                            const visaMap: Record<string, number> = {};
+                                                            try {
+                                                                const allIds = finalFiltered.map((p: any) => p.user_id).filter(Boolean);
+                                                                if (allIds.length > 0) {
+                                                                    const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?id=in.(${allIds.join(',')})&select=id,visa_points`, {
+                                                                        headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey, 'Accept': 'application/json' }
+                                                                    });
+                                                                    if (profileRes.ok) {
+                                                                        const pData = await profileRes.json();
+                                                                        if (Array.isArray(pData)) pData.forEach(p => visaMap[p.id] = p.visa_points);
+                                                                    }
+                                                                }
+                                                            } catch (e) {
+                                                                console.warn("Failed to fetch visa points for Joker:", e);
+                                                            }
+
+                                                            const startParticipants = finalFiltered.map((p, idx) => {
+                                                                const pos = getEntryCell(freshMap, (idx % 3) + 1);
+                                                                return {
+                                                                    id: p.user_id,
+                                                                    username: p.username || 'AGENT',
+                                                                    status: 'active',
+                                                                    currentR: pos.r,
+                                                                    currentC: pos.c,
+                                                                    entryIndex: (idx % 3) + 1,
+                                                                    targetExitIndex: (idx % 4) + 1,
+                                                                    inventory: getDefaultStartingInventory(jokerDemoModeEnabled),
+                                                                    blockedDoorsByRed: [],
+                                                                    hasUsedGreenCard: false,
+                                                                    hasUsedSkipCard: false,
+                                                                    nextRoundCostMultiplier: jokerDemoModeEnabled ? 2 : 1,
+                                                                    frozenBy: undefined,
+                                                                    frozenByPlayerId: undefined,
+                                                                    hasReachedExit: false,
+                                                                    score: visaMap[p.user_id] ?? 1000
+                                                                };
+                                                            });
+
+                                                            await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main`, {
+                                                                method: 'PATCH',
+                                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                                                                body: JSON.stringify({
+                                                                    system_start: true,
+                                                                    phase: 'briefing',
+                                                                    current_round: 1,
+                                                                    map_rotation: fixedRotation,
+                                                                    map_matrix: freshMap,
+                                                                    participants: startParticipants,
+                                                                    phase_started_at: new Date().toISOString(),
+                                                                    phase_duration_sec: 10
+                                                                })
+                                                            });
+                                                            showToast(`JOKER PROTOCOL INITIATED ${jokerDemoModeEnabled ? '(DEMO MODE ACTIVE - ALL CARDS GRANTED)' : ''}.`, 'success');
+                                                            setShowStartModal(false);
+                                                            return;
+                                                        }
+
                                                         if (isSpades) {
                                                             const invalidPlayers = finalFiltered.filter(p => p.role === 'master' || p.role === 'admin');
                                                             if (invalidPlayers.length > 0) {
@@ -4089,6 +4578,10 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                 showToast(`FAILURE: SPADES IS PLAYER-ONLY. REMOVE: ${names}`, 'error');
                                                                 return;
                                                             }
+                                                        }
+
+                                                        if (isSpades) {
+                                                            return;
                                                         }
 
                                                         if (suit === 'clubs') {
@@ -4359,7 +4852,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             showToast("SYSTEM ERROR: FAILED TO INITIATE", "error");
                                                         }
                                                     }}
-                                                    className={`px-2 sm:px-6 py-2 sm:py-3 flex-1 sm:flex-none rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center justify-center gap-2 ${selectedSuitForModal === 'hearts' ? 'bg-red-500 hover:bg-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : selectedSuitForModal === 'spades' ? 'bg-blue-500 hover:bg-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : selectedSuitForModal === 'diamonds' ? 'bg-purple-500 hover:bg-purple-400 shadow-[0_0_20px_rgba(168,85,247,0.3)]' : 'bg-green-500 hover:bg-green-400 shadow-[0_0_20px_rgba(34,197,94,0.3)]'}`}
+                                                    className={`px-2 sm:px-6 py-2 sm:py-3 flex-1 sm:flex-none rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center justify-center gap-2 ${selectedSuitForModal === 'hearts' ? 'bg-red-500 hover:bg-red-400 text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]' : selectedSuitForModal === 'spades' ? 'bg-blue-500 hover:bg-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.3)]' : selectedSuitForModal === 'diamonds' ? 'bg-purple-500 hover:bg-purple-400 text-white shadow-[0_0_20px_rgba(168,85,247,0.3)]' : selectedSuitForModal === 'joker' ? 'bg-slate-200 hover:bg-white text-black shadow-[0_0_20px_rgba(226,232,240,0.6)]' : 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_20px_rgba(34,197,94,0.3)]'}`}
                                                 >
                                                     INITIATE PROTOCOL <Radio size={14} className="animate-pulse" />
                                                 </button>
@@ -4414,6 +4907,17 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                 diamondsGameStatus?.system_start && (
                     <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
                         <DiamondsGameMaster isEngine={true} />
+                    </div>
+                )
+            }
+
+            {/* JOKER HEADLESS ENGINE */}
+            {
+                jokerGameStatus?.system_start && (
+                    <div className="hidden pointer-events-none opacity-0 h-0 w-0 overflow-hidden">
+                        <JokerGameMaster
+                            user={{ id: 'system-architect', username: 'SYSTEM ARCHITECT', role: 'admin' }}
+                        />
                     </div>
                 )
             }
@@ -4484,22 +4988,45 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                 })()}
 
                                 {/* Divider */}
-                                <div className="w-12 h-px bg-white/10 mb-4" />
+                                <div className="w-12 h-px bg-white/10 mb-2" />
 
                                 {/* Message */}
-                                <p className="text-gray-400 text-[13px] leading-relaxed mb-6 whitespace-pre-line font-mono tracking-wide">
+                                <p className="text-gray-400 text-[13px] leading-relaxed mb-2 whitespace-pre-line font-mono tracking-wide">
                                     {customDialog.message}
                                 </p>
+                                {/* Quick Suggestions */}
+                                {customDialog.title === 'BROADCAST MESSAGE' && (
+                                    <div className="px-4 pb-3 grid grid-cols-2 gap-2 border-t border-white/5 pt-3 mt-1 w-full">
+                                        {[
+                                            "Thank you for participating!",
+                                            "Maintenance in 5 mins",
+                                            "The next round begins soon",
+                                            "Please check your Visa points"
+                                        ].map((phrase, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setPromptValue(phrase)}
+                                                className="px-3 py-2.5 bg-white/5 hover:bg-blue-500/20 border border-white/10 hover:border-blue-500/40 rounded text-[11px] font-mono text-gray-400 hover:text-blue-300 transition-colors cursor-pointer text-left leading-snug whitespace-nowrap overflow-hidden text-ellipsis"
+                                            >
+                                                {phrase}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
 
                                 {/* Prompt input — card-based broadcast composer */}
                                 {customDialog.type === 'prompt' && (
+
                                     <div className="w-full mb-6">
                                         <div className="bg-[#0a0a0f] border border-white/10 rounded-xl overflow-hidden focus-within:border-blue-500/40 focus-within:shadow-[0_0_0_3px_rgba(59,130,246,0.08)] transition-all">
                                             {/* Card header */}
+
                                             <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-white/5">
                                                 <span className="text-[11px] font-mono text-white-400/70 uppercase tracking-[0.25em]">System Message</span>
                                                 <span className="ml-auto text-[10px] font-mono text-gray-600">{promptValue.length}/200</span>
                                             </div>
+
+
                                             {/* Textarea */}
                                             <textarea
                                                 value={promptValue}
@@ -4520,7 +5047,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                     }
                                                 }}
                                             />
-                                            {/* Card footer hint */}
 
                                         </div>
                                     </div>
@@ -4543,13 +5069,13 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                         <>
                                             <button
                                                 onClick={() => { customDialog.resolve(false); setCustomDialog(null); }}
-                                                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                                className="flex-1 py-2.5 mt-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
                                             >
                                                 Cancel
                                             </button>
                                             <button
                                                 onClick={() => { customDialog.resolve(true); setCustomDialog(null); }}
-                                                className="flex-1 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 hover:border-red-400 text-red-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
+                                                className="flex-1 py-2.5 mt-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 hover:border-red-400 text-red-400 text-[11px] font-mono font-bold uppercase tracking-[0.15em] rounded-lg transition-all active:scale-95"
                                             >
                                                 ♦ Confirm
                                             </button>
@@ -4680,6 +5206,135 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                     );
                 })()
             }
+
+            {/* JOKER MAZE MAP INSPECTOR MODAL */}
+            <AnimatePresence>
+                {showMapInspector && (
+                    <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-3 sm:p-6 overflow-hidden">
+                        <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-[#050508] border border-slate-300/50 p-4 sm:p-6 rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col font-mono text-slate-100 relative shadow-[0_0_80px_rgba(226,232,240,0.2)] space-y-3">
+                            <div className="flex justify-between items-center pb-3 border-b border-slate-700/60 gap-2">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="font-cinzel text-sm sm:text-base font-bold text-slate-100 uppercase tracking-widest flex items-center gap-1.5 shrink-0">
+                                            <Grid className="text-slate-300" size={18} />
+                                            MAZE MAP INSPECTOR
+                                        </h3>
+
+                                        {/* STATUS BADGE INDICATOR AT TOP */}
+                                        {jokerGameStatus?.system_start ? (
+                                            <span className="px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/50 rounded-full text-emerald-300 text-[9px] font-bold tracking-widest uppercase animate-pulse">
+                                                ● ACTIVE MAZE MAP
+                                            </span>
+                                        ) : (
+                                            <span className="px-2.5 py-0.5 bg-slate-400/20 border border-slate-400/50 rounded-full text-slate-300 text-[9px] font-bold tracking-widest uppercase">
+                                                ○ PREVIEW STANDBY
+                                            </span>
+                                        )}
+                                        {/* OLD VS NEW VERSION TOGGLE BUTTONS */}
+                                        <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 p-0.5 rounded-lg ml-2">
+                                            <button
+                                                onClick={() => setAdminMapViewMode('old')}
+                                                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                                                    adminMapViewMode === 'old'
+                                                        ? 'bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+                                                        : 'text-slate-400 hover:text-white'
+                                                }`}
+                                            >
+                                                🏛️ OLD VERSION (BEFORE CLAIM)
+                                            </button>
+                                            <button
+                                                onClick={() => setAdminMapViewMode('new')}
+                                                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                                                    adminMapViewMode === 'new'
+                                                        ? 'bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.5)]'
+                                                        : 'text-slate-400 hover:text-white'
+                                                }`}
+                                            >
+                                                🔀 NEW VERSION (AFTER CLAIM/RESPAWN)
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 uppercase tracking-[0.15em] mt-1 truncate">
+                                        VIEWING: {adminMapViewMode === 'old' ? 'OLD VERSION (BEFORE PLAYER CLAIMS)' : 'NEW VERSION (AFTER PLAYER CLAIMS & CARD RESPAWNS)'} // ROTATION: {jokerGameStatus?.map_rotation || 0}°
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                    {/* Admin Refresh Map Button (Disabled after game starts) */}
+                                    <button
+                                        onClick={async () => {
+                                            if (jokerGameStatus?.system_start) return;
+                                            try {
+                                                const token = await getAccessToken();
+                                                const rotation = jokerGameStatus?.map_rotation || 0;
+                                                const freshMap = ensureTwentyFourSpecialCards(generateRotatedMap(rotation));
+
+                                                const freshMatrix: any = [...freshMap];
+                                                freshMatrix._old_map = freshMap;
+                                                freshMatrix._new_map = freshMap;
+
+                                                const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.joker_main`, {
+                                                    method: 'PATCH',
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        'Authorization': `Bearer ${token}`,
+                                                        'apikey': supabaseKey,
+                                                        'Prefer': 'return=representation'
+                                                    },
+                                                    body: JSON.stringify({
+                                                        map_matrix: freshMatrix
+                                                    })
+                                                });
+                                                if (res.ok) {
+                                                    const updated = await res.json();
+                                                    if (updated && updated.length > 0 && typeof setJokerGameStatus === 'function') {
+                                                        setJokerGameStatus(updated[0]);
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                console.error('[ADMIN] Joker map refresh error:', e);
+                                            }
+                                        }}
+                                        disabled={jokerGameStatus?.system_start}
+                                        title={jokerGameStatus?.system_start ? "Refresh disabled after game starts" : "Refresh points & special cards"}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-mono font-bold text-[10px] sm:text-xs uppercase tracking-widest border transition-all cursor-pointer ${jokerGameStatus?.system_start
+                                            ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed opacity-50'
+                                            : 'bg-slate-800 hover:bg-slate-700 border-slate-500 text-slate-200 shadow-[0_0_12px_rgba(255,255,255,0.2)]'
+                                            }`}
+                                    >
+                                        <RefreshCw size={13} />
+                                        <span>REFRESH MAP</span>
+                                    </button>
+
+                                    <button
+                                        onClick={() => setShowMapInspector(false)}
+                                        className="px-3 py-1.5 bg-slate-200 hover:bg-white text-black font-mono font-bold text-[10px] sm:text-xs uppercase tracking-widest rounded transition-all shadow-[0_0_12px_rgba(226,232,240,0.3)] cursor-pointer"
+                                    >
+                                        CLOSE MAP
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="py-1">
+                                {(() => {
+                                    const parsed = parseMapMatrix(jokerGameStatus?.map_matrix);
+                                    const gridToDisplay = adminMapViewMode === 'old'
+                                        ? (parsed.old_map && parsed.old_map.length === 7 ? parsed.old_map : generateRotatedMap(jokerGameStatus?.map_rotation || 0))
+                                        : (parsed.new_map && parsed.new_map.length === 7 ? parsed.new_map : generateRotatedMap(jokerGameStatus?.map_rotation || 0));
+
+                                    return (
+                                        <JokerMapGrid
+                                            gridMatrix={gridToDisplay}
+                                            players={jokerGameStatus?.participants || []}
+                                            isAdminView={true}
+                                        />
+                                    );
+                                })()}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
         </div >
     );

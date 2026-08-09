@@ -15,16 +15,6 @@ const cards = [
         image: '/Game Wallpaper/spade.png',
     },
     {
-        type: 'Hearts',
-        title: 'PSYCHOLOGICAL',
-        nickname: 'THE NIGHTMARE',
-        description: 'Games of betrayal. Manipulation and emotional control.',
-        color: '#ef4444',
-        glow: 'rgba(239, 68, 68, 0.4)',
-        symbol: '♥',
-        image: '/Game Wallpaper/hearts.png',
-    },
-    {
         type: 'Clubs',
         title: 'TEAMWORK',
         nickname: 'THE LANTERN',
@@ -35,6 +25,16 @@ const cards = [
         image: '/Game Wallpaper/clubs.png',
     },
     {
+        type: 'Joker',
+        title: 'THE ULTIMATE PROTOCOL',
+        nickname: 'THE WILD CARD',
+        description: 'Individual rotated maze trial. 14 rounds, special doors & minigames.',
+        color: '#e2e8f0',
+        glow: 'rgba(226, 232, 240, 0.5)',
+        symbol: '🃏',
+        image: '/Game Wallpaper/Joker.png',
+    },
+    {
         type: 'Diamonds',
         title: 'INTELLIGENCE',
         nickname: 'THE FIXER',
@@ -43,6 +43,16 @@ const cards = [
         glow: 'rgba(168, 85, 247, 0.4)',
         symbol: '♦',
         image: '/Game Wallpaper/diamond.png',
+    },
+    {
+        type: 'Hearts',
+        title: 'PSYCHOLOGICAL',
+        nickname: 'THE NIGHTMARE',
+        description: 'Games of betrayal. Manipulation and emotional control.',
+        color: '#ef4444',
+        glow: 'rgba(239, 68, 68, 0.4)',
+        symbol: '♥',
+        image: '/Game Wallpaper/hearts.png',
     }
 ];
 
@@ -156,58 +166,67 @@ export const CardSelection = ({ onCardSelect, onBack, isLoggedIn, onLogoutClick,
             </motion.div>
 
             {/* Playing Card Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 lg:gap-10 w-full max-w-sm sm:max-w-3xl lg:max-w-6xl relative z-10">
-                {cards.map((card, index) => (
-                    <motion.div
-                        key={card.type}
-                        initial={{ opacity: 0, scale: 0.9, y: 30 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        transition={{ duration: 1.2, ease: "easeOut", delay: index * 0.15 }}
-                        onMouseEnter={() => setHoveredIndex(index)}
-                        onMouseLeave={() => setHoveredIndex(null)}
-                        onClick={() => {
-                            onCardSelect(card.type);
-                        }}
-                        className="relative cursor-pointer"
-                    >
-                        <motion.div
-                            animate={{ y: [0, -12, 0] }}
-                            transition={{ duration: 1.5, ease: "easeInOut", delay: index * 0.4 }}
-                        >
-                            <div
-                                className="w-full aspect-[5/7] relative group rounded-[1rem] sm:rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border border-white/10"
-                                style={{
-                                    boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
-                                }}
-                            >
-                                {/* Full-bleed Image */}
-                                <img
-                                    src={card.image}
-                                    alt={card.type}
-                                    className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
-                                />
-                                {/* Gradient overlay */}
-                                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-50 group-hover:opacity-30 transition-opacity duration-500" />
+            <div className="grid grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 lg:gap-5 xl:gap-6 w-full max-w-xs sm:max-w-lg lg:max-w-7xl relative z-10 items-center justify-items-center">
+                {cards.map((card, index) => {
+                    const mobileXClass = 
+                        card.type === 'Spades' ? 'col-start-1 row-start-1 lg:col-auto lg:row-auto' :
+                        card.type === 'Hearts' ? 'col-start-3 row-start-1 lg:col-auto lg:row-auto' :
+                        card.type === 'Joker' ? 'col-start-2 row-start-2 z-20 scale-105 sm:scale-110 lg:scale-100 lg:col-auto lg:row-auto' :
+                        card.type === 'Clubs' ? 'col-start-1 row-start-3 lg:col-auto lg:row-auto' :
+                        'col-start-3 row-start-3 lg:col-auto lg:row-auto';
 
-                                {/* Scanline */}
-                                <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
+                    return (
+                        <motion.div
+                            key={card.type}
+                            initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            transition={{ duration: 1.2, ease: "easeOut", delay: index * 0.12 }}
+                            onMouseEnter={() => setHoveredIndex(index)}
+                            onMouseLeave={() => setHoveredIndex(null)}
+                            onClick={() => {
+                                onCardSelect(card.type);
+                            }}
+                            className={`relative cursor-pointer w-full max-w-[130px] sm:max-w-[170px] lg:max-w-[210px] xl:max-w-[240px] ${mobileXClass}`}
+                        >
+                            <motion.div
+                                animate={{ y: [0, -8, 0] }}
+                                transition={{ duration: 1.5, ease: "easeInOut", delay: index * 0.3 }}
+                            >
+                                <div
+                                    className={`w-full aspect-[5/7] relative group rounded-[0.8rem] sm:rounded-[1.2rem] overflow-hidden shadow-2xl transition-all duration-500 hover:scale-[1.05] border ${card.type === 'Joker' ? 'border-slate-300/50 shadow-[0_0_20px_rgba(226,232,240,0.3)]' : 'border-white/10'}`}
+                                    style={{
+                                        boxShadow: hoveredIndex === index ? `0 0 35px ${card.glow}, 0 20px 60px rgba(0,0,0,0.7)` : '0 8px 40px rgba(0,0,0,0.6)'
+                                    }}
+                                >
+                                    {/* Full-bleed Image */}
+                                    <img
+                                        src={card.image}
+                                        alt={card.type}
+                                        className="absolute inset-0 w-full h-full object-cover object-center opacity-80 grayscale-[0.3] group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
+                                    />
+                                    {/* Gradient overlay */}
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-50 group-hover:opacity-30 transition-opacity duration-500" />
+
+                                    {/* Scanline */}
+                                    <div className="absolute inset-0 bg-scanline pointer-events-none opacity-[0.05]" />
+                                </div>
+                            </motion.div>
+
+                            {/* Status light */}
+                            <div className="mt-1.5 sm:mt-2.5 flex justify-center">
+                                <motion.div
+                                    animate={hoveredIndex === index && !window.matchMedia('(max-width: 768px)').matches ? {
+                                        scale: [1, 1.3, 1],
+                                        opacity: [0.1, 0.6, 0.1]
+                                    } : {}}
+                                    transition={{ repeat: Infinity, duration: 2 }}
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ backgroundColor: card.color, boxShadow: `0 0 15px ${card.color}` }}
+                                />
                             </div>
                         </motion.div>
-
-                        {/* Status light */}
-                        <div className="mt-1.5 sm:mt-2.5 flex justify-center">
-                            <motion.div
-                                animate={hoveredIndex === index && !window.matchMedia('(max-width: 768px)').matches ? {
-                                    scale: [1, 1.3, 1],
-                                    opacity: [0.1, 0.6, 0.1]
-                                } : {}}
-                                transition={{ repeat: Infinity, duration: 2 }}
-                                className="w-1.5 h-1.5 rounded-full"
-                                style={{ backgroundColor: card.color, boxShadow: `0 0 15px ${card.color}` }}
-                            />
-                        </div>
-                    </motion.div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );

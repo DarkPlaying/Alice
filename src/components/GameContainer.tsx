@@ -9,6 +9,8 @@ import { HeartsGameMaster } from './games/HeartsGameMaster';
 import { ClubsGame } from './games/ClubsGame';
 import { ClubsGameMaster } from './games/ClubsGameMaster';
 import { DiamondsGame } from './games/DiamondsGame';
+import { JokerGame } from './games/joker/JokerGame';
+import { JokerGameMaster } from './games/joker/JokerGameMaster';
 // import { GlowCard } from './ui/spotlight-card';
 import { PlayerCardModal } from './PlayerCardModal';
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../supabaseClient';
@@ -114,7 +116,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
             'Clubs': 'clubs_king',
             'Hearts': 'hearts_main',
             'Spades': 'spades_main',
-            'Diamonds': 'diamonds_king'
+            'Diamonds': 'diamonds_king',
+            'Joker': 'joker_main'
         };
 
         const targetId = suitIdMap[type];
@@ -124,15 +127,15 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         if (type === 'Spades') tableName = 'spades_game_state';
         if (type === 'Hearts') tableName = 'hearts_game_state';
         if (type === 'Diamonds') tableName = 'diamonds_game_state';
+        if (type === 'Joker') tableName = 'joker_game_state';
 
         const fetchInitialState = async () => {
             try {
                 const accessToken = await getAccessToken();
                 const response = await fetch(`${supabaseUrl}/rest/v1/${tableName}?id=eq.${targetId}&select=*`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'apikey': supabaseKey,
-                        'Accept': 'application/vnd.pgrst.object+json'
+                        'Authorization': `Bearer ${accessToken || supabaseKey}`,
+                        'apikey': supabaseKey
                     },
                     cache: 'no-store'
                 });
@@ -250,13 +253,15 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                 'Clubs': 'clubs_king',
                 'Hearts': 'hearts_main',
                 'Spades': 'spades_main',
-                'Diamonds': 'diamonds_king'
+                'Diamonds': 'diamonds_king',
+                'Joker': 'joker_main'
             };
             const targetId = suitIdMap[type];
             let tableName = 'clubs_game_status';
             if (type === 'Spades') tableName = 'spades_game_state';
             if (type === 'Hearts') tableName = 'hearts_game_state';
             if (type === 'Diamonds') tableName = 'diamonds_game_state';
+            if (type === 'Joker') tableName = 'joker_game_state';
 
             let data: any = null;
             try {
@@ -264,8 +269,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                 const response = await fetch(`${supabaseUrl}/rest/v1/${tableName}?id=eq.${targetId}&select=*`, {
                     headers: {
                         'Authorization': `Bearer ${accessToken}`,
-                        'apikey': supabaseKey,
-                        'Accept': 'application/vnd.pgrst.object+json'
+                        'apikey': supabaseKey
                     },
                     cache: 'no-store'
                 });
@@ -487,6 +491,15 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                     objective: "Solve all complexity protocols.",
                     cardImage: "/borderland_cards/Diamonds_K.png"
                 };
+            case 'Joker':
+                return {
+                    title: "The Ultimate Maze Protocol",
+                    difficulty: "Joker of All Suits",
+                    description: "An individual rotated maze trial through 14 rounds. Navigate your path from entry to exit while balancing special door cards, unexpected penalties, and psychological minigames.",
+                    limit: "14 Rounds",
+                    objective: "Reach your assigned exit door cell before round 14 ends.",
+                    cardImage: "/suit_assets/Joker Game.png"
+                };
             default:
                 return {
                     title: "Unknown Protocol",
@@ -494,7 +507,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                     description: "No data available.",
                     limit: "???",
                     objective: "???",
-                    cardImage: null
+                    cardImage: "/suit_assets/Joker Game.png"
                 };
         }
     };
@@ -558,11 +571,11 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
     if (!isLoaded) return <Loader />;
 
     return (
-        <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-hidden font-sans">
+        <div className="fixed inset-0 z-[100] bg-[url('/bg.jpg')] bg-cover bg-center bg-fixed flex flex-col overflow-y-auto font-sans">
             {/* Base dark overlay for readability across all games */}
             <div className="absolute inset-0 bg-black/70 backdrop-blur-2xl pointer-events-none z-0" />
 
-            <div className="relative z-10 flex flex-col w-full h-full">
+            <div className="relative z-10 flex flex-col w-full h-full min-h-screen">
                 {showPlayerCard && (
                     <PlayerCardModal
                         user={userInfo}
@@ -705,7 +718,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                 )}
 
                 {/* Main Content Area */}
-                <div className="flex-1 relative z-[60] flex items-center justify-center min-h-0 overflow-hidden">
+                <div className="flex-1 relative z-[60] flex flex-col items-center justify-start min-h-0 overflow-y-auto w-full custom-scrollbar">
                     <AnimatePresence mode="wait">
                         {spadesMasterError ? (
                             <motion.div
@@ -784,7 +797,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                                                     type === 'Spades' ? '/suit_assets/spade.png' :
                                                                         type === 'Clubs' ? '/suit_assets/clubs.png' :
                                                                             type === 'Hearts' ? '/suit_assets/hearts.png' :
-                                                                                (rules?.cardImage || undefined)
+                                                                                type === 'Joker' ? '/suit_assets/Joker Game.png' :
+                                                                                    (rules?.cardImage || '/suit_assets/Joker Game.png')
                                                             }
                                                             alt="Rules Card"
                                                             className="w-full h-full object-cover drop-shadow-[0_0_20px_rgba(255,255,255,0.1)]"
@@ -955,7 +969,8 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                                 type?.toLowerCase() === 'diamonds' ? '/suit_assets/diamond.png' :
                                                     type?.toLowerCase() === 'hearts' ? '/suit_assets/hearts.png' :
                                                         type?.toLowerCase() === 'clubs' ? '/suit_assets/clubs.png' :
-                                                            '/suit_assets/spade.png'
+                                                            type?.toLowerCase() === 'joker' ? '/suit_assets/Joker Game.png' :
+                                                                '/suit_assets/spade.png'
                                             }
                                             alt={`${type} Symbol`}
                                             className="w-full h-full object-contain drop-shadow-[0_0_40px_rgba(255,255,255,0.2)]"
@@ -969,12 +984,12 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                         transition={{ duration: 1, delay: 0.2, ease: "easeOut" }}
                                         className="space-y-4 px-4 sm:px-0"
                                     >
-                                        <h2 className={`text-2xl sm:text-3xl md:text-4xl font-cinzel font-bold tracking-widest uppercase transition-colors duration-500 whitespace-nowrap ${type?.toLowerCase() === 'hearts' ? 'text-red-500' : 'text-white'
+                                        <h2 className={`text-2xl sm:text-3xl md:text-4xl font-cinzel font-bold tracking-widest uppercase transition-colors duration-500 whitespace-nowrap ${type?.toLowerCase() === 'hearts' ? 'text-red-500' : type?.toLowerCase() === 'joker' ? 'text-slate-200' : 'text-white'
                                             }`}>
                                             Authority Hold
                                         </h2>
                                         <div className="space-y-2">
-                                            <p className={`${type?.toLowerCase() === 'hearts' ? 'text-red-400' : 'text-green-400'} font-mono text-xs sm:text-sm uppercase tracking-wider animate-pulse`}>
+                                            <p className={`${type?.toLowerCase() === 'joker' ? 'text-slate-300 font-bold' : (type?.toLowerCase() === 'hearts' ? 'text-red-400' : 'text-green-400')} font-mono text-xs sm:text-sm uppercase tracking-wider animate-pulse`}>
                                                 ► Awaiting Game Master Authorization
                                             </p>
                                             <p className="text-gray-400 font-mono text-[10px] sm:text-xs max-w-[280px] sm:max-w-xs mx-auto leading-relaxed">
@@ -1024,6 +1039,10 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                                 <ClubsGame onComplete={handleComplete} onFail={handleFail} user={userInfo} onProfileClick={() => setShowPlayerCard(true)} />;
                                         case 'Diamonds':
                                             return <DiamondsGame user={userInfo} onClose={() => setWaitingForGM(true)} />;
+                                        case 'Joker':
+                                            return isMasterRole ?
+                                                <JokerGameMaster user={userInfo} /> :
+                                                <JokerGame user={userInfo} onClose={() => setWaitingForGM(true)} />;
                                         default:
                                             return <div className="text-white uppercase font-mono tracking-widest p-12 text-center bg-white/5 rounded-xl border border-white/10">UNKNOWN PROTOCOL ERROR. RE-INITIATING HANDSHAKE...</div>;
                                     }

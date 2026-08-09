@@ -195,7 +195,7 @@ export const DemoDiamondsGame: React.FC<DemoDiamondsGameProps> = ({ user, onClos
     const handleConfirmSlots = () => {
         const count = mySlots.filter(s => s !== null).length;
         if (count === 0) {
-            alert("MUST DEPLOY AT LEAST 1 ASSET FOR BATTLE");
+            addToast("MUST DEPLOY AT LEAST 1 ASSET FOR BATTLE", "error");
             return;
         }
         setIsLocked(true);
