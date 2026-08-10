@@ -599,9 +599,7 @@ export class DoorSystem {
       cardTypes = [cardInput];
     }
 
-    if (cardTypes.length === 0) {
-      return null as any;
-    }
+    if (cardTypes.length === 0) cardTypes = ['none'];
 
     const totalCards = cardTypes.length;
     let cardWidth = 2.2;

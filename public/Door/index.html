@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D POV Maze Exploration | Modern Door Network</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚪</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- 3D Canvas Container -->
+  <div id="canvas-container"></div>
+
+  <!-- HUD Crosshair -->
+  <div id="crosshair" class="crosshair">
+    <div class="dot"></div>
+    <div class="ring"></div>
+  </div>
+
+  <!-- Dynamic Door Proximity Prompt Modal -->
+  <div id="door-prompt-modal" class="door-modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="pulse-icon">🔮</span>
+        <span id="door-id-tag" class="tag">DOOR DETECTED</span>
+      </div>
+      <h2 id="door-title">TRANSITION TO ROOM</h2>
+      <p id="door-description">Do you wish to open this door and transition to the connected room?</p>
+      
+      <div class="modal-actions">
+        <button id="door-yes-btn" class="btn modal-btn confirm">
+          <span>✨ OPEN DOOR</span>
+        </button>
+        <button id="door-no-btn" class="btn modal-btn cancel">
+          <span>CANCEL</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Right Controls -->
+  <div class="top-right-controls">
+    <button id="map-toggle-btn" class="icon-btn" title="Open Maze Map Inspector (M)">🗺️</button>
+    <button id="audio-toggle-btn" class="icon-btn" title="Toggle Sound">
+      <span id="audio-icon">🔊</span>
+    </button>
+  </div>
+
+  <!-- Top Left HUD Badge -->
+  <div class="top-left-hud">
+    <div class="hud-badge">
+      <div class="room-dot"></div>
+      <span id="room-badge-text">ROOM R1 (0,6)</span>
+    </div>
+  </div>
+
+  <!-- Proximity Banner -->
+  <div id="proximity-banner" class="proximity-banner hidden">
+    <div class="pulse-dot"></div>
+    <span id="proximity-text" class="prompt-text">PRESS [E] OR CLICK TO INTERACT WITH DOOR</span>
+  </div>
+
+  <!-- MAZE MAP INSPECTOR MODAL -->
+  <div id="map-inspector-modal" class="map-modal hidden">
+    <div class="map-card">
+      <div class="map-header">
+        <div class="map-title-wrap">
+          <span style="font-size:1.4rem;">🌐</span>
+          <h2>MAZE MAP INSPECTOR</h2>
+        </div>
+        <button id="close-map-btn" class="btn modal-btn cancel" style="padding:0.4rem 1rem; width:auto;">CLOSE MAP</button>
+      </div>
+      <div class="map-sub-bar">
+        ROTATION: 180° // ENTRY R (RED) &rarr; EXIT G (GREEN) // ACTIVE CELL HIGHLIGHTED
+      </div>
+      <div id="maze-grid-container" class="maze-grid"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

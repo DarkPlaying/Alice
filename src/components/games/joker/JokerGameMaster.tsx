@@ -292,6 +292,29 @@ export const JokerGameMaster: React.FC<JokerGameMasterProps> = ({ user }) => {
                             let choice: any = p.boughtDoorChoice || p.lastDoorChoice || p.pendingDoorChoice;
 
                             if (choice?.door) {
+                                if (choice.isProcessed) {
+                                    // Player already walked into room during 3D Reveal Phase! Do NOT apply processDoorPurchase a second time!
+                                    const isGreenWasUsed = p.hasUsedGreenCard || choice?.door?.isGreenUsed;
+                                    const finalInventory = p.inventory || [];
+                                    const cleanP: any = { ...p };
+                                    delete cleanP.pendingDoorChoice;
+                                    delete cleanP.lastDoorChoice;
+                                    delete cleanP.boughtDoorChoice;
+
+                                    return {
+                                        ...cleanP,
+                                        inventory: finalInventory,
+                                        hasUsedGreenCard: false,
+                                        hasUsedSkipCard: false,
+                                        nextRoundCostMultiplier: isGreenWasUsed ? 1 : (p.nextRoundCostMultiplier || 1),
+                                        frozenBy: undefined,
+                                        frozenByPlayerId: undefined,
+                                        blockedDoorsByRed: [],
+                                        blockedByPlayerName: undefined,
+                                        blockedByPlayerId: undefined
+                                    };
+                                }
+
                                 const { door, finalCost, isSkip } = choice;
                                 const { updatedPlayer } = processDoorPurchase(p, door, finalCost, isSkip, currentMatrix);
                                 delete updatedPlayer.pendingDoorChoice;

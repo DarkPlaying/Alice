@@ -576,10 +576,11 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
 
                     if (isNewRound || data.phase === 'briefing' || !data.system_start) {
                         claimedCellCoordsRef.current.clear();
+                        claimCoordsByRoundRef.current = {}; // reset cached destination coords each new round
                     }
 
-                    // Red Card door blocks only last 1 round! Reset blocked doors & temporary card effects whenever round changes or room position changes or phase is briefing
-                    if (isNewRound || data.phase === 'briefing') {
+                    // Red Card door blocks only last 1 round! Reset blocked doors & temporary card effects whenever round changes or phase is briefing/choosing
+                    if (isNewRound || data.phase === 'briefing' || data.phase === 'choosing') {
                         newMe.frozenBy = undefined;
                         newMe.frozenByPlayerId = undefined;
                         newMe.lastDoorChoice = undefined;
@@ -1066,97 +1067,171 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     };
 
     const claimedCellCoordsRef = useRef<Set<string>>(new Set());
+    const roundStartPosRef = useRef<{ [round: number]: { r: number; c: number } }>({});
+    // Cache the destination room (claimR, claimC) computed ONCE per round per player.
+    // Prevents re-computation when currentR/C changes mid-Reveal (player walks through door)
+    // or when map_matrix subscription update re-triggers the effect.
+    const claimCoordsByRoundRef = useRef<{[roundPlayerId: string]: {r: number, c: number}}>({});
+
+    // Lock starting position ONCE per round when round changes (never overwrite during the round!)
+    useEffect(() => {
+        if (myPlayer?.currentR !== undefined && myPlayer?.currentC !== undefined && gameState?.current_round) {
+            if (!roundStartPosRef.current[gameState.current_round]) {
+                roundStartPosRef.current[gameState.current_round] = { r: myPlayer.currentR, c: myPlayer.currentC };
+                console.log(`[ROUND START POS] Locked Round ${gameState.current_round} start position for "${myPlayer.username}": (${myPlayer.currentR}, ${myPlayer.currentC})`);
+            }
+        }
+    }, [gameState?.current_round, myPlayer?.id]);
 
     // Auto-claim cards DURING REVEAL PHASE when candidate enters destination room
     useEffect(() => {
         if (!myPlayer || !gameState || gameState.phase !== 'reveal' || myPlayer.trumpSwappedBy) return;
-        const parsedMap = parseMapMatrix(gameState.map_matrix);
-        const fallbackRotationMap = generateRotatedMap(gameState.map_rotation || 0);
-        const activeOldMap = parsedMap.old_map && parsedMap.old_map.length === 7 ? parsedMap.old_map : fallbackRotationMap;
-        const activeNewBase = parsedMap.new_map && parsedMap.new_map.length === 7 ? parsedMap.new_map : activeOldMap;
 
-        let claimR = myPlayer.currentR;
-        let claimC = myPlayer.currentC;
-        const doorChoice = myPlayer.pendingDoorChoice || (myPlayer as any).boughtDoorChoice || (myPlayer as any).lastDoorChoice;
-        if (doorChoice?.door?.direction) {
-            const dir = doorChoice.door.direction;
-            const isSkip = Boolean(doorChoice.isSkip);
-            const step = isSkip ? 2 : 1;
-            let candR = claimR;
-            let candC = claimC;
-            if (dir === 'up' || dir === 'north') candR = Math.max(0, candR - step);
-            if (dir === 'down' || dir === 'south') candR = Math.min(6, candR + step);
-            if (dir === 'left' || dir === 'west') candC = Math.max(0, candC - step);
-            if (dir === 'right' || dir === 'east') candC = Math.min(6, candC + step);
+        const roundPlayerKey = `${gameState.current_round}_${myPlayer.id}`;
+        let claimR: number;
+        let claimC: number;
 
-            const destCell = activeOldMap[candR]?.[candC];
-            if (destCell && destCell.type !== 'wall' && !destCell.isBlockedCell) {
-                claimR = candR;
-                claimC = candC;
-            }
-        }
+        if (claimCoordsByRoundRef.current[roundPlayerKey]) {
+            // Use the destination coords computed on the FIRST run this round — never recompute.
+            claimR = claimCoordsByRoundRef.current[roundPlayerKey].r;
+            claimC = claimCoordsByRoundRef.current[roundPlayerKey].c;
+        } else {
+            // First run this Reveal Phase — compute destination from round start position + doorChoice.
+            const parsedMap = parseMapMatrix(gameState.map_matrix);
+            const fallbackRotationMap = generateRotatedMap(gameState.map_rotation || 0);
+            const activeOldMap = parsedMap.old_map && parsedMap.old_map.length === 7 ? parsedMap.old_map : fallbackRotationMap;
 
-        const currentCell = activeOldMap[claimR]?.[claimC];
+            const startPos = roundStartPosRef.current[gameState.current_round] || { r: myPlayer.currentR, c: myPlayer.currentC };
+            claimR = startPos.r;
+            claimC = startPos.c;
 
-        if (currentCell && currentCell.specialCards && currentCell.specialCards.length > 0) {
-            const playerRoundCellKey = `${gameState.current_round}_${myPlayer.id}_${claimR}_${claimC}`;
+            const doorChoice = myPlayer.pendingDoorChoice || (myPlayer as any).boughtDoorChoice || (myPlayer as any).lastDoorChoice;
+            if (doorChoice?.door?.direction) {
+                const dir = doorChoice.door.direction;
+                const isSkip = Boolean(
+                    doorChoice.isSkip ||
+                    myPlayer.hasUsedSkipCard ||
+                    myPlayer.pendingDoorChoice?.isSkip ||
+                    myPlayer.lastDoorChoice?.isSkip ||
+                    (myPlayer as any).boughtDoorChoice?.isSkip
+                );
+                const step = isSkip ? 2 : 1;
+                let candR = claimR;
+                let candC = claimC;
+                if (dir === 'up' || dir === 'north') candR = Math.max(0, candR - step);
+                if (dir === 'down' || dir === 'south') candR = Math.min(6, candR + step);
+                if (dir === 'left' || dir === 'west') candC = Math.max(0, candC - step);
+                if (dir === 'right' || dir === 'east') candC = Math.min(6, candC + step);
 
-            if (claimedCellCoordsRef.current.has(playerRoundCellKey)) {
-                return;
-            }
-
-            const cardsToClaim = currentCell.specialCards.filter((c: string) => c && c !== 'none');
-            if (cardsToClaim.length === 0) return;
-
-            claimedCellCoordsRef.current.add(playerRoundCellKey);
-
-            const newInventory = [...(myPlayer.inventory || [])];
-            cardsToClaim.forEach((spec: any) => {
-                newInventory.push(spec);
-            });
-
-            const nextRoundCostMultiplier = calculateRedCostMultiplier(newInventory, 0, Boolean(myPlayer.frozenBy || myPlayer.frozenByPlayerId));
-            myRedMultiplierRef.current = nextRoundCostMultiplier;
-
-            console.log(`[CARD CLAIM LOG] Candidate "${myPlayer.username}" claimed card(s): [${cardsToClaim.join(', ')}] at room cell (${claimR}, ${claimC}). New Multiplier: ${nextRoundCostMultiplier}X.`);
-
-            const updatedNewMatrix = spawnCardsToNewLocation(activeNewBase, claimR, claimC, cardsToClaim);
-            const payloadMatrix = buildMapMatrixPayload(activeOldMap, activeOldMap, updatedNewMatrix);
-
-            const updatedPlayer = {
-                ...myPlayer,
-                inventory: newInventory,
-                nextRoundCostMultiplier
-            };
-            setMyPlayer(updatedPlayer);
-            setGameState(prev => prev ? { ...prev, map_matrix: payloadMatrix } as any : prev);
-
-            const currentParticipants = gameState.participants || [];
-            const newParticipants = currentParticipants.map(p => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
-            syncParticipantsToState(newParticipants);
-
-            const claimCardsInDB = async () => {
-                try {
-                    const token = await getAccessToken();
-                    await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}`, {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'apikey': supabaseKey
-                        },
-                        body: JSON.stringify({
-                            map_matrix: payloadMatrix,
-                            participants: newParticipants
-                        })
-                    });
-                } catch (e) {
-                    console.error('[JOKER_GAME] Claim cards error:', e);
+                const destCell = activeOldMap[candR]?.[candC];
+                if (destCell && destCell.type !== 'wall' && !destCell.isBlockedCell) {
+                    claimR = candR;
+                    claimC = candC;
                 }
-            };
-            claimCardsInDB();
+            }
+
+            // Lock in this destination for the entire Reveal Phase of this round
+            claimCoordsByRoundRef.current[roundPlayerKey] = { r: claimR, c: claimC };
+            console.log(`[CARD CLAIM] Destination locked: Round ${gameState.current_round}, Player "${myPlayer.username}" → room (${claimR}, ${claimC})`);
         }
-    }, [myPlayer?.currentR, myPlayer?.currentC, gameState?.phase, gameState?.current_round, JSON.stringify(gameState?.map_matrix)]);
+
+        const playerRoundCellKey = `${gameState.current_round}_${myPlayer.id}_${claimR}_${claimC}`;
+        if (claimedCellCoordsRef.current.has(playerRoundCellKey)) return;
+
+        // BOTH players who chose the same room both receive the card — NOT first-come-first-served.
+        // Card list comes from old_map (frozen round-start snapshot, same for everyone).
+        // new_map clear+respawn only runs for the FIRST claimant; subsequent claimants skip respawn
+        // but still receive their copy of the card from old_map.
+        const claimCardsFromLiveDB = async () => {
+            try {
+                const token = await getAccessToken();
+                const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}&select=map_matrix,participants`, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                });
+                if (!res.ok) return;
+                const dbData = await res.json();
+                if (!dbData || !dbData[0]) return;
+
+                const liveParsed = parseMapMatrix(dbData[0].map_matrix);
+                const liveNewMap = liveParsed.new_map && liveParsed.new_map.length === 7 ? liveParsed.new_map : generateRotatedMap(gameState.map_rotation || 0);
+                // old_map is the frozen round-start snapshot — every player reads the SAME card list from it
+                const liveOldMap = liveParsed.old_map && liveParsed.old_map.length === 7 ? liveParsed.old_map : liveNewMap;
+
+                // Determine cards to give THIS player from old_map (round-start state, identical for all players)
+                const oldMapCell = liveOldMap[claimR]?.[claimC];
+                if (!oldMapCell || !oldMapCell.specialCards || oldMapCell.specialCards.length === 0) {
+                    // No card was placed in this room at round start — nothing to claim
+                    claimedCellCoordsRef.current.add(playerRoundCellKey);
+                    console.log(`[CARD CLAIM LOG] Room (${claimR}, ${claimC}) had no cards at round start — nothing to claim.`);
+                    return;
+                }
+
+                const cardsToClaim = oldMapCell.specialCards.filter((c: string) => c && c !== 'none');
+                if (cardsToClaim.length === 0) {
+                    claimedCellCoordsRef.current.add(playerRoundCellKey);
+                    return;
+                }
+
+                // Mark claimed BEFORE async DB write to prevent double-fire for THIS player
+                claimedCellCoordsRef.current.add(playerRoundCellKey);
+
+                const newInventory = [...(myPlayer.inventory || [])];
+                cardsToClaim.forEach((spec: any) => { newInventory.push(spec); });
+
+                const nextRoundCostMultiplier = calculateRedCostMultiplier(newInventory, 0, Boolean(myPlayer.frozenBy || myPlayer.frozenByPlayerId));
+                myRedMultiplierRef.current = nextRoundCostMultiplier;
+
+                console.log(`[CARD CLAIM LOG] Candidate "${myPlayer.username}" claimed card(s): [${cardsToClaim.join(', ')}] at room cell (${claimR}, ${claimC}). New Multiplier: ${nextRoundCostMultiplier}X.`);
+
+                // Only respawn (clear + move card) if new_map still has the card — i.e. this is the FIRST claimant.
+                // If new_map cell is already empty, another player already triggered the respawn — skip it.
+                // Either way, THIS player still receives the card from old_map above.
+                const newMapCell = liveNewMap[claimR]?.[claimC];
+                const newMapHasCard = newMapCell?.specialCards && newMapCell.specialCards.filter((c: string) => c && c !== 'none').length > 0;
+
+                let payloadMatrix: any;
+                if (newMapHasCard) {
+                    // First claimant: clear cell in new_map and respawn card elsewhere
+                    const liveParticipantsForSpawn: any[] = dbData[0].participants || [];
+                    const occupiedPositions = liveParticipantsForSpawn
+                        .filter((p: any) => typeof p.currentR === 'number' && typeof p.currentC === 'number')
+                        .map((p: any) => ({ r: p.currentR, c: p.currentC }));
+                    const updatedNewMatrix = spawnCardsToNewLocation(liveNewMap, claimR, claimC, cardsToClaim, occupiedPositions);
+                    payloadMatrix = buildMapMatrixPayload(liveOldMap, liveOldMap, updatedNewMatrix);
+                    console.log(`[CARD CLAIM LOG] First claimant — card respawned from (${claimR}, ${claimC}) to new location.`);
+                } else {
+                    // Subsequent claimant: card already respawned by someone else — just update participants
+                    payloadMatrix = buildMapMatrixPayload(liveOldMap, liveOldMap, liveNewMap);
+                    console.log(`[CARD CLAIM LOG] Subsequent claimant — card already respawned, skipping respawn.`);
+                }
+
+                const updatedPlayer = { ...myPlayer, inventory: newInventory, nextRoundCostMultiplier };
+                setMyPlayer(updatedPlayer);
+                setGameState(prev => prev ? { ...prev, map_matrix: payloadMatrix } as any : prev);
+
+                const liveParticipants: any[] = dbData[0].participants || [];
+                const newParticipants = liveParticipants.map((p: any) => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
+                syncParticipantsToState(newParticipants);
+
+                await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                        'apikey': supabaseKey
+                    },
+                    body: JSON.stringify({ map_matrix: payloadMatrix, participants: newParticipants })
+                });
+            } catch (e) {
+                console.error('[JOKER_GAME] Claim cards error:', e);
+            }
+        };
+        claimCardsFromLiveDB();
+    // Intentionally exclude gameState.map_matrix from deps: we fetch live from DB anyway, and including
+    // it caused cascade re-runs (claim → DB update → subscription → re-run → wrong destination).
+    // Also exclude currentR/C from re-computing destination (cached in claimCoordsByRoundRef).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [myPlayer?.id, myPlayer?.currentR, myPlayer?.currentC, gameState?.phase, gameState?.current_round]);
 
     const handleExecuteFreeze = async (targetPlayerId: string) => {
         if (!myPlayer || !gameState) return;

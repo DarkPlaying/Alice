@@ -114,6 +114,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     const hasPlayedEntranceAnimRef = useRef<string>('');
     const hasPlayedFadeInAnimRef = useRef<string>('');
     const lastBuiltRoomKeyRef = useRef<string>('');
+    const roomCardHistoryRef = useRef<{ [cellKey: string]: string[] }>({});
 
     const onEnterRoomRef = useRef(onEnterRoom);
     useEffect(() => {
@@ -543,6 +544,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
 
             const parsedMap = parseMapMatrix(gameState?.map_matrix || gridMatrix);
             const activeOldMap = parsedMap.old_map && parsedMap.old_map.length === 7 ? parsedMap.old_map : gridMatrix;
+            // old_map is the frozen round-start snapshot. Use it for BOTH room geometry AND center card display so:
+            //   • Choosing Phase: shows what cards were there at round start (correct reference for players)
+            //   • Reveal Phase: card stays visible even after a player claims it (new_map clears it, old_map doesn't)
+            // Claim logic reads LIVE from DB, so only the first claimant actually receives the card — display is separate.
             const displayCell = activeOldMap[currentCell.r]?.[currentCell.c] || currentCell;
 
             if (isNewRoom || isRoundChanged || lastBuiltRoomKeyRef.current !== roomBuildKey || lastBuiltIsSkipRef.current !== isSkipUsed) {
@@ -550,6 +555,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 lastBuiltIsSkipRef.current = isSkipUsed;
                 lastRenderedCenterCardKeyRef.current = '';
                 console.log(`[DOOR 3D LOG] Building 3D room geometry for Room (${currentCell.r}, ${currentCell.c}) (isSkip: ${isSkipUsed})`);
+                // Room geometry (walls, doors) built from old_map structure; card display updated separately from new_map
                 hallwayRef.current.rebuildRoomForCell(displayCell, doorSystemRef.current, activeOldMap, isSkipUsed, player, phase === 'reveal');
             }
 
@@ -684,21 +690,26 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     : true
             );
 
-            // Synchronized room cards directly from snapshot/gridMatrix for absolute consistency & 0 flickering
-            const roomKey = `${displayCell.r}_${displayCell.c}`;
-            const snapshottedCards = roomCardMapRef.current[roomKey];
-            const gridCellCards = (gridMatrix[displayCell.r]?.[displayCell.c]?.specialCards || []).filter((c: string) => c && c !== 'none');
-            const liveRoomCards = (snapshottedCards && snapshottedCards.length > 0)
-                ? snapshottedCards
-                : (gridCellCards.length > 0
-                    ? gridCellCards
-                    : (displayCell.specialCards || []).filter((c: string) => c && c !== 'none'));
+            // Read card data from old_map, falling back to roomCardHistoryRef and gridMatrix if old_map was cleared post-claim:
+            // This ensures during Choosing Phase (and when selecting doors), the center card display persists the card from the previous Reveal Phase.
+            const roomKey = `${currentCell.r}_${currentCell.c}`;
+            const liveCards = (displayCell.specialCards || []).filter((c: string) => c && c !== 'none');
+            const gridCellCards = (gridMatrix[currentCell.r]?.[currentCell.c]?.specialCards || []).filter((c: string) => c && c !== 'none');
+            const rawGridCards = (parsedMap.grid?.[currentCell.r]?.[currentCell.c]?.specialCards || []).filter((c: string) => c && c !== 'none');
 
-            if (liveRoomCards.length > 0 && !roomCardMapRef.current[roomKey]) {
-                roomCardMapRef.current[roomKey] = [...liveRoomCards];
+            if (liveCards.length > 0) {
+                roomCardHistoryRef.current[roomKey] = liveCards;
+            } else if (gridCellCards.length > 0 && !roomCardHistoryRef.current[roomKey]) {
+                roomCardHistoryRef.current[roomKey] = gridCellCards;
+            } else if (rawGridCards.length > 0 && !roomCardHistoryRef.current[roomKey]) {
+                roomCardHistoryRef.current[roomKey] = rawGridCards;
             }
 
-            let cellCards: any = (liveRoomCards.length > 0) ? liveRoomCards : 'none';
+            const activeCards = liveCards.length > 0
+                ? liveCards
+                : (roomCardHistoryRef.current[roomKey] || gridCellCards || rawGridCards || []);
+
+            let cellCards: any = activeCards.length > 0 ? activeCards : 'none';
 
             if (isMyTargetExitRoom) {
                 cellCards = 'win';
@@ -712,8 +723,26 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 lastRenderedCenterCardKeyRef.current = cardRenderKey;
                 doorSystemRef.current.createCenterSpecialCard(cellCards);
             }
+
+            // Hide center card briefly during door bounce/fade-in animation (~1s) when entering a new room
+            // to prevent peeking card color through door gaps. After animation (or when standing in room), always show the card.
+            if (doorSystemRef.current && doorSystemRef.current.centerMesh) {
+                if (isNewRoom) {
+                    doorSystemRef.current.centerMesh.visible = false;
+                    const meshToShow = doorSystemRef.current.centerMesh;
+                    setTimeout(() => {
+                        if (meshToShow) meshToShow.visible = true;
+                    }, 900);
+                } else {
+                    doorSystemRef.current.centerMesh.visible = true;
+                }
+            }
         }
+    // Watch old_map (not new_map) for the current cell's cards. old_map is the frozen round-start
+    // snapshot: it never clears mid-round after a claim, so the card stays visible throughout Reveal
+    // and correctly reflects round-start state during Choosing Phase.
     }, [currentCell.r, currentCell.c, phase, isSkipUsed, JSON.stringify(parseMapMatrix(gameState?.map_matrix).old_map?.[currentCell.r]?.[currentCell.c]?.specialCards || [])]);
+
 
     // Door selection highlight (STRICTLY ONLY for current round's pending choice or locked door)
     useEffect(() => {
@@ -998,8 +1027,19 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                             const stableCost = stableDoorCostsRef.current[dir] || door.cost || 10;
                             const displayCost = player?.hasUsedGreenCard ? 0 : stableCost * costMultiplier;
 
-                            const activeLockedDir = lockedDoorDir || player?.pendingDoorChoice?.door?.direction;
-                            const isLockedThis = activeLockedDir === dir;
+                            const normalizeDir = (d?: string | null) => {
+                                if (!d) return '';
+                                const lower = String(d).toLowerCase();
+                                if (lower === 'north' || lower === 'up') return 'up';
+                                if (lower === 'south' || lower === 'down') return 'down';
+                                if (lower === 'west' || lower === 'left') return 'left';
+                                if (lower === 'east' || lower === 'right') return 'right';
+                                return lower;
+                            };
+
+                            const rawActiveDir = lockedDoorDir || lockedDoorDirRef.current || player?.pendingDoorChoice?.door?.direction || (player as any)?.boughtDoorChoice?.door?.direction || (player as any)?.lastDoorChoice?.door?.direction || selectedDoorRef.current?.direction || lastChosenDirRef.current;
+                            const activeLockedDir = normalizeDir(rawActiveDir);
+                            const isLockedThis = activeLockedDir === normalizeDir(dir);
 
                             return (
                                 <button

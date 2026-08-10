@@ -76,30 +76,45 @@ export const BASE_7X7_MAP: MapCell[][] = (() => {
     return ensureTwentyFourSpecialCards(grid);
 })();
 
-export function spawnCardsToNewLocation(matrix: MapCell[][], claimR: number, claimC: number, claimedCards: string[]): MapCell[][] {
+// occupiedPositions: list of {r, c} for every player currently in the maze.
+// Respawned cards will NOT land on any occupied room so they aren't instantly auto-claimed again.
+export function spawnCardsToNewLocation(
+    matrix: MapCell[][],
+    claimR: number,
+    claimC: number,
+    claimedCards: string[],
+    occupiedPositions: Array<{ r: number; c: number }> = []
+): MapCell[][] {
     const newMatrix = matrix.map(row => row.map(cell => ({ ...cell, doors: [...cell.doors], specialCards: cell.specialCards ? [...cell.specialCards] : undefined })));
-    
+
     // Clear claimed cell special cards
     if (newMatrix[claimR]?.[claimC]) {
         newMatrix[claimR][claimC].specialCards = undefined;
     }
 
-    // Respawn claimed cards into random path cells
-    const emptyPathCells: MapCell[] = [];
+    // Build a fast lookup set of all player-occupied cells
+    const occupiedSet = new Set(occupiedPositions.map(p => `${p.r}_${p.c}`));
+    // Always exclude the claimed cell itself
+    occupiedSet.add(`${claimR}_${claimC}`);
+
+    // Collect valid respawn targets: path cells with room for more cards AND no player occupying them
+    const validRespawnCells: MapCell[] = [];
     for (let r = 0; r < 7; r++) {
         for (let c = 0; c < 7; c++) {
-            if (r === claimR && c === claimC) continue;
+            if (occupiedSet.has(`${r}_${c}`)) continue;
             const cell = newMatrix[r][c];
             if (cell.type === 'path' && (!cell.specialCards || cell.specialCards.length < 3)) {
-                emptyPathCells.push(cell);
+                validRespawnCells.push(cell);
             }
         }
     }
 
-    if (emptyPathCells.length > 0 && claimedCards && claimedCards.length > 0) {
+    // If no valid unoccupied cell exists, don't force spawn — card is simply not placed.
+    // There is no requirement to maintain a fixed card count every round.
+    if (validRespawnCells.length > 0 && claimedCards && claimedCards.length > 0) {
         claimedCards.forEach(card => {
             if (!card || card === 'none') return;
-            const randomCell = emptyPathCells[Math.floor(Math.random() * emptyPathCells.length)];
+            const randomCell = validRespawnCells[Math.floor(Math.random() * validRespawnCells.length)];
             if (randomCell) {
                 const currentSpecs = newMatrix[randomCell.r][randomCell.c].specialCards || [];
                 newMatrix[randomCell.r][randomCell.c].specialCards = [...currentSpecs, card as any];
