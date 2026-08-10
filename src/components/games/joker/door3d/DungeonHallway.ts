@@ -378,10 +378,6 @@ export class DungeonHallway {
           }
           cardTypes = cardTypes.filter(c => c && c !== 'none');
 
-          if (cardTypes.length === 0 && destCell.type !== 'exit') {
-            cardTypes = ['none'];
-          }
-
           if (cardTypes.length > 0) {
             // Show special card types with spacing
             const totalCards = cardTypes.length;

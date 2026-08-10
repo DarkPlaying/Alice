@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Lock, Unlock, Zap, Briefcase, LogOut, AlertTriangle, Eye, Timer, ShieldAlert, User } from 'lucide-react';
+import { Shield, Lock, Unlock, Zap, Briefcase, LogOut, AlertTriangle, Eye, Timer, ShieldAlert, User, Map as MapIcon, X } from 'lucide-react';
 import type { DoorData, JokerPlayer, MapCell, JokerGameState } from '../jokerTypes';
 import { DOOR_3D_CONFIG } from './door3dConfig';
 import { DungeonHallway } from './DungeonHallway';
@@ -12,6 +12,7 @@ import { SoundEngine } from './SoundEngine';
 import { calculateRedCostMultiplier } from '../jokerInventoryConfig';
 import { PlayerCardModal } from '../../../PlayerCardModal';
 import { parseMapMatrix } from '../jokerMapData';
+import { JokerMapGrid } from '../JokerMapGrid';
 
 interface Joker3DWorldCanvasProps {
     currentCell: MapCell;
@@ -34,6 +35,7 @@ interface Joker3DWorldCanvasProps {
 export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     currentCell,
     player,
+    allPlayers,
     gridMatrix,
     phase,
     timeLeft,
@@ -57,6 +59,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     const [nearbyDoorTitle, setNearbyDoorTitle] = useState<string | null>(null);
     const [autoTeleportTimer, setAutoTeleportTimer] = useState(30);
     const [showPlayerProfileModal, setShowPlayerProfileModal] = useState<boolean>(false);
+    const [showMapModal, setShowMapModal] = useState<boolean>(false);
 
     const soundEngineRef = useRef<SoundEngine | null>(null);
     const doorSystemRef = useRef<DoorSystem | null>(null);
@@ -709,19 +712,26 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 ? liveCards
                 : (roomCardHistoryRef.current[roomKey] || gridCellCards || rawGridCards || []);
 
-            let cellCards: any = activeCards.length > 0 ? activeCards : 'none';
+            let cellCards: any = activeCards.length > 0 ? activeCards : null;
 
             if (isMyTargetExitRoom) {
                 cellCards = 'win';
             } else if (displayCell.type === 'exit') {
-                cellCards = 'none';
+                cellCards = null;
             }
 
             currentSpecialCardRef.current = cellCards;
             const cardRenderKey = `${currentCell.r}_${currentCell.c}_${JSON.stringify(cellCards)}`;
-            if (doorSystemRef.current && cellCards && (lastRenderedCenterCardKeyRef.current !== cardRenderKey || !doorSystemRef.current.centerMesh)) {
-                lastRenderedCenterCardKeyRef.current = cardRenderKey;
-                doorSystemRef.current.createCenterSpecialCard(cellCards);
+            if (doorSystemRef.current) {
+                if (cellCards && cellCards !== 'none') {
+                    if (lastRenderedCenterCardKeyRef.current !== cardRenderKey || !doorSystemRef.current.centerMesh) {
+                        lastRenderedCenterCardKeyRef.current = cardRenderKey;
+                        doorSystemRef.current.createCenterSpecialCard(cellCards);
+                    }
+                } else {
+                    lastRenderedCenterCardKeyRef.current = cardRenderKey;
+                    doorSystemRef.current.createCenterSpecialCard(null);
+                }
             }
 
             // Hide center card briefly during door bounce/fade-in animation (~1s) when entering a new room
@@ -738,9 +748,9 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 }
             }
         }
-    // Watch old_map (not new_map) for the current cell's cards. old_map is the frozen round-start
-    // snapshot: it never clears mid-round after a claim, so the card stays visible throughout Reveal
-    // and correctly reflects round-start state during Choosing Phase.
+        // Watch old_map (not new_map) for the current cell's cards. old_map is the frozen round-start
+        // snapshot: it never clears mid-round after a claim, so the card stays visible throughout Reveal
+        // and correctly reflects round-start state during Choosing Phase.
     }, [currentCell.r, currentCell.c, phase, isSkipUsed, JSON.stringify(parseMapMatrix(gameState?.map_matrix).old_map?.[currentCell.r]?.[currentCell.c]?.specialCards || [])]);
 
 
@@ -882,7 +892,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     <span>LOCK DOOR</span>
                 </div>
 
-                {/* Right Section: White Profile Pill Button, Inventory, Round, Timer, Credits & Exit */}
+                {/* Right Section: White Profile Pill Button, MAP Button, Inventory, Round, Timer, Credits & Exit */}
                 <div className="flex items-center gap-3 sm:gap-4">
                     <button
                         onClick={() => setShowPlayerProfileModal(true)}
@@ -891,6 +901,15 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     >
                         <User size={15} className="text-slate-700" />
                         <span>{player?.username || user?.username || 'PROFILE'}</span>
+                    </button>
+
+                    <button
+                        onClick={() => setShowMapModal(true)}
+                        className="flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-md hover:scale-105 active:scale-95"
+                        title="Open Labyrinth Map"
+                    >
+                        <MapIcon size={15} className="text-slate-950" />
+                        <span>MAP</span>
                     </button>
 
                     {onOpenInventory && (
@@ -1233,6 +1252,33 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     onClose={() => setShowPlayerProfileModal(false)}
                     currentGameScore={player?.score}
                 />
+            )}
+
+            {/* CONSTANT LABYRINTH MAP MODAL */}
+            {showMapModal && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-2xl w-full flex flex-col items-center gap-4 relative shadow-2xl">
+                        <button
+                            onClick={() => setShowMapModal(false)}
+                            className="absolute top-4 right-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
+                            title="Close Map"
+                        >
+                            <X size={20} />
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <MapIcon className="text-amber-400" size={24} />
+                            <h3 className="font-cinzel text-xl font-black text-white tracking-widest uppercase">LABYRINTH MAP</h3>
+                        </div>
+                        <div className="w-full flex items-center justify-center p-3 bg-slate-950/60 rounded-xl border border-slate-800 overflow-auto max-h-[80vh]">
+                            <JokerMapGrid
+                                gridMatrix={gridMatrix}
+                                players={allPlayers}
+                                currentPlayerId={player?.id}
+                                isAdminView={false}
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

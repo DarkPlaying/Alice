@@ -99,12 +99,12 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
 
     useEffect(() => {
         const currentPhaseStr = String(gameState?.phase || '');
-        const isEndPhase = currentPhaseStr === 'end' 
-            || currentPhaseStr === 'completed' 
-            || myPlayer?.hasReachedExit 
-            || myPlayer?.status === 'escaped' 
-            || (gameState?.participants || []).some(p => p.hasReachedExit || p.status === 'escaped') 
-            || showWinnerMapOverlay 
+        const isEndPhase = currentPhaseStr === 'end'
+            || currentPhaseStr === 'completed'
+            || myPlayer?.hasReachedExit
+            || myPlayer?.status === 'escaped'
+            || (gameState?.participants || []).some(p => p.hasReachedExit || p.status === 'escaped')
+            || showWinnerMapOverlay
             || showVictoryCard;
 
         if (!isEndPhase) {
@@ -555,15 +555,17 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             if (me) {
                 console.log(`[JOKER_GAME] State Update: Round ${data.current_round} | Phase: ${data.phase} | Player Pos: (${me.currentR}, ${me.currentC}) | Score: ${me.score}`);
                 setMyPlayer(prev => {
+                    const currentInventory = me?.inventory || prev?.inventory || [];
                     if (me?.hasUsedGreenCard) {
                         myRedMultiplierRef.current = 1;
                     } else {
-                        const calculatedMult = calculateRedCostMultiplier(me?.inventory || [], 0, Boolean(me?.frozenBy || me?.frozenByPlayerId));
+                        const calculatedMult = calculateRedCostMultiplier(currentInventory, 0, Boolean(me?.frozenBy || me?.frozenByPlayerId));
                         myRedMultiplierRef.current = Math.min(6, Math.max(calculatedMult, me?.nextRoundCostMultiplier || 1));
                     }
 
                     let newMe = {
                         ...me!,
+                        inventory: currentInventory,
                         nextRoundCostMultiplier: me?.hasUsedGreenCard ? 1 : myRedMultiplierRef.current
                     };
 
@@ -968,7 +970,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         }
 
         let updatedInventory = myPlayer.inventory.filter((c, idx) => idx !== myPlayer.inventory.indexOf(card));
-        
+
         let updatedPlayer: JokerPlayer = {
             ...myPlayer,
             inventory: updatedInventory,
@@ -1071,7 +1073,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     // Cache the destination room (claimR, claimC) computed ONCE per round per player.
     // Prevents re-computation when currentR/C changes mid-Reveal (player walks through door)
     // or when map_matrix subscription update re-triggers the effect.
-    const claimCoordsByRoundRef = useRef<{[roundPlayerId: string]: {r: number, c: number}}>({});
+    const claimCoordsByRoundRef = useRef<{ [roundPlayerId: string]: { r: number, c: number } }>({});
 
     // Lock starting position ONCE per round when round changes (never overwrite during the round!)
     useEffect(() => {
@@ -1088,8 +1090,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         if (!myPlayer || !gameState || gameState.phase !== 'reveal' || myPlayer.trumpSwappedBy) return;
 
         const roundPlayerKey = `${gameState.current_round}_${myPlayer.id}`;
-        let claimR: number;
-        let claimC: number;
+        let claimR: number = myPlayer.currentR;
+        let claimC: number = myPlayer.currentC;
 
         if (claimCoordsByRoundRef.current[roundPlayerKey]) {
             // Use the destination coords computed on the FIRST run this round — never recompute.
@@ -1101,13 +1103,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             const fallbackRotationMap = generateRotatedMap(gameState.map_rotation || 0);
             const activeOldMap = parsedMap.old_map && parsedMap.old_map.length === 7 ? parsedMap.old_map : fallbackRotationMap;
 
-            const startPos = roundStartPosRef.current[gameState.current_round] || { r: myPlayer.currentR, c: myPlayer.currentC };
-            claimR = startPos.r;
-            claimC = startPos.c;
-
             const doorChoice = myPlayer.pendingDoorChoice || (myPlayer as any).boughtDoorChoice || (myPlayer as any).lastDoorChoice;
-            if (doorChoice?.door?.direction) {
-                const dir = doorChoice.door.direction;
+            if (doorChoice?.door) {
                 const isSkip = Boolean(
                     doorChoice.isSkip ||
                     myPlayer.hasUsedSkipCard ||
@@ -1115,24 +1112,13 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                     myPlayer.lastDoorChoice?.isSkip ||
                     (myPlayer as any).boughtDoorChoice?.isSkip
                 );
-                const step = isSkip ? 2 : 1;
-                let candR = claimR;
-                let candC = claimC;
-                if (dir === 'up' || dir === 'north') candR = Math.max(0, candR - step);
-                if (dir === 'down' || dir === 'south') candR = Math.min(6, candR + step);
-                if (dir === 'left' || dir === 'west') candC = Math.max(0, candC - step);
-                if (dir === 'right' || dir === 'east') candC = Math.min(6, candC + step);
-
-                const destCell = activeOldMap[candR]?.[candC];
-                if (destCell && destCell.type !== 'wall' && !destCell.isBlockedCell) {
-                    claimR = candR;
-                    claimC = candC;
-                }
+                const { updatedPlayer: calcPlayer } = processDoorPurchase(myPlayer, doorChoice.door, doorChoice.finalCost || 0, isSkip, activeOldMap);
+                claimR = calcPlayer.currentR;
+                claimC = calcPlayer.currentC;
             }
 
-            // Lock in this destination for the entire Reveal Phase of this round
             claimCoordsByRoundRef.current[roundPlayerKey] = { r: claimR, c: claimC };
-            console.log(`[CARD CLAIM] Destination locked: Round ${gameState.current_round}, Player "${myPlayer.username}" → room (${claimR}, ${claimC})`);
+            console.log(`[CARD CLAIM] Destination resolved: Round ${gameState.current_round}, Player "${myPlayer.username}" → room (${claimR}, ${claimC})`);
         }
 
         const playerRoundCellKey = `${gameState.current_round}_${myPlayer.id}_${claimR}_${claimC}`;
@@ -1154,29 +1140,33 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
 
                 const liveParsed = parseMapMatrix(dbData[0].map_matrix);
                 const liveNewMap = liveParsed.new_map && liveParsed.new_map.length === 7 ? liveParsed.new_map : generateRotatedMap(gameState.map_rotation || 0);
-                // old_map is the frozen round-start snapshot — every player reads the SAME card list from it
                 const liveOldMap = liveParsed.old_map && liveParsed.old_map.length === 7 ? liveParsed.old_map : liveNewMap;
 
-                // Determine cards to give THIS player from old_map (round-start state, identical for all players)
-                const oldMapCell = liveOldMap[claimR]?.[claimC];
-                if (!oldMapCell || !oldMapCell.specialCards || oldMapCell.specialCards.length === 0) {
-                    // No card was placed in this room at round start — nothing to claim
-                    claimedCellCoordsRef.current.add(playerRoundCellKey);
-                    console.log(`[CARD CLAIM LOG] Room (${claimR}, ${claimC}) had no cards at round start — nothing to claim.`);
-                    return;
-                }
+                // Check claimR/claimC room cell, falling back to myPlayer.currentR/C room cell
+                const oldMapCell = liveOldMap[claimR]?.[claimC] || liveOldMap[myPlayer.currentR]?.[myPlayer.currentC];
+                const newMapCell = liveNewMap[claimR]?.[claimC] || liveNewMap[myPlayer.currentR]?.[myPlayer.currentC];
+                const gridCell = liveParsed.grid[claimR]?.[claimC] || liveParsed.grid[myPlayer.currentR]?.[myPlayer.currentC];
 
-                const cardsToClaim = oldMapCell.specialCards.filter((c: string) => c && c !== 'none');
+                const availableSpecialCards = (oldMapCell?.specialCards && oldMapCell.specialCards.length > 0)
+                    ? oldMapCell.specialCards
+                    : ((newMapCell?.specialCards && newMapCell.specialCards.length > 0)
+                        ? newMapCell.specialCards
+                        : (gridCell?.specialCards || []));
+
+                const cardsToClaim = availableSpecialCards.filter((c: string) => c && c !== 'none');
                 if (cardsToClaim.length === 0) {
                     claimedCellCoordsRef.current.add(playerRoundCellKey);
+                    console.log(`[CARD CLAIM LOG] Room (${claimR}, ${claimC}) had no cards — nothing to claim.`);
                     return;
                 }
 
                 // Mark claimed BEFORE async DB write to prevent double-fire for THIS player
                 claimedCellCoordsRef.current.add(playerRoundCellKey);
 
-                const newInventory = [...(myPlayer.inventory || [])];
-                cardsToClaim.forEach((spec: any) => { newInventory.push(spec); });
+                const liveParticipants: any[] = dbData[0].participants || [];
+                const dbMe = liveParticipants.find((p: any) => isSamePlayer(p, myPlayer));
+                const baseInv = dbMe?.inventory || myPlayer.inventory || [];
+                const newInventory = [...baseInv, ...cardsToClaim];
 
                 const nextRoundCostMultiplier = calculateRedCostMultiplier(newInventory, 0, Boolean(myPlayer.frozenBy || myPlayer.frozenByPlayerId));
                 myRedMultiplierRef.current = nextRoundCostMultiplier;
@@ -1186,7 +1176,6 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 // Only respawn (clear + move card) if new_map still has the card — i.e. this is the FIRST claimant.
                 // If new_map cell is already empty, another player already triggered the respawn — skip it.
                 // Either way, THIS player still receives the card from old_map above.
-                const newMapCell = liveNewMap[claimR]?.[claimC];
                 const newMapHasCard = newMapCell?.specialCards && newMapCell.specialCards.filter((c: string) => c && c !== 'none').length > 0;
 
                 let payloadMatrix: any;
@@ -1209,7 +1198,6 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 setMyPlayer(updatedPlayer);
                 setGameState(prev => prev ? { ...prev, map_matrix: payloadMatrix } as any : prev);
 
-                const liveParticipants: any[] = dbData[0].participants || [];
                 const newParticipants = liveParticipants.map((p: any) => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
                 syncParticipantsToState(newParticipants);
 
@@ -1227,10 +1215,10 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             }
         };
         claimCardsFromLiveDB();
-    // Intentionally exclude gameState.map_matrix from deps: we fetch live from DB anyway, and including
-    // it caused cascade re-runs (claim → DB update → subscription → re-run → wrong destination).
-    // Also exclude currentR/C from re-computing destination (cached in claimCoordsByRoundRef).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Intentionally exclude gameState.map_matrix from deps: we fetch live from DB anyway, and including
+        // it caused cascade re-runs (claim → DB update → subscription → re-run → wrong destination).
+        // Also exclude currentR/C from re-computing destination (cached in claimCoordsByRoundRef).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [myPlayer?.id, myPlayer?.currentR, myPlayer?.currentC, gameState?.phase, gameState?.current_round]);
 
     const handleExecuteFreeze = async (targetPlayerId: string) => {
@@ -2111,9 +2099,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                         </div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <span className={`px-3.5 py-1.5 font-black text-xs uppercase rounded-lg tracking-wider shadow-md ${
-                                                            winnerEscaped ? 'bg-emerald-400 border-2 border-emerald-300 text-slate-900' : 'bg-red-400 border-2 border-red-300 text-slate-900'
-                                                        }`}>
+                                                        <span className={`px-3.5 py-1.5 font-black text-xs uppercase rounded-lg tracking-wider shadow-md ${winnerEscaped ? 'bg-emerald-400 border-2 border-emerald-300 text-slate-900' : 'bg-red-400 border-2 border-red-300 text-slate-900'
+                                                            }`}>
                                                             {winnerEscaped ? 'ESCAPED (+1000 PTS)' : 'ELIMINATED (-200 PTS)'}
                                                         </span>
                                                     </div>
@@ -2148,9 +2135,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                     return (
                                                         <div
                                                             key={p.id || idx}
-                                                            className={`p-3.5 flex items-center justify-between text-xs font-mono transition-all backdrop-blur-sm ${
-                                                                isMe ? 'bg-white/25 font-bold' : ''
-                                                            }`}
+                                                            className={`p-3.5 flex items-center justify-between text-xs font-mono transition-all backdrop-blur-sm ${isMe ? 'bg-white/25 font-bold' : ''
+                                                                }`}
                                                         >
                                                             <div className="flex items-center gap-3">
                                                                 <span className="w-10 font-black text-amber-300">{rankStr}</span>
@@ -2163,11 +2149,10 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                                     SCORE: <strong className="text-white font-extrabold">{finalScore} PTS</strong>
                                                                 </span>
                                                                 <span
-                                                                    className={`px-3 py-1 text-[10px] font-black uppercase rounded shadow-md ${
-                                                                        isEscaped
+                                                                    className={`px-3 py-1 text-[10px] font-black uppercase rounded shadow-md ${isEscaped
                                                                             ? 'bg-emerald-400 text-slate-900 border border-emerald-300'
                                                                             : 'bg-red-400 text-slate-900 border border-red-300'
-                                                                    }`}
+                                                                        }`}
                                                                 >
                                                                     {isEscaped ? 'ESCAPED (+1000)' : 'ELIMINATED (-200)'}
                                                                 </span>
@@ -2206,7 +2191,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         <div className="w-16 h-16 rounded-2xl bg-red-950/90 border-2 border-red-500 flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(239,68,68,0.6)] animate-pulse">
                             <ShieldAlert size={36} className="text-red-500" />
                         </div>
-                        
+
                         <h2 className="text-2xl font-cinzel font-black text-red-100 tracking-wider mb-1">
                             DOOR BLOCKED BY RED CARD ATTACK!
                         </h2>

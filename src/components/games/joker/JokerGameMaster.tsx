@@ -604,7 +604,7 @@ export const JokerGameMaster: React.FC<JokerGameMasterProps> = ({ user }) => {
                     currentR: entryCell.r,
                     currentC: entryCell.c,
                     score: keepPoints ? (p.score ?? 1000) : 1000,
-                    inventory: [],
+                    inventory: getDefaultStartingInventory(false),
                     status: 'active' as const,
                     pendingDoorChoice: undefined,
                     hasReachedExit: false

@@ -594,8 +594,8 @@ export class DoorSystem {
 
     let cardTypes: string[] = [];
     if (Array.isArray(cardInput)) {
-      cardTypes = cardInput.filter(c => c && c !== 'none');
-    } else if (typeof cardInput === 'string' && cardInput !== 'none') {
+      cardTypes = cardInput.filter(c => c);
+    } else if (typeof cardInput === 'string') {
       cardTypes = [cardInput];
     }
 
