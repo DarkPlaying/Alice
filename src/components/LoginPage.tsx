@@ -53,6 +53,9 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 };
                 localStorage.setItem('demo-user-session', JSON.stringify(demoUser));
                 if (onLogin) onLogin(demoUser);
+                setTimeout(() => {
+                    window.location.reload();
+                }, 100);
                 return;
             }
 
@@ -144,6 +147,11 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             } else {
                 onLogin(finalUser);
             }
+
+            // Refresh the page upon successful login
+            setTimeout(() => {
+                window.location.reload();
+            }, 100);
         } catch (err: any) {
             console.error("Login Error:", err);
 
