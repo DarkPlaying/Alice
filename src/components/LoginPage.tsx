@@ -38,6 +38,17 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
     }, []);
 
 
+    useEffect(() => {
+        const storedError = sessionStorage.getItem('login_error_msg');
+        if (storedError) {
+            sessionStorage.removeItem('login_error_msg');
+            setError(storedError);
+            setTimeout(() => {
+                shakeForm();
+            }, 200);
+        }
+    }, []);
+
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(false);
@@ -53,9 +64,6 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 };
                 localStorage.setItem('demo-user-session', JSON.stringify(demoUser));
                 if (onLogin) onLogin(demoUser);
-                setTimeout(() => {
-                    window.location.reload();
-                }, 100);
                 return;
             }
 
@@ -101,8 +109,9 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 .single();
 
             if (profileError || !userData) {
-                setError("IDENTITY UNLINKED. CONTACT GAME MASTER.");
-                shakeForm();
+                const unlinkedMsg = "IDENTITY UNLINKED. CONTACT GAME MASTER.";
+                sessionStorage.setItem('login_error_msg', unlinkedMsg);
+                window.location.reload();
                 return;
             }
 
@@ -147,23 +156,19 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             } else {
                 onLogin(finalUser);
             }
-
-            // Refresh the page upon successful login
-            setTimeout(() => {
-                window.location.reload();
-            }, 100);
         } catch (err: any) {
             console.error("Login Error:", err);
 
+            let errorMsg = `SYSTEM ERROR: ${err.message || ''}`;
             const msg = err.message || '';
             if (msg.includes('Invalid login credentials')) {
-                setError("ACCESS DENIED. INVALID CREDENTIALS.");
+                errorMsg = "ACCESS DENIED. INVALID CREDENTIALS.";
             } else if (msg.includes('User already registered')) {
-                setError("IDENTITY ALREADY REGISTERED.");
-            } else {
-                setError(`SYSTEM ERROR: ${msg}`);
+                errorMsg = "IDENTITY ALREADY REGISTERED.";
             }
-            shakeForm();
+
+            sessionStorage.setItem('login_error_msg', errorMsg);
+            window.location.reload();
         }
     };
 
