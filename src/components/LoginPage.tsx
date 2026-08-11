@@ -151,7 +151,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 }
             });
 
-            if (userData.role === 'master' || userData.role === 'admin' || userData.username === 'admin') {
+            if (userData.role === 'admin' || userData.username === 'admin') {
                 onAdminLogin(finalUser);
             } else {
                 onLogin(finalUser);

@@ -4580,10 +4580,6 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                             }
                                                         }
 
-                                                        if (isSpades) {
-                                                            return;
-                                                        }
-
                                                         if (suit === 'clubs') {
                                                             const hasPlayer = finalFiltered.some(p => p.role === 'player' || !p.role);
                                                             const hasMaster = finalFiltered.some(p => p.role === 'master' || p.role === 'admin' || p.username === 'admin');
