@@ -53,6 +53,12 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
         e.preventDefault();
         setError(false);
 
+        if (!username.trim() || !password.trim()) {
+            sessionStorage.setItem('login_error_msg', "ACCESS DENIED. INVALID CREDENTIALS.");
+            window.location.reload();
+            return;
+        }
+
         try {
             if (username === 'demo' && password === 'demo') {
                 const demoUser = {
@@ -64,6 +70,9 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 };
                 localStorage.setItem('demo-user-session', JSON.stringify(demoUser));
                 if (onLogin) onLogin(demoUser);
+                setTimeout(() => {
+                    window.location.reload();
+                }, 100);
                 return;
             }
 
@@ -156,6 +165,11 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             } else {
                 onLogin(finalUser);
             }
+
+            // Reload page on every Enter The Borderland submit
+            setTimeout(() => {
+                window.location.reload();
+            }, 100);
         } catch (err: any) {
             console.error("Login Error:", err);
 

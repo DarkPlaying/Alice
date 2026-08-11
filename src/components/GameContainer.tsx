@@ -626,15 +626,14 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
                 {/* Protocol Header */}
                 {((type === 'Clubs' || type === 'Hearts') || (waitingForGM || showRules || kickedUser)) && (
-                    <div 
+                    <div
                         id="protocol-header"
-                        className={`relative z-50 flex justify-between items-center px-4 py-3 sm:px-8 sm:py-6 border-b transition-all duration-300 overflow-hidden ${
-                            (isGameEnded || isBriefing)
-                                ? 'bg-black border-transparent' 
-                                : isGameScrolled 
-                                    ? 'bg-black border-white/10' 
-                                    : 'backdrop-blur-md'
-                        }`}
+                        className={`relative z-50 flex justify-between items-center px-4 py-3 sm:px-8 sm:py-6 border-b transition-all duration-300 overflow-hidden ${(isGameEnded || isBriefing)
+                            ? 'bg-black border-transparent'
+                            : isGameScrolled
+                                ? 'bg-black border-white/10'
+                                : 'backdrop-blur-md'
+                            }`}
                         style={!(isGameEnded || isBriefing) && !isGameScrolled ? {
                             backgroundColor: (waitingForGM && !showRules) ? `${theme.color}15` : 'rgba(0,0,0,0.4)',
                             borderColor: (waitingForGM && !showRules) ? `${theme.color}50` : 'rgba(255,255,255,0.1)'
@@ -856,7 +855,7 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
 
                                     {/* BOTTOM: Center Confirm Button */}
                                     <div className="flex justify-center w-full">
-                                        {isMasterRole && (type === 'Spades' || type === 'Diamonds') ? (
+                                        {isMasterRole && (type === 'Spades' || type === 'Diamonds' || type === 'Joker') ? (
                                             <div
                                                 className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-red-900/40 backdrop-blur-md text-red-400 font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden border border-red-500/30 cursor-not-allowed"
                                                 style={{
