@@ -1173,10 +1173,7 @@ export const SpadesGame: React.FC<SpadesGameProps> = ({ user, onComplete, onFail
                                 setShowHintModal(true);
                                 return;
                             }
-                            let hintText = localRoundData.hint || 'Signal corrupted.';
-                            if (localRoundData.target_card && localRoundData.target_card.suit.toLowerCase() === 'clubs') {
-                                hintText = `${localRoundData.target_card.rank} OF CLUBS`;
-                            }
+                            const hintText = localRoundData.hint || 'Signal corrupted.';
                             setHintModalText(hintText);
                             setShowHintModal(true);
                         }}
