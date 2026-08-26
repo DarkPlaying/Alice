@@ -406,14 +406,17 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
             }
             onSelectDoor(null as any, 0, false);
         } else {
-            // Check if door direction is blocked by Red Card attack!
+            // Skip Card Validation & Target Calculation BEFORE locking
+            const isSkip = !!(player?.hasUsedSkipCard || player?.pendingDoorChoice?.isSkip);
+
+            // Check if door direction is blocked by Red Card attack (Skip Card BYPASSES Red Card door blocks!)
             const dDirStr = String(door.direction);
             const jokerDirCheck = (dDirStr === 'north' || dDirStr === 'up') ? 'up'
                 : (dDirStr === 'south' || dDirStr === 'down') ? 'down'
                     : (dDirStr === 'west' || dDirStr === 'left') ? 'left'
                         : 'right';
 
-            if ((player?.blockedDoorsByRed || []).includes(jokerDirCheck as any)) {
+            if (!isSkip && (player?.blockedDoorsByRed || []).includes(jokerDirCheck as any)) {
                 console.log(`[DOOR 3D LOG] Door ${door.direction} is blocked by Red Card attack! Opening unblock popup modal.`);
                 soundEngineRef.current?.playErrorBuzz();
                 modalOpenedAtRef.current = Date.now();
@@ -428,8 +431,6 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 return;
             }
 
-            // Skip Card Validation & Target Calculation BEFORE locking
-            const isSkip = !!(player?.hasUsedSkipCard || player?.pendingDoorChoice?.isSkip);
             const step = isSkip ? 2 : 1;
             let destR = Number(currentCell?.r ?? 0);
             let destC = Number(currentCell?.c ?? 0);
@@ -513,11 +514,11 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 doorSystemRef.current.setDoorSelected(dir3d, isSkip);
             }
 
-            // Green Card & Multiplier Application
+            // Green Card & Skip Card & Multiplier Application
             const isFrozenByCard = !!player?.frozenBy || !!player?.frozenByPlayerId;
             const baseMult = player?.nextRoundCostMultiplier || 1;
             const costMultiplier = player?.hasUsedGreenCard ? 1 : (isFrozenByCard ? 5 + baseMult : baseMult);
-            const finalCost = player?.hasUsedGreenCard ? 0 : (door.cost || 10) * costMultiplier;
+            const finalCost = (player?.hasUsedGreenCard || isSkip) ? 0 : (door.cost || 10) * costMultiplier;
 
             onSelectDoor(door, finalCost, isSkip);
             soundEngineRef.current?.playLockClick();

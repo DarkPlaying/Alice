@@ -22,7 +22,7 @@ export const getInventoryCardCounts = (inventory: SpecialDoorCardType[] = []): R
     return counts;
 };
 
-// Merges DB inventory with local player inventory so newly claimed cards are NEVER wiped out by stale Realtime updates.
+// Merges DB inventory with local player inventory so newly claimed and refunded cards are NEVER wiped out by stale Realtime updates.
 export const mergePlayerInventories = (
     dbInventory: SpecialDoorCardType[] = [],
     localInventory: SpecialDoorCardType[] = [],
@@ -40,11 +40,16 @@ export const mergePlayerInventories = (
 
         let finalCount = Math.max(dbC, localC);
 
-        // If card was explicitly used locally in this phase, local count is authoritative for that card
-        if (cardType === 'skip' && playerFlags?.hasUsedSkipCard) {
+        // If local has MORE cards than DB (claimed or refunded card), ALWAYS keep local count
+        if (localC > dbC) {
             finalCount = localC;
-        } else if (cardType === 'green' && playerFlags?.hasUsedGreenCard) {
-            finalCount = localC;
+        } else if (localC < dbC) {
+            // If local has FEWER cards (card consumed locally), check if card was used
+            if (cardType === 'skip' && playerFlags?.hasUsedSkipCard) {
+                finalCount = localC;
+            } else if (cardType === 'green' && playerFlags?.hasUsedGreenCard) {
+                finalCount = localC;
+            }
         }
 
         for (let i = 0; i < finalCount; i++) {

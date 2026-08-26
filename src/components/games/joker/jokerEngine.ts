@@ -38,7 +38,8 @@ export function processDoorPurchase(
 
     const finalCell = gridMatrix[nextR]?.[nextC];
     const reachedExit = finalCell?.type === 'exit' && finalCell?.exitIndex === player.entryIndex;
-    const newScore = Math.max(0, (player.score || 0) - (finalCost || 0));
+    const actualCost = isSkip ? 0 : (finalCost || 0);
+    const newScore = Math.max(0, (player.score || 0) - actualCost);
 
     const isGreenUsed = player.hasUsedGreenCard;
     const updatedMult = isGreenUsed ? 1 : (player.nextRoundCostMultiplier || 1);
