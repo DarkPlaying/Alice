@@ -5,6 +5,7 @@ import { Timer, Shield, Activity, Users, LogOut, Award, AlertTriangle, Eye, Map,
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../../supabaseClient';
 import type { JokerGameState, JokerPlayer, JokerPhase, DoorData, SpecialDoorCardType, MapCell } from './jokerTypes';
 import { generateRotatedMap, getEntryCell, getRandomEntryCell, ensureTwentySpecialCards, placeTrumpCardInRandomCell, spawnCardsToNewLocation, parseMapMatrix, buildMapMatrixPayload } from './jokerMapData';
+import { claimSpecialCardsForPlayer, mergePlayerInventories } from './jokerCardService';
 import { JokerMapGrid } from './JokerMapGrid';
 import { JokerBriefing } from './JokerBriefing';
 import { JokerDoorChooser } from './JokerDoorChooser';
@@ -558,17 +559,22 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             if (me) {
                 console.log(`[JOKER_GAME] State Update: Round ${data.current_round} | Phase: ${data.phase} | Player Pos: (${me.currentR}, ${me.currentC}) | Score: ${me.score}`);
                 setMyPlayer(prev => {
-                    const currentInventory = me?.inventory || prev?.inventory || [];
+                    const mergedInv = mergePlayerInventories(
+                        me?.inventory || [],
+                        prev?.inventory || [],
+                        { hasUsedSkipCard: me?.hasUsedSkipCard || prev?.hasUsedSkipCard, hasUsedGreenCard: me?.hasUsedGreenCard || prev?.hasUsedGreenCard }
+                    );
+
                     if (me?.hasUsedGreenCard) {
                         myRedMultiplierRef.current = 1;
                     } else {
-                        const calculatedMult = calculateRedCostMultiplier(currentInventory, 0, Boolean(me?.frozenBy || me?.frozenByPlayerId));
+                        const calculatedMult = calculateRedCostMultiplier(mergedInv, 0, Boolean(me?.frozenBy || me?.frozenByPlayerId));
                         myRedMultiplierRef.current = Math.min(6, Math.max(calculatedMult, me?.nextRoundCostMultiplier || 1));
                     }
 
                     let newMe = {
                         ...me!,
-                        inventory: currentInventory,
+                        inventory: mergedInv,
                         nextRoundCostMultiplier: me?.hasUsedGreenCard ? 1 : myRedMultiplierRef.current
                     };
 
@@ -1162,100 +1168,20 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         const playerRoundCellKey = `${gameState.current_round}_${myPlayer.id}_${claimR}_${claimC}`;
         if (claimedCellCoordsRef.current.has(playerRoundCellKey)) return;
 
-        // BOTH players who chose the same room both receive the card — NOT first-come-first-served.
-        // Card list comes from old_map (frozen round-start snapshot, same for everyone).
-        // new_map clear+respawn only runs for the FIRST claimant; subsequent claimants skip respawn
-        // but still receive their copy of the card from old_map.
-        const claimCardsFromLiveDB = async () => {
-            try {
-                const token = await getAccessToken();
-                const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}&select=map_matrix,participants`, {
-                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
-                    cache: 'no-store'
-                });
-                if (!res.ok) return;
-                const dbData = await res.json();
-                if (!dbData || !dbData[0]) return;
-
-                const liveParsed = parseMapMatrix(dbData[0].map_matrix);
-                const liveNewMap = liveParsed.new_map && liveParsed.new_map.length === 7 ? liveParsed.new_map : generateRotatedMap(gameState.map_rotation || 0);
-                const liveOldMap = liveParsed.old_map && liveParsed.old_map.length === 7 ? liveParsed.old_map : liveNewMap;
-
-                // Check claimR/claimC room cell from old_map (frozen round-start snapshot).
-                // old_map is never cleared mid-round, so the card is always visible for EVERY claimant.
-                const oldMapCell = liveOldMap[claimR]?.[claimC];
-                const newMapCell = liveNewMap[claimR]?.[claimC];
-
-                const availableSpecialCards = (oldMapCell?.specialCards && oldMapCell.specialCards.length > 0)
-                    ? oldMapCell.specialCards
-                    : (newMapCell?.specialCards && newMapCell.specialCards.length > 0)
-                        ? newMapCell.specialCards
-                        : [];
-
-                const cardsToClaim = availableSpecialCards.filter((c: string) => c && c !== 'none');
-                if (cardsToClaim.length === 0) {
-                    claimedCellCoordsRef.current.add(playerRoundCellKey);
-                    console.log(`[CARD CLAIM LOG] Room (${claimR}, ${claimC}) had no cards — nothing to claim.`);
-                    return;
-                }
-
-                // Mark claimed BEFORE async DB write to prevent double-fire for THIS player
-                claimedCellCoordsRef.current.add(playerRoundCellKey);
-
-                // Build this player's new inventory from the LIVE DB snapshot (prevents overwriting other players)
-                const liveParticipants: any[] = dbData[0].participants || [];
-                const dbMe = liveParticipants.find((p: any) => isSamePlayer(p, myPlayer));
-                const baseInv = dbMe?.inventory || myPlayer.inventory || [];
-                const newInventory = [...baseInv, ...cardsToClaim];
-
-                const nextRoundCostMultiplier = calculateRedCostMultiplier(newInventory, 0, Boolean(myPlayer.frozenBy || myPlayer.frozenByPlayerId));
-                myRedMultiplierRef.current = nextRoundCostMultiplier;
-
-                console.log(`[CARD CLAIM LOG] Candidate "${myPlayer.username}" claimed card(s): [${cardsToClaim.join(', ')}] at room cell (${claimR}, ${claimC}). New Multiplier: ${nextRoundCostMultiplier}X.`);
-
-                // Only respawn (clear + move card) if new_map still has the card — i.e. this is the FIRST claimant.
-                // If new_map cell is already empty, another player already triggered the respawn — skip it.
-                // Either way, THIS player still receives the card from old_map above.
-                const newMapHasCard = newMapCell?.specialCards && newMapCell.specialCards.filter((c: string) => c && c !== 'none').length > 0;
-
-                let payloadMatrix: any;
-                if (newMapHasCard) {
-                    // First claimant: clear cell in new_map and respawn card elsewhere
-                    const occupiedPositions = liveParticipants
-                        .filter((p: any) => typeof p.currentR === 'number' && typeof p.currentC === 'number')
-                        .map((p: any) => ({ r: p.currentR, c: p.currentC }));
-                    const updatedNewMatrix = spawnCardsToNewLocation(liveNewMap, claimR, claimC, cardsToClaim, occupiedPositions);
-                    payloadMatrix = buildMapMatrixPayload(liveOldMap, liveOldMap, updatedNewMatrix);
-                    console.log(`[CARD CLAIM LOG] First claimant — card respawned from (${claimR}, ${claimC}) to new location.`);
-                } else {
-                    // Subsequent claimant: card already respawned by someone else — just update participants
-                    payloadMatrix = buildMapMatrixPayload(liveOldMap, liveOldMap, liveNewMap);
-                    console.log(`[CARD CLAIM LOG] Subsequent claimant — card already respawned, skipping respawn.`);
-                }
-
-                const updatedPlayer = { ...myPlayer, inventory: newInventory, nextRoundCostMultiplier };
-                setMyPlayer(updatedPlayer);
-                setGameState(prev => prev ? { ...prev, map_matrix: payloadMatrix } as any : prev);
-
-                // ONE atomic PATCH: map_matrix + participants (only this player's entry updated from live DB).
-                // Do NOT call syncParticipantsToState separately — that would cause a second PATCH
-                // that races with this one and can overwrite another player's simultaneous claim.
-                const updatedParticipants = liveParticipants.map((p: any) => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
-                await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'apikey': supabaseKey
-                    },
-                    body: JSON.stringify({ map_matrix: payloadMatrix, participants: updatedParticipants })
-                });
-                console.log(`[CARD CLAIM LOG] Atomic DB PATCH sent: map_matrix + participants for "${myPlayer.username}".`);
-            } catch (e) {
-                console.error('[JOKER_GAME] Claim cards error:', e);
+        const executeClaim = async () => {
+            claimedCellCoordsRef.current.add(playerRoundCellKey);
+            const result = await claimSpecialCardsForPlayer(myPlayer, gameState, claimR, claimC);
+            if (result && result.success) {
+                setMyPlayer(result.updatedPlayer);
+                setGameState(prev => prev ? { ...prev, map_matrix: result.payloadMatrix } as any : prev);
+                console.log(`[CARD CLAIM SUCCESS] Candidate "${myPlayer.username}" claimed cards:`, result.claimedCards);
+            } else {
+                // If cell had no cards or claim deferred, delete key so retries can happen if needed
+                claimedCellCoordsRef.current.delete(playerRoundCellKey);
             }
         };
-        claimCardsFromLiveDB();
+
+        executeClaim();
         // Intentionally exclude gameState.map_matrix from deps: we fetch live from DB anyway, and including
         // it caused cascade re-runs (claim → DB update → subscription → re-run → wrong destination).
         // Also exclude currentR/C from re-computing destination (cached in claimCoordsByRoundRef).
