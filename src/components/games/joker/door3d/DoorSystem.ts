@@ -583,7 +583,7 @@ export class DoorSystem {
     }
 
     let targetX = 0;
-    let targetZ = -2.5;
+    let targetZ = 0;
     if (doorDir === 'north' || doorDir === 'up') targetZ = -16.4;
     else if (doorDir === 'south' || doorDir === 'down') targetZ = 16.4;
     else if (doorDir === 'east' || doorDir === 'right') { targetX = 16.4; targetZ = 0; }
