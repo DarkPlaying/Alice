@@ -1466,6 +1466,7 @@ export const ClubsGameMaster = ({ onComplete, user, isEngine = false }: ClubsGam
 
                     setGameState('setup_phase1');
                     setPhaseExpiry(expiry);
+                    channelRef.current?.send({ type: 'broadcast', event: 'game_started', payload: { timestamp: Date.now() } });
                 }
                 else if (gameState === 'setup_phase1' || gameState === 'setup') {
                     console.log('🎬 PHASE 1 TRANSITION TRIGGERED');

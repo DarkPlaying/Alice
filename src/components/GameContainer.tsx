@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Sword, Heart, Users, Brain, AlertTriangle, ArrowRight, LogOut, FastForward, User } from 'lucide-react';
+import { X, Sword, Heart, Users, Brain, AlertTriangle, ArrowRight, ArrowLeft, LogOut, FastForward, User } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { SpadesGame } from './games/SpadesGame';
@@ -325,17 +325,10 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
         const whitelistActive = localAllowedPlayers.length > 0;
         const isAllowed = currentUserId && localAllowedPlayers.includes(currentUserId);
         const isSpades = type === 'Spades';
-        const isDiamonds = type === 'Diamonds';
+        // Masters view game rules overview by default instead of Access Denied error popup
+        const accessGranted = isMasterRole || !whitelistActive || isAllowed;
 
-        // Masters are explicitly forbidden from joining Spades and Diamonds
-        const isForbiddenMaster = (isSpades || isDiamonds) && isMasterRole;
-        const accessGranted = (!isForbiddenMaster && isMasterRole) || !whitelistActive || isAllowed;
-
-        if (isForbiddenMaster) {
-            setSpadesMasterError(true);
-            setWaitingForGM(false);
-            setShowRules(false);
-        } else if (localSystemStart && accessGranted) {
+        if (localSystemStart && accessGranted && !isMasterRole) {
             console.log(`[GAME_ENTRY] Access confirmed for ${type}. Entry active.`);
             if (resetTimerRef.current) {
                 clearTimeout(resetTimerRef.current);
@@ -853,20 +846,38 @@ export const GameContainer = ({ type, onClose, isLoggedIn, onLogoutClick, userIn
                                         </div>
                                     </div>
 
-                                    {/* BOTTOM: Center Confirm Button */}
+                                    {/* BOTTOM: Center Confirm / Master Buttons */}
                                     <div className="flex justify-center w-full">
                                         {isMasterRole && (type === 'Spades' || type === 'Diamonds' || type === 'Joker') ? (
-                                            <div
-                                                className="group relative px-6 sm:px-10 py-4 sm:py-5 bg-red-900/40 backdrop-blur-md text-red-400 font-black font-mono uppercase text-sm sm:text-lg tracking-widest overflow-hidden border border-red-500/30 cursor-not-allowed"
-                                                style={{
-                                                    clipPath: "polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px)",
-                                                    boxShadow: `0 0 20px rgba(239, 68, 68, 0.2)`,
-                                                    textShadow: `0 0 10px rgba(239, 68, 68, 0.5)`
-                                                }}
-                                            >
-                                                <span className="relative z-10 flex items-center gap-4">
-                                                    MASTERS CANNOT PARTICIPATE IN {type.toUpperCase()}
-                                                </span>
+                                            <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-4 w-full px-3 sm:px-4">
+                                                <div
+                                                    className="group relative px-3 sm:px-6 py-2.5 sm:py-3.5 bg-red-900/40 backdrop-blur-md text-red-400 font-black font-mono uppercase text-[9px] xs:text-[10px] sm:text-xs md:text-base tracking-wider sm:tracking-widest overflow-hidden border border-red-500/30 cursor-not-allowed text-center max-w-full"
+                                                    style={{
+                                                        clipPath: "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)",
+                                                        boxShadow: `0 0 20px rgba(239, 68, 68, 0.2)`,
+                                                        textShadow: `0 0 10px rgba(239, 68, 68, 0.5)`
+                                                    }}
+                                                >
+                                                    <span className="relative z-10 flex items-center justify-center gap-1.5 sm:gap-2.5 whitespace-nowrap">
+                                                        <AlertTriangle size={14} className="text-red-500 shrink-0 sm:w-4 sm:h-4" />
+                                                        MASTERS CANNOT PARTICIPATE IN {type.toUpperCase()}
+                                                    </span>
+                                                </div>
+
+                                                <motion.button
+                                                    whileHover={{ scale: 1.02 }}
+                                                    whileTap={{ scale: 0.98 }}
+                                                    onClick={onClose}
+                                                    className="group relative px-4 sm:px-6 py-2.5 sm:py-3.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-black font-mono uppercase text-[10px] sm:text-xs md:text-base tracking-wider sm:tracking-widest overflow-hidden transition-all border border-white/20 hover:border-white shadow-lg cursor-pointer flex items-center justify-center gap-2"
+                                                    style={{
+                                                        clipPath: "polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)",
+                                                        boxShadow: `0 0 20px rgba(255, 255, 255, 0.1)`,
+                                                        textShadow: `0 0 10px rgba(255, 255, 255, 0.5)`
+                                                    }}
+                                                >
+                                                    <ArrowLeft size={14} className="group-hover:-translate-x-1 transition-transform shrink-0 sm:w-4 sm:h-4" />
+                                                    <span className="relative z-10 whitespace-nowrap">RETURN TO LOBBY</span>
+                                                </motion.button>
                                             </div>
                                         ) : (
                                             <motion.button

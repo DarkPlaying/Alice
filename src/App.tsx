@@ -34,11 +34,11 @@ function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: R
       <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[999] flex flex-col items-center justify-center text-center px-4 font-sans select-none">
         {/* Futuristic Laser grid background overlay */}
         <div className="absolute inset-0 opacity-20 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%]" />
-        
+
         <div className="relative w-full max-w-sm overflow-hidden rounded-xl border border-white/15 bg-[#0a0a10] shadow-[0_0_80px_rgba(0,0,0,0.9)] backdrop-blur-sm z-10 mx-auto">
           {/* Inner content */}
           <div className="px-8 pt-8 pb-8 flex flex-col items-center text-center">
-            
+
             {/* Joker image */}
             <img src="/suit_assets/joker.png" alt="System" className="w-12 h-12 object-contain mb-5 opacity-70" />
 
@@ -52,7 +52,7 @@ function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: R
 
             {/* Message */}
             <p className="text-gray-400 text-[13px] leading-relaxed mb-6 whitespace-pre-line font-mono tracking-wide">
-              Activate authentication sequence.<br/>Survival depends on valid credentials.
+              Activate authentication sequence.<br />Survival depends on valid credentials.
             </p>
 
             {/* Loading Bar Footer */}
@@ -66,7 +66,8 @@ function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: R
             </div>
           </div>
         </div>
-        <style dangerouslySetInnerHTML={{__html: `
+        <style dangerouslySetInnerHTML={{
+          __html: `
           @keyframes loadProgress {
             from { width: 0%; }
             to { width: 100%; }
@@ -104,7 +105,7 @@ function AppContent() {
   useEffect(() => {
     const bootTime = Date.now();
     console.log("LOCAL STORAGE DUMP ON BOOT:", localStorage.getItem('borderland-fresh-token-v2'));
-    
+
     // Fallback: forcefully remove loader after 5s if auth state change doesn't fire
     const fallbackTimer = setTimeout(() => {
       setIsLoading(false);
@@ -152,7 +153,7 @@ function AppContent() {
             if (userData.username && userData.role === 'player') {
               const time = new Date().toLocaleTimeString();
               const message = `Player "${userData.username}" re-synchronized with Arena (REFRESH)`;
-              
+
               // 1. Broadcast signal (Instant)
               supabase.channel('admin_signals').send({
                 type: 'broadcast',
@@ -202,7 +203,7 @@ function AppContent() {
         setIsAdmin(false);
       }
       clearTimeout(fallbackTimer);
-      
+
       const elapsed = Date.now() - bootTime;
       const remaining = Math.max(0, 2000 - elapsed);
       setTimeout(() => setIsLoading(false), remaining);
@@ -270,12 +271,56 @@ function AppContent() {
 
   // NOTE: Broadcast overlay is now dismissed by the user clicking, not auto-dismissed
 
+  // Auto-refresh handler: Double refresh on initial boot when session is active & 5-hour session auto-refresh
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    // 1. Double Refresh on page load when logged in to sync all GoTrue/Supabase client instances
+    const bootRefreshed = sessionStorage.getItem('app_boot_auto_refreshed');
+    if (!bootRefreshed) {
+      sessionStorage.setItem('app_boot_auto_refreshed', 'true');
+      console.log("🔄 AUTO-SYNC: Executing secondary page refresh for session lock...");
+      const timer = setTimeout(() => {
+        window.location.reload();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+
+    // 2. 5-Hour session expiration refresh
+    const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+    let sessionStartTime = localStorage.getItem('login_session_start_time');
+    if (!sessionStartTime) {
+      sessionStartTime = Date.now().toString();
+      localStorage.setItem('login_session_start_time', sessionStartTime);
+    }
+
+    const checkFiveHourRefresh = async () => {
+      const start = localStorage.getItem('login_session_start_time');
+      if (start && Date.now() - parseInt(start, 10) >= FIVE_HOURS_MS) {
+        console.log("⏰ 5-HOUR SESSION REFRESH: Re-synchronizing user session and reloading...");
+        localStorage.setItem('login_session_start_time', Date.now().toString());
+        sessionStorage.removeItem('app_boot_auto_refreshed');
+        try {
+          await supabase.auth.refreshSession();
+        } catch (err) {
+          console.warn("Session refresh failed:", err);
+        }
+        window.location.reload();
+      }
+    };
+
+    checkFiveHourRefresh();
+    const interval = setInterval(checkFiveHourRefresh, 60000);
+
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
+
   const handleLogout = async () => {
     try {
-      // The custom lock function causes ANY Supabase Auth method (like signOut) to permanently hang the in-memory mutex.
-      // We completely bypass it by clearing localStorage and doing a hard page reload to destroy the stuck mutex in memory!
       localStorage.removeItem('borderland-fresh-token-v2');
       localStorage.removeItem('demo-user-session');
+      localStorage.removeItem('login_session_start_time');
+      sessionStorage.removeItem('app_boot_auto_refreshed');
       window.location.href = '/login';
     } catch (error) {
       console.error("LOGOUT ERROR", error);
@@ -366,13 +411,13 @@ function AppContent() {
           element={
             <RequireAuth isLoggedIn={isLoggedIn} isAdmin={isAdmin} isLoading={isLoading}>
               {maintenanceActive && !isAdmin ? (
-                  <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[9999] flex flex-col items-center justify-center text-center p-8 select-none">
-                    <WaitlistCard
-                        icon={<span className="text-4xl animate-pulse">⚠️</span>}
-                        title="SYSTEM MAINTENANCE"
-                        description="This arena is temporarily offline for system maintenance. Operations will resume shortly."
-                    />
-                  </div>
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[9999] flex flex-col items-center justify-center text-center p-8 select-none">
+                  <WaitlistCard
+                    icon={<span className="text-4xl animate-pulse">⚠️</span>}
+                    title="SYSTEM MAINTENANCE"
+                    description="This arena is temporarily offline for system maintenance. Operations will resume shortly."
+                  />
+                </div>
               ) : (
                 <GamePage onClose={() => navigate('/home/card')} isLoggedIn={isLoggedIn} onLogoutClick={handleLogout} userInfo={user} isAdmin={isAdmin} />
               )}

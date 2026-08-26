@@ -26,15 +26,30 @@ export const JokerMapGrid: React.FC<JokerMapGridProps> = ({
 
     const isGameCardVision = targetExitOnlyIndex !== undefined;
 
-    // Group players by cell coordinate key "r,c" (Filter out non-active players)
-    const playersByCell: Record<string, JokerPlayer[]> = {};
-    const validPlayers = (players || []).filter(p => p && p.status === 'active');
+    // Filter active players (If regular player view !isAdminView, show ONLY current player's location)
+    // Filter active players (If regular player view !isAdminView, show ONLY current player's location)
+    const allValidPlayers = (players || []).filter(p => p && p.status === 'active');
 
+    // Robust player resolution helper
+    const activePlayer = (players || []).find(p =>
+        p && ((p.id && currentPlayerId && p.id === currentPlayerId) ||
+              (p.username && currentPlayerId && p.username.toLowerCase() === currentPlayerId.toLowerCase()))
+    ) || (players && players.length > 0 ? players[0] : undefined);
+
+    const validPlayers = isAdminView 
+        ? allValidPlayers 
+        : allValidPlayers.filter(p => activePlayer ? (p.id === activePlayer.id || p.username === activePlayer.username) : p.id === currentPlayerId);
+
+    // Group players by cell coordinate key "r,c"
+    const playersByCell: Record<string, JokerPlayer[]> = {};
     validPlayers.forEach(p => {
         const key = `${p.currentR},${p.currentC}`;
         if (!playersByCell[key]) playersByCell[key] = [];
         playersByCell[key].push(p);
     });
+
+    // Determine current player's assigned gate index (defaults to 1 for R1/G1 if unassigned)
+    const playerGateIndex = activePlayer?.targetExitIndex || activePlayer?.entryIndex || 1;
 
     const handleGridCellClick = (cell: MapCell) => {
         const key = `${cell.r},${cell.c}`;
@@ -57,17 +72,21 @@ export const JokerMapGrid: React.FC<JokerMapGridProps> = ({
                     row.map((cell, c) => {
                         const cellKey = `${r},${c}`;
                         const cellPlayers = playersByCell[cellKey] || [];
-                        const isCurrentPlayerHere = !isGameCardVision && cellPlayers.some(p => p.id === currentPlayerId);
+                        const isCurrentPlayerHere = !isGameCardVision && cellPlayers.some(p => activePlayer ? (p.id === activePlayer.id || p.username === activePlayer.username) : p.id === currentPlayerId);
+
+                        const isMyEntry = isGameCardVision ? false : (isAdminView || cell.entryIndex === playerGateIndex);
+                        const isMyExit = isGameCardVision
+                            ? cell.exitIndex === targetExitOnlyIndex
+                            : (isAdminView || cell.exitIndex === playerGateIndex);
 
                         let bgStyle = 'bg-slate-900/90 border-slate-400/60 text-slate-100 shadow-[0_0_12px_rgba(226,232,240,0.18)]';
                         if (cell.type === 'wall' || cell.isBlockedCell) {
                             bgStyle = 'bg-black border-slate-900 opacity-90';
                         } else if (cell.type === 'entry') {
-                            bgStyle = isGameCardVision
+                            bgStyle = (isGameCardVision || !isMyEntry)
                                 ? 'bg-slate-900/90 border-slate-400/60 text-slate-100 shadow-[0_0_12px_rgba(226,232,240,0.18)]'
                                 : 'bg-red-950/80 border-red-500 text-red-200 shadow-[0_0_15px_rgba(239,68,68,0.3)]';
                         } else if (cell.type === 'exit') {
-                            const isMyExit = isGameCardVision ? cell.exitIndex === targetExitOnlyIndex : true;
                             bgStyle = isMyExit
                                 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 shadow-[0_0_20px_rgba(34,197,94,0.6)] animate-pulse'
                                 : 'bg-slate-900/90 border-slate-400/60 text-slate-100 shadow-[0_0_12px_rgba(226,232,240,0.18)]';
@@ -83,7 +102,7 @@ export const JokerMapGrid: React.FC<JokerMapGridProps> = ({
                                 }`}
                             >
                                 {/* Cell Type Labels & Centered Box Door Value */}
-                                {cell.type === 'entry' && !isGameCardVision && (
+                                {cell.type === 'entry' && !isGameCardVision && isMyEntry && (
                                     <div className="flex flex-col items-center justify-center leading-none">
                                         <span className="text-[9px] sm:text-[11px] font-black font-cinzel text-red-400">
                                             R{cell.entryIndex}
@@ -98,16 +117,16 @@ export const JokerMapGrid: React.FC<JokerMapGridProps> = ({
                                                 alt={`Exit G${cell.exitIndex}`}
                                                 className="w-full h-full object-cover rounded shadow-[0_0_12px_rgba(34,197,94,0.8)] animate-pulse"
                                             />
-                                        ) : (
+                                        ) : isMyExit ? (
                                             <span className="text-[9px] sm:text-[11px] font-black font-cinzel text-emerald-400">
                                                 G{cell.exitIndex}
                                             </span>
-                                        )}
+                                        ) : null}
                                     </div>
                                 )}
-                                {cell.type === 'path' && !isGameCardVision && (
+                                {cell.type === 'path' && !isGameCardVision && isAdminView && (
                                     <div className="flex flex-col items-center justify-center leading-none">
-                                         {/* Render special card indicator dots */}
+                                         {/* Render special card indicator dots ONLY for Admin View */}
                                          {(() => {
                                              const specCards = cell.specialCards || [];
                                              if (specCards.length === 0) return null;

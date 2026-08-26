@@ -345,6 +345,13 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 if (onOpenInventory) onOpenInventory();
             }
 
+            if (e.key.toLowerCase() === 'm') {
+                if (playerControllerRef.current) {
+                    playerControllerRef.current.unlockPointer();
+                }
+                setShowMapModal(prev => !prev);
+            }
+
             if (phase === 'choosing') {
                 let targetDir: 'up' | 'right' | 'down' | 'left' | null = null;
                 if (e.code === 'Digit1') targetDir = 'up';
@@ -593,6 +600,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
 
             if (isRoundChanged) {
                 prevRoundRef.current = currentRound;
+                // Clear stale room card history so the new round displays correct card types from the fresh map.
+                // Without this, round-1 card types (e.g. "red") would still show in rooms that now have different cards.
+                roomCardHistoryRef.current = {};
+                lastRenderedCenterCardKeyRef.current = '';
             }
 
             const animKey = `${currentRound}_${currentCell.r}_${currentCell.c}`;

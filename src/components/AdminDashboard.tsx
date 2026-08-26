@@ -524,8 +524,8 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
         { name: 'SPADES', type: 'Physical', id: 'spades', icon: Spade, color: 'text-blue-400', dotColor: 'bg-blue-400', status: 'Active', description: "Strength, endurance, and physical agility are tested." },
         { name: 'CLUBS', type: 'Team', id: 'clubs', icon: Club, color: 'text-green-400', dotColor: 'bg-green-400', status: 'Stable', description: "Cooperation and balancing individual vs group needs." },
         { name: 'JOKER', type: 'Luck Based', id: 'joker', icon: Shield, color: 'text-slate-300', dotColor: 'bg-slate-300', status: 'Unknown', description: "The ultimate rotated maze protocol across 14 rounds." },
-        { name: 'DIAMONDS', type: 'Intellect', id: 'diamonds', icon: Diamond, color: 'text-purple-400', dotColor: 'bg-purple-400', status: 'Analyzing', description: "Logic, mathematics, and strategy are essential." },
         { name: 'HEARTS', type: 'Psychological', id: 'hearts', icon: Heart, color: 'text-red-500', dotColor: 'bg-red-500', status: 'Critical', description: "Trust, betrayal, and emotional manipulation." },
+        { name: 'DIAMONDS', type: 'Intellect', id: 'diamonds', icon: Diamond, color: 'text-purple-400', dotColor: 'bg-purple-400', status: 'Analyzing', description: "Logic, mathematics, and strategy are essential." },
     ];
 
     const [newUsername, setNewUsername] = useState('');
@@ -4720,7 +4720,7 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     };
                                                                 });
                                                             } else if (suit === 'clubs') {
-                                                                updateData.gameState = 'idle';
+                                                                updateData.gameState = 'briefing';
                                                                 updateData.round_data = {
                                                                     master_selection: null,
                                                                     player_selection: null
@@ -4834,12 +4834,20 @@ export const AdminDashboard = ({ onLogout }: AdminDashboardProps) => {
                                                                     body: JSON.stringify(updateData)
                                                                 });
                                                                 if (!retryRes.ok) {
-                                                                    showToast(`START ERROR: ${await retryRes.text()}`, 'error');
                                                                 } else {
                                                                     showToast(`${suit.toUpperCase()} PROTOCOL INITIATED (Whitelist Disabled)`, 'info');
                                                                     setShowStartModal(false);
                                                                 }
                                                             } else {
+                                                                if (suit === 'clubs') {
+                                                                    const tempChannel = supabase.channel('clubs_king_game');
+                                                                    tempChannel.subscribe(async (status) => {
+                                                                        if (status === 'SUBSCRIBED') {
+                                                                            await tempChannel.send({ type: 'broadcast', event: 'game_started', payload: { timestamp: Date.now() } });
+                                                                            supabase.removeChannel(tempChannel);
+                                                                        }
+                                                                    });
+                                                                }
                                                                 showToast(`${suit.toUpperCase()} PROTOCOL INITIATED.`, 'success');
                                                                 setShowStartModal(false);
                                                             }

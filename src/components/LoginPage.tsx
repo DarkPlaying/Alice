@@ -49,11 +49,22 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
         }
     }, []);
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleLogin = async (e?: React.FormEvent | React.KeyboardEvent) => {
+        if (e && e.preventDefault) e.preventDefault();
+        console.log("🔑 [LOGIN SUBMIT] Enter key / Submit clicked! Username:", username, "Password:", password);
+
         setError(false);
 
+        // Sign out any previous active session so reload doesn't auto-login to old user
+        try {
+            localStorage.removeItem('demo-user-session');
+            await supabase.auth.signOut();
+        } catch (err) {
+            console.warn("Signout prior to login failed:", err);
+        }
+
         if (!username.trim() || !password.trim()) {
+            console.warn("⚠️ [LOGIN] Empty inputs! Saving error and refreshing page...");
             sessionStorage.setItem('login_error_msg', "ACCESS DENIED. INVALID CREDENTIALS.");
             window.location.reload();
             return;
@@ -61,6 +72,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
 
         try {
             if (username === 'demo' && password === 'demo') {
+                console.log("✅ [LOGIN] Demo account authorized!");
                 const demoUser = {
                     id: 'demo-user',
                     username: 'demo',
@@ -70,9 +82,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 };
                 localStorage.setItem('demo-user-session', JSON.stringify(demoUser));
                 if (onLogin) onLogin(demoUser);
-                setTimeout(() => {
-                    window.location.reload();
-                }, 100);
+                window.location.reload();
                 return;
             }
 
@@ -80,21 +90,24 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             let email = sanitizedUsername;
 
             if (!email.includes('@')) {
-                const { data: profile } = await supabase.from('profiles').select('email').eq('username', sanitizedUsername).single();
-                if (profile && profile.email) {
-                    email = profile.email;
-                } else {
+                try {
+                    const { data: profile } = await supabase.from('profiles').select('email').eq('username', sanitizedUsername).single();
+                    if (profile && profile.email) {
+                        email = profile.email;
+                    } else {
+                        email = `${sanitizedUsername}@borderland.app`;
+                    }
+                } catch {
                     email = `${sanitizedUsername}@borderland.app`;
                 }
             }
 
-            console.log("Login attempt for:", email);
+            console.log("📡 [LOGIN] Authenticating via Supabase for:", email);
 
             if (isRegistering) {
                 const { data, error: authError } = await supabase.auth.signUp({ email, password });
                 if (authError) throw authError;
 
-                // Ensure profile is correctly initialized if they didn't exist
                 const { data: upsertData, error: profileError } = await supabase.from('profiles').upsert({
                     email,
                     username,
@@ -103,7 +116,8 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 if (profileError) throw profileError;
 
                 const finalUser = { ...upsertData, uid: data?.user?.id, email: email, id: data?.user?.id };
-                onLogin(finalUser);
+                if (onLogin) onLogin(finalUser);
+                window.location.reload();
                 return;
             }
 
@@ -118,24 +132,23 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                 .single();
 
             if (profileError || !userData) {
-                const unlinkedMsg = "IDENTITY UNLINKED. CONTACT GAME MASTER.";
-                sessionStorage.setItem('login_error_msg', unlinkedMsg);
+                console.warn("⚠️ [LOGIN] Profile unlinked!");
+                sessionStorage.setItem('login_error_msg', "IDENTITY UNLINKED. CONTACT GAME MASTER.");
                 window.location.reload();
                 return;
             }
 
             const finalUser = { ...userData, uid: data?.user?.id, email: email, id: data?.user?.id };
+            console.log("🎉 [LOGIN SUCCESS] User authenticated:", finalUser);
 
-            // 1. Log the entry in the system_logs table (Persistence)
+            // 1. Log the entry in system_logs table
             const syncLoginLog = async () => {
                 try {
-                    // Delete previous login logs for this player to keep only the latest
                     await supabase.from('system_logs')
                         .delete()
                         .eq('player_id', data?.user?.id)
                         .eq('type', 'login');
 
-                    // Insert the new login log
                     await supabase.from('system_logs').insert({
                         message: `Player "${userData.username}" logged in to Arena LOBBY`,
                         type: 'login',
@@ -149,7 +162,7 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             };
             syncLoginLog();
 
-            // 2. Broadcast the signal immediately (Instant Real-time)
+            // 2. Broadcast the signal immediately
             supabase.channel('admin_signals').subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
                     supabase.channel('admin_signals').send({
@@ -161,23 +174,20 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
             });
 
             if (userData.role === 'admin' || userData.username === 'admin') {
-                onAdminLogin(finalUser);
+                if (onAdminLogin) onAdminLogin(finalUser);
             } else {
-                onLogin(finalUser);
+                if (onLogin) onLogin(finalUser);
             }
 
-            // Reload page on every Enter The Borderland submit
-            setTimeout(() => {
-                window.location.reload();
-            }, 100);
+            localStorage.setItem('login_session_start_time', Date.now().toString());
+            sessionStorage.removeItem('app_boot_auto_refreshed');
+            window.location.reload();
         } catch (err: any) {
-            console.error("Login Error:", err);
+            console.error("❌ [LOGIN ERROR] Authentication failed:", err);
 
-            let errorMsg = `SYSTEM ERROR: ${err.message || ''}`;
-            const msg = err.message || '';
-            if (msg.includes('Invalid login credentials')) {
-                errorMsg = "ACCESS DENIED. INVALID CREDENTIALS.";
-            } else if (msg.includes('User already registered')) {
+            let errorMsg = `ACCESS DENIED. INVALID CREDENTIALS.`;
+            const msg = err?.message || '';
+            if (msg.includes('User already registered')) {
                 errorMsg = "IDENTITY ALREADY REGISTERED.";
             }
 
@@ -406,6 +416,12 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                             type="text"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    console.log('⌨️ [KEYPRESS] Enter key pressed on Username input!');
+                                    handleLogin(e);
+                                }
+                            }}
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             className={clsx(
@@ -427,6 +443,12 @@ export const LoginPage = ({ onLogin, onAdminLogin }: LoginPageProps) => {
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    console.log('⌨️ [KEYPRESS] Enter key pressed on Password input!');
+                                    handleLogin(e);
+                                }
+                            }}
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
                             className={clsx(

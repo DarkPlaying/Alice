@@ -113,6 +113,7 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
     const chatEndRef = useRef<HTMLDivElement>(null);
     const channelRef = useRef<RealtimeChannel | null>(null);
     const [isPaused, setIsPaused] = useState(false);
+    const wasStartedRef = useRef<boolean | null>(null);
 
     // Phase Notification Banner
     const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
@@ -480,6 +481,10 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     // Fixed: Calculate detailed scores on initial load
                     updateScoreState(statusData);
 
+                    if (wasStartedRef.current === null) {
+                        wasStartedRef.current = !!statusData.system_start;
+                    }
+
                     // Sync State (Move up for timer logic)
                     const serverState = statusData.gameState || 'setup_phase1';
                     setGameState(serverState);
@@ -638,8 +643,23 @@ export const ClubsGame = ({ onComplete, onFail, user, onProfileClick }: ClubsGam
                     }
                 }
             })
+            .on('broadcast', { event: 'game_started' }, () => {
+                console.log("🚀 GAME STARTED BROADCAST RECEIVED! REFRESHING ALL PLAYER SCREENS...");
+                window.location.reload();
+            })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clubs_game_status', filter: 'id=eq.clubs_king' }, (payload) => {
                 const status = payload.new;
+
+                // Refresh screen if game starts
+                if (status.system_start && wasStartedRef.current === false) {
+                    console.log("🚀 SYSTEM_START TRANSITION DETECTED! REFRESHING PLAYER SCREEN...");
+                    wasStartedRef.current = true;
+                    window.location.reload();
+                    return;
+                }
+                if (status.system_start !== undefined) {
+                    wasStartedRef.current = status.system_start;
+                }
 
                 // CRITICAL: Check for force reset
                 if (status.round_data?.force_reset) {

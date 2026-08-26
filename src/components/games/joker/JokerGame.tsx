@@ -79,6 +79,9 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     const prevRoundRef = useRef<number>(1);
     const myRedMultiplierRef = useRef<number>(1);
     const prevBlockedDoorsCountRef = useRef<number>(0);
+    // Local map cache: eagerly loaded at start of each choosing phase so claims/display use fresh data
+    const localMapRef = useRef<any>(null);
+    const localMapLoadedRoundRef = useRef<number>(0);
     const [incomingRedAttackAlert, setIncomingRedAttackAlert] = useState<{
         show: boolean;
         direction: string;
@@ -657,6 +660,36 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         };
     }, [user?.id, user?.username]);
 
+    // Eagerly fetch & cache the full map_matrix locally at the start of EACH choosing phase.
+    // This prevents stale/online-error-prone map data during reveal-phase claims.
+    // The cached map is used by gridMatrix, handleEnterRoom, and claimCardsFromLiveDB.
+    useEffect(() => {
+        if (gameState?.phase !== 'choosing') return;
+        const round = gameState.current_round || 1;
+        if (localMapLoadedRoundRef.current === round && localMapRef.current) return;
+
+        const loadMapLocally = async () => {
+            try {
+                const token = await getAccessToken();
+                const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}&select=map_matrix`, {
+                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                    cache: 'no-store'
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data[0]?.map_matrix) {
+                        localMapRef.current = data[0].map_matrix;
+                        localMapLoadedRoundRef.current = round;
+                        console.log(`[MAP CACHE] Locally loaded map_matrix for Round ${round} (choosing phase).`);
+                    }
+                }
+            } catch (e) {
+                console.warn('[MAP CACHE] Failed to load map locally:', e);
+            }
+        };
+        loadMapLocally();
+    }, [gameState?.phase, gameState?.current_round]);
+
     // Reset local player choice & sync minigames with admin
     useEffect(() => {
         setHasBoughtDoorThisRound(false);
@@ -893,9 +926,13 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         if (!choice?.door) return;
 
         const { door, finalCost, isSkip } = choice;
-        const gridMatrix = gameState.map_matrix && gameState.map_matrix.length === 7 ? gameState.map_matrix : generateRotatedMap(gameState.map_rotation || 0);
+        // Use locally cached map (loaded eagerly at choosing-phase start) for correct round-specific positions
+        const parsedGameMap = parseMapMatrix(localMapRef.current || gameState?.map_matrix);
+        const enterRoomGrid = parsedGameMap.old_map && parsedGameMap.old_map.length === 7
+            ? parsedGameMap.old_map
+            : generateRotatedMap(gameState.map_rotation || 0);
 
-        const { updatedPlayer } = processDoorPurchase(myPlayer, door, finalCost, isSkip, gridMatrix);
+        const { updatedPlayer } = processDoorPurchase(myPlayer, door, finalCost, isSkip, enterRoomGrid);
 
         updatedPlayer.pendingDoorChoice = undefined;
         updatedPlayer.lastDoorChoice = { ...choice, isProcessed: true };
@@ -1099,7 +1136,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             claimC = claimCoordsByRoundRef.current[roundPlayerKey].c;
         } else {
             // First run this Reveal Phase — compute destination from round start position + doorChoice.
-            const parsedMap = parseMapMatrix(gameState.map_matrix);
+            // Use locally cached map (loaded at choosing-phase start) for correct round-specific old_map.
+            const parsedMap = parseMapMatrix(localMapRef.current || gameState.map_matrix);
             const fallbackRotationMap = generateRotatedMap(gameState.map_rotation || 0);
             const activeOldMap = parsedMap.old_map && parsedMap.old_map.length === 7 ? parsedMap.old_map : fallbackRotationMap;
 
@@ -1132,7 +1170,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             try {
                 const token = await getAccessToken();
                 const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}&select=map_matrix,participants`, {
-                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                    headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                    cache: 'no-store'
                 });
                 if (!res.ok) return;
                 const dbData = await res.json();
@@ -1142,16 +1181,16 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 const liveNewMap = liveParsed.new_map && liveParsed.new_map.length === 7 ? liveParsed.new_map : generateRotatedMap(gameState.map_rotation || 0);
                 const liveOldMap = liveParsed.old_map && liveParsed.old_map.length === 7 ? liveParsed.old_map : liveNewMap;
 
-                // Check claimR/claimC room cell, falling back to myPlayer.currentR/C room cell
-                const oldMapCell = liveOldMap[claimR]?.[claimC] || liveOldMap[myPlayer.currentR]?.[myPlayer.currentC];
-                const newMapCell = liveNewMap[claimR]?.[claimC] || liveNewMap[myPlayer.currentR]?.[myPlayer.currentC];
-                const gridCell = liveParsed.grid[claimR]?.[claimC] || liveParsed.grid[myPlayer.currentR]?.[myPlayer.currentC];
+                // Check claimR/claimC room cell from old_map (frozen round-start snapshot).
+                // old_map is never cleared mid-round, so the card is always visible for EVERY claimant.
+                const oldMapCell = liveOldMap[claimR]?.[claimC];
+                const newMapCell = liveNewMap[claimR]?.[claimC];
 
                 const availableSpecialCards = (oldMapCell?.specialCards && oldMapCell.specialCards.length > 0)
                     ? oldMapCell.specialCards
-                    : ((newMapCell?.specialCards && newMapCell.specialCards.length > 0)
+                    : (newMapCell?.specialCards && newMapCell.specialCards.length > 0)
                         ? newMapCell.specialCards
-                        : (gridCell?.specialCards || []));
+                        : [];
 
                 const cardsToClaim = availableSpecialCards.filter((c: string) => c && c !== 'none');
                 if (cardsToClaim.length === 0) {
@@ -1163,6 +1202,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 // Mark claimed BEFORE async DB write to prevent double-fire for THIS player
                 claimedCellCoordsRef.current.add(playerRoundCellKey);
 
+                // Build this player's new inventory from the LIVE DB snapshot (prevents overwriting other players)
                 const liveParticipants: any[] = dbData[0].participants || [];
                 const dbMe = liveParticipants.find((p: any) => isSamePlayer(p, myPlayer));
                 const baseInv = dbMe?.inventory || myPlayer.inventory || [];
@@ -1181,8 +1221,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 let payloadMatrix: any;
                 if (newMapHasCard) {
                     // First claimant: clear cell in new_map and respawn card elsewhere
-                    const liveParticipantsForSpawn: any[] = dbData[0].participants || [];
-                    const occupiedPositions = liveParticipantsForSpawn
+                    const occupiedPositions = liveParticipants
                         .filter((p: any) => typeof p.currentR === 'number' && typeof p.currentC === 'number')
                         .map((p: any) => ({ r: p.currentR, c: p.currentC }));
                     const updatedNewMatrix = spawnCardsToNewLocation(liveNewMap, claimR, claimC, cardsToClaim, occupiedPositions);
@@ -1198,9 +1237,10 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 setMyPlayer(updatedPlayer);
                 setGameState(prev => prev ? { ...prev, map_matrix: payloadMatrix } as any : prev);
 
-                const newParticipants = liveParticipants.map((p: any) => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
-                syncParticipantsToState(newParticipants);
-
+                // ONE atomic PATCH: map_matrix + participants (only this player's entry updated from live DB).
+                // Do NOT call syncParticipantsToState separately — that would cause a second PATCH
+                // that races with this one and can overwrite another player's simultaneous claim.
+                const updatedParticipants = liveParticipants.map((p: any) => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
                 await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}`, {
                     method: 'PATCH',
                     headers: {
@@ -1208,8 +1248,9 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         'Authorization': `Bearer ${token}`,
                         'apikey': supabaseKey
                     },
-                    body: JSON.stringify({ map_matrix: payloadMatrix, participants: newParticipants })
+                    body: JSON.stringify({ map_matrix: payloadMatrix, participants: updatedParticipants })
                 });
+                console.log(`[CARD CLAIM LOG] Atomic DB PATCH sent: map_matrix + participants for "${myPlayer.username}".`);
             } catch (e) {
                 console.error('[JOKER_GAME] Claim cards error:', e);
             }
@@ -1570,7 +1611,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         }
     };
 
-    const parsedMapData = parseMapMatrix(gameState?.map_matrix);
+    // Use locally cached map (loaded at choosing-phase start) — falls back to gameState?.map_matrix if not yet loaded
+    const parsedMapData = parseMapMatrix(localMapRef.current || gameState?.map_matrix);
     const gridMatrix = parsedMapData.old_map && parsedMapData.old_map.length === 7 ? parsedMapData.old_map : generateRotatedMap(gameState?.map_rotation || 0);
     const fallbackEntry = getEntryCell(gridMatrix, myPlayer?.entryIndex || 1);
     // Only fall back to entry gate if cell is TRULY missing or a wall — path/entry/exit are all valid
@@ -2150,8 +2192,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                                 </span>
                                                                 <span
                                                                     className={`px-3 py-1 text-[10px] font-black uppercase rounded shadow-md ${isEscaped
-                                                                            ? 'bg-emerald-400 text-slate-900 border border-emerald-300'
-                                                                            : 'bg-red-400 text-slate-900 border border-red-300'
+                                                                        ? 'bg-emerald-400 text-slate-900 border border-emerald-300'
+                                                                        : 'bg-red-400 text-slate-900 border border-red-300'
                                                                         }`}
                                                                 >
                                                                     {isEscaped ? 'ESCAPED (+1000)' : 'ELIMINATED (-200)'}
