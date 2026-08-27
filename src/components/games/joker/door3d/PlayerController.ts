@@ -35,8 +35,8 @@ export class PlayerController {
 
   public jump() {
     console.log('[PLAYER_CONTROLLER] JUMP TRIGGERED! Current Y:', this.position.y.toFixed(2));
-    this.jumpVelocity = 7.5;
-    this.jumpHeight = 0.15;
+    this.jumpVelocity = 12.0;
+    this.jumpHeight = 0.4;
     try { this.soundEngine?.playStep(); } catch (e) {}
   }
 
@@ -269,12 +269,12 @@ export class PlayerController {
       // In east/west corridor — clamp Z to corridor width
       this.position.z = Math.max(-corridorClamp, Math.min(corridorClamp, this.position.z));
     }
-    // Handle Sitting / Crouching Height
-    const targetBaseHeight = this.isSitting ? 0.85 : 1.60;
+    // Handle Sitting / Crouching Height (0.75m when sitting, 1.60m when standing)
+    const targetBaseHeight = this.isSitting ? 0.75 : 1.60;
 
     // Handle Jump Physics Impulse
     if (this.jumpHeight > 0 || this.jumpVelocity !== 0) {
-      this.jumpVelocity -= 15.0 * delta;
+      this.jumpVelocity -= 18.0 * delta;
       this.jumpHeight += this.jumpVelocity * delta;
       if (this.jumpHeight <= 0) {
         this.jumpHeight = 0;

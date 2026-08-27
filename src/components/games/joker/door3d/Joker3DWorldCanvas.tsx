@@ -1060,8 +1060,8 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 )}
             </AnimatePresence>
 
-            {/* PHASE 2 (CHOOSING) BOTTOM WHITE BUTTONS HUB OVERLAY (ONE LINE ON MOBILE) */}
-            {phase === 'choosing' && (
+            {/* BOTTOM WHITE BUTTONS HUB OVERLAY (VISIBLE IN CHOOSING & REVEAL PHASES) */}
+            {(phase === 'choosing' || phase === 'reveal') && (
                 <div className="absolute bottom-2 left-2 right-2 sm:bottom-6 sm:left-6 sm:right-6 z-40 bg-white/95 border border-slate-300 rounded-xl sm:rounded-2xl p-2 sm:p-3 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono flex flex-row items-center justify-between gap-2 overflow-x-auto whitespace-nowrap">
                     <div className="flex flex-row flex-nowrap items-center justify-center gap-1.5 sm:gap-3 w-full overflow-x-auto py-1">
                         {(['up', 'right', 'down', 'left'] as const).map((dir) => {
@@ -1248,19 +1248,19 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 </div>
             </div>
 
-            {/* PHASE 3 (REVEAL) IN-WORLD HUD (POSITIONED AT MIDDLE TOP ON MOBILE) */}
+            {/* PHASE 3 (REVEAL) IN-WORLD HUD (POSITIONED AT VERY TOP CENTER) */}
             {phase === 'reveal' && (
-                <div className="absolute top-14 sm:top-20 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-xl w-full px-2 sm:px-4 text-center">
+                <div className="absolute top-2 sm:top-3 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-md w-full px-2 text-center pointer-events-none">
                     <motion.div
-                        initial={{ opacity: 0, y: -15 }}
+                        initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white/95 border border-emerald-600 p-2 sm:p-3.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.4)] text-slate-900 space-y-0.5 sm:space-y-1"
+                        className="bg-white/95 border border-emerald-600 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] text-slate-900 space-y-0.5"
                     >
-                        <h4 className="font-cinzel text-[9px] sm:text-sm font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-1">
-                            <Zap size={13} className="animate-pulse" />
+                        <h4 className="font-cinzel text-[9px] sm:text-xs font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-1">
+                            <Zap size={12} className="animate-pulse" />
                             REVEAL PHASE // BOUGHT DOOR OPENED
                         </h4>
-                        <p className="text-[8px] sm:text-[10px] text-slate-700 font-extrabold uppercase tracking-wider">
+                        <p className="text-[7.5px] sm:text-[9px] text-slate-700 font-extrabold uppercase tracking-wider">
                             WALK AROUND FREELY // ADVANCING AT END OF PHASE
                         </p>
                     </motion.div>
