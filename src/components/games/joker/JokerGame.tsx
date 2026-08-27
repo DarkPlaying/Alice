@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Timer, Shield, Activity, Users, LogOut, Award, AlertTriangle, Eye, Map, CheckCircle2, Briefcase, X, Trophy, XOctagon, CheckCircle, Snowflake, ShieldAlert, Home, Sparkles, Crown } from 'lucide-react';
+import { Timer, Shield, Activity, Users, LogOut, Award, AlertTriangle, Eye, Map, CheckCircle2, Briefcase, X, Trophy, XOctagon, CheckCircle, Snowflake, ShieldAlert, Home, Sparkles, Crown, Flame, Check, Lock, Layers, AlertCircle } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey, getAccessToken } from '../../../supabaseClient';
 import type { JokerGameState, JokerPlayer, JokerPhase, DoorData, SpecialDoorCardType, MapCell } from './jokerTypes';
 import { generateRotatedMap, getEntryCell, getRandomEntryCell, ensureTwentySpecialCards, placeTrumpCardInRandomCell, spawnCardsToNewLocation, parseMapMatrix, buildMapMatrixPayload } from './jokerMapData';
@@ -21,6 +21,7 @@ import { JokerTrumpModal } from './JokerTrumpModal';
 import { processDoorPurchase, processNoPurchasePenalty } from './jokerEngine';
 import { getDefaultStartingInventory, SpecialCardMetadata, getCardCountInInventory, calculateRedCostMultiplier } from './jokerInventoryConfig';
 import { JokerGameConfig } from './config/JokerGameConfig';
+import { JokerMinigameConfig } from './config/JokerMinigameConfig';
 
 interface JokerGameProps {
     user?: any;
@@ -69,12 +70,14 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     const [showRedCardModal, setShowRedCardModal] = useState(false);
     const [showTrumpModal, setShowTrumpModal] = useState(false);
     const [attackNullifiedAlert, setAttackNullifiedAlert] = useState<{ targetName: string; cardType: string } | null>(null);
+    const [isScreenProtected, setIsScreenProtected] = useState(false);
     const [minigameResultState, setMinigameResultState] = useState<{
         show: boolean;
         won: boolean;
-        scoreBonus: number;
+        scoreBonus?: number;
         timeLeft: number;
     } | null>(null);
+    const [minigameHistory, setMinigameHistory] = useState<Record<number, 'win' | 'loss'>>({});
 
     const isRegisteringRef = useRef<boolean>(false);
     const prevRoundRef = useRef<number>(1);
@@ -296,6 +299,83 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [myPlayer?.frozenBy]);
+
+    // Anti-Screenshot & Screen Recording Protection (Blackout Overlay & All Key Blocking) — ONLY ACTIVE DURING MINIGAMES
+    useEffect(() => {
+        if (!activeMinigame && gameState?.phase !== 'minigame') {
+            setIsScreenProtected(false);
+            return;
+        }
+
+        const triggerProtection = () => {
+            setIsScreenProtected(true);
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText('');
+                }
+            } catch (err) { }
+            setTimeout(() => setIsScreenProtected(false), 3000);
+        };
+
+        const handleBlur = () => triggerProtection();
+        const handleFocus = () => setIsScreenProtected(false);
+        const handleVisibility = () => {
+            if (document.hidden) triggerProtection();
+            else setIsScreenProtected(false);
+        };
+
+        const handleKey = (e: KeyboardEvent) => {
+            const keyLower = e.key ? e.key.toLowerCase() : '';
+            const codeLower = e.code ? e.code.toLowerCase() : '';
+            const isFKey = keyLower.startsWith('f') && keyLower.length > 1; // F1 - F12
+            const isPrtScr = keyLower.includes('print') || keyLower.includes('snapshot') || e.keyCode === 44 || codeLower.includes('print');
+            const isSystemKey =
+                isPrtScr ||
+                e.ctrlKey ||
+                e.altKey ||
+                e.metaKey ||
+                keyLower === 'control' ||
+                keyLower === 'alt' ||
+                keyLower === 'meta' ||
+                keyLower === 'contextmenu' ||
+                codeLower.includes('win') ||
+                isFKey;
+
+            if (isSystemKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerProtection();
+            }
+        };
+
+        const handleContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
+            triggerProtection();
+        };
+
+        const handleCopy = (e: ClipboardEvent) => {
+            e.preventDefault();
+            triggerProtection();
+        };
+
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', handleVisibility);
+        window.addEventListener('keydown', handleKey, { capture: true });
+        window.addEventListener('keyup', handleKey, { capture: true });
+        window.addEventListener('contextmenu', handleContextMenu);
+        window.addEventListener('copy', handleCopy, { capture: true });
+
+        return () => {
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('focus', handleFocus);
+            document.removeEventListener('visibilitychange', handleVisibility);
+            window.removeEventListener('keydown', handleKey, { capture: true });
+            window.removeEventListener('keyup', handleKey, { capture: true });
+            window.removeEventListener('contextmenu', handleContextMenu);
+            window.removeEventListener('copy', handleCopy, { capture: true });
+        };
+    }, [activeMinigame, gameState?.phase]);
 
     // 30s Minigame Result Window Timer Countdown
     useEffect(() => {
@@ -568,8 +648,9 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                     if (me?.hasUsedGreenCard) {
                         myRedMultiplierRef.current = 1;
                     } else {
-                        const calculatedMult = calculateRedCostMultiplier(mergedInv, 0, Boolean(me?.frozenBy || me?.frozenByPlayerId));
-                        myRedMultiplierRef.current = Math.min(6, Math.max(calculatedMult, me?.nextRoundCostMultiplier || 1));
+                        const isFrozenByCard = Boolean(me?.frozenBy || me?.frozenByPlayerId);
+                        const calculatedMult = calculateRedCostMultiplier(mergedInv, 0, isFrozenByCard);
+                        myRedMultiplierRef.current = Math.max(calculatedMult, me?.nextRoundCostMultiplier || 1);
                     }
 
                     let newMe = {
@@ -590,8 +671,8 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         claimCoordsByRoundRef.current = {}; // reset cached destination coords each new round
                     }
 
-                    // Red Card door blocks only last 1 round! Reset blocked doors & temporary card effects whenever round changes or phase is briefing/choosing
-                    if (isNewRound || data.phase === 'briefing' || data.phase === 'choosing') {
+                    // Reset blocked doors & temporary door selections whenever round changes or phase is briefing
+                    if (isNewRound || data.phase === 'briefing') {
                         newMe.frozenBy = undefined;
                         newMe.frozenByPlayerId = undefined;
                         newMe.lastDoorChoice = undefined;
@@ -605,8 +686,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         prevBlockedDoorsCountRef.current = 0;
                         setIncomingRedAttackAlert(null);
                     } else if (prev && (prev.currentR !== newMe.currentR || prev.currentC !== newMe.currentC)) {
-                        newMe.frozenBy = undefined;
-                        newMe.frozenByPlayerId = undefined;
+                        newMe.lastDoorChoice = undefined;
                         newMe.pendingDoorChoice = undefined;
                         newMe.blockedDoorsByRed = [];
                         newMe.blockedByPlayerName = undefined;
@@ -773,18 +853,23 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             if (!startStr.endsWith('Z') && !startStr.match(/[+-]\d{2}:?\d{2}$/)) startStr += 'Z';
             const startTime = new Date(startStr).getTime();
             if (isNaN(startTime)) {
-                setTimeLeft(gameState?.phase_duration_sec || 30);
+                setTimeLeft(JokerGameConfig.getPhaseDuration(gameState?.phase || 'choosing', gameState?.current_round || 1));
                 return;
             }
             const now = new Date().getTime();
             const elapsed = Math.floor((now - startTime) / 1000);
-            const remaining = Math.max(0, (gameState.phase_duration_sec || 30) - elapsed);
-            setTimeLeft(isNaN(remaining) ? 0 : remaining);
+            const durationSec = (gameState.phase_duration_sec && gameState.phase_duration_sec > 0)
+                ? gameState.phase_duration_sec
+                : JokerGameConfig.getPhaseDuration(gameState.phase, gameState.current_round);
+            const remaining = Math.max(0, durationSec - elapsed);
+            setTimeLeft(remaining);
 
-            if (gameState.phase === 'choosing' && [4, 8, 12].includes(gameState.current_round)) {
-                if (gameState.current_round === 4) setActiveMinigame('slip');
-                if (gameState.current_round === 8) setActiveMinigame('reflex');
-                if (gameState.current_round === 12) setActiveMinigame('trust');
+            if (gameState.phase === 'minigame') {
+                const mType = JokerMinigameConfig.getMinigameTypeForRound(gameState.current_round);
+                setActiveMinigame(mType as any);
+            } else {
+                setActiveMinigame(null);
+                setMinigameResultState(null);
             }
         };
 
@@ -1189,9 +1274,15 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     }, [myPlayer?.id, myPlayer?.currentR, myPlayer?.currentC, gameState?.phase, gameState?.current_round]);
 
     const handleExecuteFreeze = async (targetPlayerId: string) => {
-        if (!myPlayer || !gameState) return;
+        if (!myPlayer || !gameState || !targetPlayerId) return;
 
-        const targetPlayer = (gameState.participants || []).find(p => p.id === targetPlayerId || (p.username && myPlayer.username && p.username !== myPlayer.username));
+        // Ensure sender never freezes themselves
+        if (targetPlayerId === myPlayer.id || (myPlayer.username && String(targetPlayerId).toLowerCase() === String(myPlayer.username).toLowerCase())) {
+            console.warn('[JOKER_FREEZE] Cannot freeze yourself.');
+            return;
+        }
+
+        const targetPlayer = (gameState.participants || []).find(p => !isSamePlayer(p, myPlayer) && (p.id === targetPlayerId || (p.username && String(p.username).toLowerCase() === String(targetPlayerId).toLowerCase())));
         if (!targetPlayer || isSamePlayer(targetPlayer, myPlayer)) return;
 
         // 1. Remove freeze card from inventory and unselect selected door
@@ -1201,23 +1292,24 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         const updatedMe = {
             ...myPlayer,
             inventory: updatedInventory,
-            pendingDoorChoice: undefined // Unselect selected door on card use
+            pendingDoorChoice: undefined
         };
         setMyPlayer(updatedMe);
         setHasBoughtDoorThisRound(false);
         setShowFreezeModal(false);
 
-        // 2. Fetch latest state and apply freeze to target
+        // 2. Fetch latest state and apply freeze (+5X) to target ONLY
         try {
             const token = await getAccessToken();
             const res = await fetch(`${supabaseUrl}/rest/v1/joker_game_state?id=eq.${GAME_ID}&select=participants`, {
-                headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey }
+                headers: { 'Authorization': `Bearer ${token}`, 'apikey': supabaseKey },
+                cache: 'no-store'
             });
             if (res.ok) {
                 const data = await res.json();
                 if (data && data.length > 0 && data[0].participants) {
                     const isTargetPlayer = (p: any) => {
-                        if (!p) return false;
+                        if (!p || isSamePlayer(p, updatedMe)) return false;
                         if (p.id && targetPlayerId && p.id === targetPlayerId) return true;
                         if (p.username && targetPlayer.username && String(p.username).toLowerCase() === String(targetPlayer.username).toLowerCase()) return true;
                         return false;
@@ -1225,7 +1317,12 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
 
                     const latestParticipants = data[0].participants.map((p: any) => {
                         if (isSamePlayer(p, updatedMe)) {
-                            return updatedMe;
+                            // Sender is NEVER frozen
+                            return {
+                                ...updatedMe,
+                                frozenBy: undefined,
+                                frozenByPlayerId: undefined
+                            };
                         }
                         if (isTargetPlayer(p)) {
                             if (p.hasUsedGreenCard) {
@@ -1235,16 +1332,20 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                 });
                                 return p;
                             }
-                            const targetRedCount = getCardCountInInventory(p.inventory || [], 'red');
-                            const targetRedMult = targetRedCount >= 3 ? 6 : targetRedCount === 2 ? 4 : targetRedCount === 1 ? 2 : 1;
-                            const combinedMult = 5 + (targetRedMult > 1 ? targetRedMult : 0);
+
+                            // Receiver multiplier logic:
+                            // If receiver already has penalty (e.g. 6X), add +5X = 11X. If no penalty (1X), becomes 5X.
+                            const currentMult = (p.nextRoundCostMultiplier && p.nextRoundCostMultiplier > 1) ? p.nextRoundCostMultiplier : 1;
+                            const combinedMult = currentMult > 1 ? currentMult + 5 : 5;
+
+                            console.log(`[FREEZE ATTACK] Target "${p.username}" frozen by "${myPlayer.username}". Old Mult: ${currentMult}X → New Mult: ${combinedMult}X.`);
 
                             return {
                                 ...p,
                                 frozenBy: myPlayer.username || 'AGENT',
                                 frozenByPlayerId: myPlayer.id,
                                 nextRoundCostMultiplier: combinedMult,
-                                pendingDoorChoice: undefined // Unselect target player's door choice
+                                pendingDoorChoice: undefined
                             };
                         }
                         return p;
@@ -1450,28 +1551,37 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
         syncParticipantsToState(newParticipants);
     };
 
-    // Minigame Completion Handler (NO MINUS MARKS, 30S TOP LAYER RESULT MODAL)
-    const handleMinigameComplete = (success: boolean, scoreBonus: number) => {
+    // Minigame Completion Handler (REWARD 1 GAME CARD ON WIN & STORE HISTORY IN DB)
+    const handleMinigameComplete = (success: boolean) => {
         setActiveMinigame(null);
-        const finalBonus = Math.max(0, scoreBonus); // NO MINUS MARKS!
+
+        const isAlreadyWon = Boolean(minigameResultState?.show && minigameResultState?.won);
+        const finalWon = isAlreadyWon ? true : success;
+        const currRound = gameState?.current_round || 1;
 
         if (myPlayer) {
+            const updatedInventory = finalWon
+                ? (myPlayer.inventory?.includes('game') ? myPlayer.inventory : [...(myPlayer.inventory || []), 'game' as const])
+                : (myPlayer.inventory || []);
+            const updatedHistory = { ...(myPlayer.minigameHistory || {}), [currRound]: finalWon ? ('win' as const) : ('loss' as const) };
             const updatedPlayer: JokerPlayer = {
                 ...myPlayer,
-                score: myPlayer.score + finalBonus
+                inventory: updatedInventory,
+                minigameHistory: updatedHistory
             };
             setMyPlayer(updatedPlayer);
+            setMinigameHistory(updatedHistory);
+
             const currentParticipants = gameState?.participants || [];
-            const newParticipants = currentParticipants.map(p => p.id === updatedPlayer.id ? updatedPlayer : p);
+            const newParticipants = currentParticipants.map(p => isSamePlayer(p, updatedPlayer) ? updatedPlayer : p);
             syncParticipantsToState(newParticipants);
         }
 
-        // Open 30-Second Top Layer Result Window (Map for Winner, "YOU DIDN'T WIN" for Loser)
+        // Open Top Layer Result Window (Lock victory state once set to true)
         setMinigameResultState({
             show: true,
-            won: success,
-            scoreBonus: finalBonus,
-            timeLeft: 30
+            won: finalWon,
+            timeLeft: timeLeft
         });
     };
 
@@ -1545,59 +1655,61 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     const rawCell = myPlayer ? gridMatrix[myPlayer.currentR]?.[myPlayer.currentC] : undefined;
     const currentCell = (rawCell && rawCell.type !== 'wall') ? rawCell : gridMatrix[fallbackEntry.r][fallbackEntry.c];
 
+    const isMinigameMode = !!(activeMinigame || minigameResultState?.show || gameState?.phase === 'minigame');
+
     return (
-        <div className="w-full min-h-screen bg-white text-slate-900 font-mono flex flex-col items-center justify-start p-4 relative overflow-y-auto select-none">
-            {/* Top White Header HUD (Rendered for briefing phase or minigames) */}
-            {(gameState?.phase === 'briefing' || activeMinigame) && (
-                <header className="w-full max-w-6xl mx-auto p-4 bg-white/95 border border-slate-300 rounded-2xl backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md relative z-40">
-                    <div className="flex items-center gap-3">
-                        <div className="p-1.5 bg-slate-100 border border-slate-300 rounded-xl shadow-sm">
-                            <img src="/suit_assets/Joker Game.png" alt="Joker Logo" className="w-7 h-7 object-contain" />
+        <div className={`w-full min-h-screen ${isMinigameMode ? 'bg-[#050508] text-slate-100' : 'bg-white text-slate-900'} font-mono flex flex-col items-center justify-start p-2 sm:p-4 relative overflow-y-auto select-none transition-colors duration-300`}>
+            {/* Top Header HUD (Rendered strictly during minigame mode) */}
+            {isMinigameMode && (
+                <header className={`w-full ${isMinigameMode ? 'max-w-[98%] bg-[#0a0b12]/95 border-slate-800/90 text-slate-100 shadow-[0_4px_30px_rgba(0,0,0,0.5)]' : 'max-w-6xl bg-white/95 border-slate-300 text-slate-900 shadow-md'} mx-auto p-2 sm:p-4 border rounded-xl sm:rounded-2xl backdrop-blur-xl flex flex-row items-center justify-between gap-2 relative z-40 transition-all duration-300 overflow-hidden`}>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className={`p-1 sm:p-1.5 ${isMinigameMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-300'} border rounded-lg sm:rounded-xl shadow-sm shrink-0`}>
+                            <img src="/suit_assets/Joker Game.png" alt="Joker Logo" className="w-5 h-5 sm:w-7 sm:h-7 object-contain" />
                         </div>
-                        <div>
-                            <h1 className="font-cinzel text-xl sm:text-2xl font-black text-slate-950 tracking-widest uppercase">
-                                JOKER TRIAL <span className="text-slate-500 font-extrabold">:: LOGIC LABYRINTH</span>
+                        <div className="min-w-0">
+                            <h1 className={`font-cinzel text-xs sm:text-xl font-black ${isMinigameMode ? 'text-white' : 'text-slate-950'} tracking-wider uppercase truncate`}>
+                                JOKER TRIAL <span className={`${isMinigameMode ? 'text-slate-400' : 'text-slate-500'} font-extrabold hidden md:inline`}>:: LOGIC LABYRINTH</span>
                             </h1>
-                            <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.2em]">
+                            <p className={`text-[8px] sm:text-[10px] ${isMinigameMode ? 'text-slate-400' : 'text-slate-600'} font-bold uppercase tracking-wider truncate hidden sm:block`}>
                                 SUBJECT: {user?.username || 'AGENT'} // ENTRY R{myPlayer?.entryIndex || 1} ➔ EXIT G{myPlayer?.targetExitIndex || 1}
                             </p>
                         </div>
                     </div>
 
-                    {/* Sub-Header Widget */}
-                    <div className="flex items-center gap-4 sm:gap-6">
-                        {/* Inventory Button before round details */}
+                    {/* Sub-Header Widget in ONE LINE */}
+                    <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
+                        {/* Inventory Button */}
                         <button
                             onClick={() => setShowInventoryModal(true)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 uppercase tracking-widest transition-all cursor-pointer shadow-sm"
+                            className={`flex items-center gap-1 sm:gap-2 px-2 py-1 sm:px-3 sm:py-1.5 ${isMinigameMode ? 'bg-[#08090e] hover:bg-slate-900 border-slate-800 text-slate-100' : 'bg-white hover:bg-slate-100 border-slate-300 text-slate-900'} border rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer`}
                         >
-                            <Briefcase size={15} className="text-slate-700" />
-                            <span className="hidden sm:inline">INVENTORY</span>
-                            <span className="px-1.5 py-0.5 bg-emerald-600 text-white text-[10px] rounded font-black">
+                            <Briefcase size={13} className={isMinigameMode ? "text-emerald-400" : "text-slate-700"} />
+                            <span className="hidden md:inline">INVENTORY</span>
+                            <span className="px-1 py-0.2 bg-emerald-600 text-white text-[9px] sm:text-[10px] rounded font-black">
                                 {myPlayer?.inventory?.length || 0}
                             </span>
                         </button>
 
-                        <div className="text-center sm:text-right">
-                            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">ROUND</span>
-                            <span className="text-xl font-black font-cinzel text-slate-950">{gameState?.current_round || 1}/14</span>
+                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
+                            <span className="text-slate-400 font-bold hidden sm:inline">R:</span>
+                            <span className="font-black text-white">{gameState?.current_round || 1}/14</span>
                         </div>
 
-                        <div className="text-center sm:text-right">
-                            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">TIMER</span>
-                            <span className={`text-xl font-black font-mono ${timeLeft <= 10 ? 'text-red-600 animate-pulse' : 'text-slate-950'}`}>
+                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
+                            <span className="text-slate-400 font-bold hidden sm:inline">TIME:</span>
+                            <span className={`font-black ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-slate-100'}`}>
                                 {timeLeft}s
                             </span>
                         </div>
 
-                        <div className="px-4 py-1.5 bg-slate-100 border border-slate-300 rounded-xl text-center sm:text-right shadow-inner">
-                            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">CREDITS</span>
-                            <span className="text-xl font-black font-mono text-emerald-600">{myPlayer?.score ?? 1000}</span>
+                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
+                            <span className="text-slate-400 font-bold hidden sm:inline">CR:</span>
+                            <span className="font-black text-emerald-400">{myPlayer?.score ?? 1000}</span>
                         </div>
 
                         {onClose && (
-                            <button onClick={onClose} className="p-2 text-slate-500 hover:text-slate-950 transition-colors cursor-pointer" title="Exit Game">
-                                <LogOut size={20} />
+                            <button onClick={onClose} className={`p-1 sm:p-1.5 ${isMinigameMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-950'} transition-colors cursor-pointer`} title="Exit Game">
+                                <LogOut size={16} />
                             </button>
                         )}
                     </div>
@@ -1605,7 +1717,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
             )}
 
             {/* Main Interactive Grid & Game Views */}
-            <main className="w-full max-w-6xl my-4 flex-1 flex flex-col lg:flex-row items-start justify-center gap-6 relative z-30">
+            <main className={`w-full ${activeMinigame ? 'max-w-[98%]' : 'max-w-6xl'} my-4 flex-1 flex flex-col lg:flex-row items-start justify-center gap-6 relative z-30`}>
                 {/* Left: Map Grid (ONLY VISIBLE FOR ADMIN / GAME MASTER ROLE) */}
                 {isMasterRole && (
                     <div className="w-full lg:w-1/2 flex items-center justify-center">
@@ -1618,17 +1730,17 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                     </div>
                 )}
 
-                {/* Right: Door Choice / Minigame Controller (Takes full width for regular players) */}
-                <div className={`w-full ${isMasterRole ? 'lg:w-1/2' : 'max-w-4xl mx-auto'} flex flex-col items-center justify-center`}>
-                    {activeMinigame === 'slip' && (
+                {/* Right: Door Choice / Minigame Controller (Takes full width for regular players or minigame) */}
+                <div className={`w-full ${activeMinigame ? 'w-full max-w-full px-2 sm:px-4' : (isMasterRole ? 'lg:w-1/2' : 'max-w-4xl mx-auto')} flex flex-col items-center justify-center`}>
+                    {activeMinigame === 'slip' && !minigameResultState?.show && (
                         <SlipCardGame timeLeft={timeLeft} onComplete={handleMinigameComplete} />
                     )}
 
-                    {activeMinigame === 'reflex' && (
+                    {activeMinigame === 'reflex' && !minigameResultState?.show && (
                         <ReflexGame onComplete={handleMinigameComplete} />
                     )}
 
-                    {activeMinigame === 'trust' && (
+                    {activeMinigame === 'trust' && !minigameResultState?.show && (
                         <TrustPairsGame
                             players={gameState?.participants || []}
                             myPlayerId={user?.id}
@@ -1780,7 +1892,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         </div>
                         <h2 className="text-2xl font-cinzel font-black text-red-500 mb-2 tracking-wider">FROZEN!</h2>
                         <p className="text-sm text-slate-300 leading-relaxed mb-6">
-                            <span className="font-bold text-white text-base">{myPlayer.frozenBy}</span> caused you freeze effect so your current door value are increase by <span className="font-bold text-red-400 text-base">5X</span> and u can also have option not to buy any doors current round.
+                            <span className="font-bold text-white text-base">{myPlayer.frozenBy}</span> applied Freeze Card to you! Your door cost multiplier is increased by <span className="font-bold text-red-400 text-base">+5X</span> (Total: <span className="font-bold text-red-400 text-base">{myPlayer.nextRoundCostMultiplier || 5}X</span>) for this round.
                         </p>
                         <button
                             onClick={handleAcknowledgeFreeze}
@@ -1863,7 +1975,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                             <span className="text-red-600 font-black">
                                                                 {(() => {
                                                                     if (myPlayer?.hasUsedGreenCard) return '1X';
-                                                                    const mult = Math.min(6, myPlayer?.nextRoundCostMultiplier || 1);
+                                                                    const mult = Math.max(1, myPlayer?.nextRoundCostMultiplier || 1);
                                                                     return `${mult}X`;
                                                                 })()}
                                                             </span>
@@ -1924,71 +2036,193 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                 )}
             </AnimatePresence>
 
-            {/* 30-SECOND TOP LAYER RESULT MODAL FOR MINIGAMES (WIN OR LOSE) */}
+            {/* TOP LAYER RESULT MODAL FOR MINIGAMES (APPROVED HORIZONTAL LAYOUT WITH ELECTRIC BLUE/CYAN & RED FIRING FLAME) */}
             <AnimatePresence>
                 {minigameResultState?.show && (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
+                        initial={{ opacity: 0, scale: 0.96 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
+                        exit={{ opacity: 0, scale: 0.96 }}
                         className="fixed inset-0 z-[1300] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 sm:p-6 font-mono text-slate-100 overflow-y-auto"
                     >
-                        <div className="max-w-2xl w-full bg-[#05050a] border border-slate-400/50 p-6 sm:p-8 rounded-3xl text-center space-y-5 shadow-[0_0_100px_rgba(0,0,0,0.9)] relative max-h-[90vh] overflow-y-auto">
-                            {/* Header Status */}
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                    <Trophy size={16} className={minigameResultState.won ? "text-yellow-400" : "text-slate-500"} />
-                                    ROUND 4 GAME CARD RESULT
-                                </span>
-                                <span className="px-3 py-1 bg-slate-900 border border-slate-700 rounded-full text-xs font-bold text-slate-300">
-                                    CLOSING IN: {minigameResultState.timeLeft}s
-                                </span>
+                        {/* Dynamic CSS Keyframes for Firing Flame */}
+                        <style dangerouslySetInnerHTML={{
+                            __html: `
+                            @keyframes blueFireFlicker {
+                                0% { transform: scale(1) translateY(0) rotate(-4deg); filter: drop-shadow(0 4px 22px rgba(6, 182, 212, 0.95)); }
+                                25% { transform: scale(1.15) translateY(-5px) rotate(-8deg); filter: drop-shadow(0 8px 32px rgba(59, 130, 246, 0.95)); }
+                                50% { transform: scale(0.92) translateY(2px) rotate(-1deg); filter: drop-shadow(0 2px 22px rgba(56, 189, 248, 0.9)); }
+                                75% { transform: scale(1.12) translateY(-3px) rotate(-6deg); filter: drop-shadow(0 6px 30px rgba(14, 165, 233, 0.95)); }
+                                100% { transform: scale(1) translateY(0) rotate(-4deg); filter: drop-shadow(0 4px 22px rgba(6, 182, 212, 0.95)); }
+                            }
+
+                            @keyframes redFireFlicker {
+                                0% { transform: scale(1) translateY(0) rotate(0deg); filter: drop-shadow(0 4px 18px rgba(239, 68, 68, 0.95)); }
+                                50% { transform: scale(1.12) translateY(-4px) rotate(4deg); filter: drop-shadow(0 8px 28px rgba(185, 28, 28, 0.95)); }
+                                100% { transform: scale(1) translateY(0) rotate(0deg); filter: drop-shadow(0 4px 18px rgba(239, 68, 68, 0.95)); }
+                            }
+
+                            @keyframes blueHeatPulse {
+                                0%, 100% { transform: scale(0.9); opacity: 0.45; }
+                                50% { transform: scale(1.4); opacity: 0.9; }
+                            }
+                        `}} />
+
+                        {/* HORIZONTAL CARD WITH TOP FLOATING ELECTRIC BLUE FLAME (NO BOX) */}
+                        <div className="relative w-full max-w-3xl mt-6">
+
+                            {/* 3D FLOATING FLAME AT TOP CENTER */}
+                            <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none">
+                                <div className="relative flex items-center justify-center">
+                                    <div className={`absolute w-16 h-16 rounded-full blur-xl animate-[blueHeatPulse_2s_infinite] ${minigameResultState.won ? 'bg-cyan-400/80' : 'bg-red-500/70'}`} />
+
+                                    <Flame
+                                        size={58}
+                                        className={`transform transition-all duration-300 ${
+                                            minigameResultState.won
+                                                ? 'text-cyan-300 fill-cyan-400 animate-[blueFireFlicker_1.2s_infinite_alternate_ease-in-out]'
+                                                : 'text-red-500 fill-red-500 animate-[redFireFlicker_1.4s_infinite_alternate_ease-in-out]'
+                                        }`}
+                                    />
+                                </div>
                             </div>
 
-                            {minigameResultState.won ? (
-                                /* WINNER RESULT: Show Maze Map & Earned Points */
-                                <div className="space-y-4">
-                                    <div className="p-4 bg-emerald-950/70 border border-emerald-500 rounded-2xl flex items-center justify-center gap-3 text-emerald-300">
-                                        <CheckCircle size={32} className="text-emerald-400 shrink-0" />
-                                        <div className="text-left">
-                                            <h3 className="font-cinzel text-xl font-black uppercase tracking-wider text-emerald-300">
-                                                PROTOCOL CLEARED — VICTORY!
-                                            </h3>
-                                            <p className="text-xs text-emerald-400 font-bold uppercase tracking-widest">
-                                                CREDITS EARNED THIS GAME: +{minigameResultState.scoreBonus} CR
-                                            </p>
-                                        </div>
+                            {/* Outer Horizontal Card Container */}
+                            <div className="w-full bg-[#0e101a] rounded-3xl sm:rounded-[36px] p-4 sm:p-8 pt-10 sm:pt-12 text-white shadow-[0_25px_60px_rgba(0,0,0,0.8)] border border-slate-800 relative overflow-hidden flex flex-col items-center">
+                                {/* Background Subtle Grid Overlay */}
+                                <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2133_1px,transparent_1px),linear-gradient(to_bottom,#1f2133_1px,transparent_1px)] bg-[size:24px_24px] opacity-30 pointer-events-none" />
+
+                                {/* Top Status Header Row */}
+                                <div className="w-full flex justify-between items-center border-b border-slate-800/80 pb-2.5 mb-4 sm:mb-6 relative z-10">
+                                    <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 font-mono">
+                                        <Trophy size={14} className={minigameResultState.won ? 'text-cyan-400' : 'text-slate-500'} />
+                                        ROUND {gameState?.current_round || 1} MINIGAME {minigameResultState.won ? 'VICTORY' : 'RESULT'}
+                                    </span>
+                                    <span className="px-2.5 py-0.5 sm:px-3 sm:py-1 bg-slate-900 border border-slate-800 rounded-full text-[10px] sm:text-xs font-bold text-slate-400 font-mono">
+                                        CLOSING IN: {timeLeft}s
+                                    </span>
+                                </div>
+
+                                {/* LEFT & RIGHT SPLIT CONTENT LAYOUT */}
+                                <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-8 items-center relative z-10">
+                                    
+                                    {/* LEFT COLUMN: Game Card Artwork Graphic Display */}
+                                    <div className="md:col-span-5 flex flex-col items-center justify-center p-3 sm:p-5 bg-[#141624] border border-slate-800/80 rounded-2xl sm:rounded-3xl shadow-inner min-h-[110px] sm:min-h-[220px]">
+                                        {minigameResultState.won ? (
+                                            <div className="relative group flex flex-col items-center">
+                                                <div className="absolute inset-0 bg-cyan-400/25 rounded-2xl blur-xl group-hover:blur-2xl transition-all" />
+                                                <div className="relative p-1.5 sm:p-2 bg-[#080912] border border-cyan-400/50 rounded-xl sm:rounded-2xl shadow-[0_0_30px_rgba(6,182,212,0.3)] transform hover:scale-105 transition-all">
+                                                    <img
+                                                        src="/specialcard_joker/game.png"
+                                                        alt="Game Card Reward"
+                                                        className="w-20 h-28 sm:w-28 sm:h-40 object-contain rounded-lg sm:rounded-xl shadow-lg border border-cyan-300/40"
+                                                    />
+                                                </div>
+                                                <span className="text-[9px] sm:text-[10px] font-black text-cyan-400 tracking-[0.2em] uppercase font-mono block mt-2 sm:mt-3 drop-shadow-[0_0_8px_rgba(6,182,212,0.6)]">
+                                                    +1 GAME CARD REWARD
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center py-2 sm:py-4">
+                                                <span className="font-cinzel text-4xl sm:text-6xl font-black text-slate-600 tracking-widest drop-shadow-sm">
+                                                    00
+                                                </span>
+                                                <span className="text-[9px] sm:text-[10px] font-black text-red-400 tracking-[0.2em] uppercase mt-1 sm:mt-2">
+                                                    NO CARD CLAIMED
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    {/* Interactive Full Maze Map Preview for Winner */}
-                                    <div className="p-4 bg-slate-900/90 border border-slate-700 rounded-2xl space-y-3">
-                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block text-left">
-                                            🗺️ LABYRINTH MAP VECTOR INSPECTOR (30S VIEWING ACCESS)
-                                        </span>
-                                        <div className="w-full flex items-center justify-center max-h-[340px]">
-                                            <JokerMapGrid
-                                                gridMatrix={gridMatrix}
-                                                players={gameState?.participants || []}
-                                                currentPlayerId={user?.id}
-                                                isAdminView={true}
-                                            />
+                                    {/* RIGHT COLUMN: Title, Message, History Milestones & Action Button */}
+                                    <div className="md:col-span-7 flex flex-col items-start text-left space-y-3 sm:space-y-4">
+                                        
+                                        {/* Main Title */}
+                                        <div className="space-y-1">
+                                            <h2 className="font-cinzel text-xl sm:text-3xl font-black uppercase tracking-[0.15em] text-white">
+                                                {minigameResultState.won ? 'YOU WON THE MINIGAME!' : 'MINIGAME ENDED'}
+                                            </h2>
+                                            <div className={`w-16 sm:w-20 h-0.5 ${minigameResultState.won ? 'bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]' : 'bg-red-500/80'}`} />
                                         </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                /* LOSER RESULT: Banner & Earned Points (NO MINUS MARKS) */
-                                <div className="space-y-6 my-4">
-                                    <div className="p-6 bg-red-950/80 border-2 border-red-500 rounded-2xl flex flex-col items-center justify-center space-y-3 text-red-200 shadow-xl">
-                                        <XOctagon size={48} className="text-red-400 animate-pulse" />
-                                        <h3 className="font-cinzel text-2xl font-black uppercase tracking-widest text-red-400">
-                                            YOU DIDN'T WIN THE GAME
-                                        </h3>
-                                        <p className="text-xs text-slate-300 uppercase tracking-widest font-mono">
-                                            CREDITS EARNED: 0 CR (NO MINUS MARKS APPLIED)
+
+                                        {/* Subtitle Message */}
+                                        <p className="text-[11px] sm:text-xs text-slate-300 font-mono leading-relaxed">
+                                            {minigameResultState.won ? (
+                                                <>Outstanding speed! <strong className="text-cyan-300 font-bold">1 GAME CARD</strong> has been added to your inventory for maze advantages.</>
+                                            ) : (
+                                                <>Time expired or failed attempts limit reached. <strong className="text-slate-400 font-bold">0 CREDITS</strong> earned in this round.</>
+                                            )}
                                         </p>
+
+                                        {/* Minigame Milestones Progress Row */}
+                                        <div className="w-full bg-[#161826] border border-slate-800 rounded-xl sm:rounded-2xl p-2.5 sm:p-4">
+                                            <div className="flex flex-wrap justify-between items-center gap-1.5 mb-2 sm:mb-3 pb-1.5 sm:pb-2 border-b border-slate-800/60">
+                                                <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                                                    MINIGAME MILESTONES
+                                                </span>
+                                                <span className={`text-[7px] sm:text-[8px] font-bold ${minigameResultState.won ? 'text-cyan-400 bg-cyan-950/40 border-cyan-500/40' : 'text-red-400 bg-red-950/40 border-red-500/40'} border px-2 py-0.5 rounded-md uppercase tracking-wider font-mono`}>
+                                                    CURRENT: R{gameState?.current_round || 1}
+                                                </span>
+                                            </div>
+
+                                            <div className="grid grid-cols-7 gap-1 sm:gap-4 text-center py-1">
+                                                {[1, 2, 3, 4, 5, 6, 7].map((roundNum) => {
+                                                    const currentRoundNum = gameState?.current_round || 1;
+                                                    const activeHistory = myPlayer?.minigameHistory || minigameHistory;
+                                                    const result = activeHistory[roundNum] || (roundNum === currentRoundNum ? (minigameResultState.won ? 'win' : 'loss') : undefined);
+                                                    const isCurrent = roundNum === currentRoundNum;
+
+                                                    const ringStyle = isCurrent
+                                                        ? (result === 'loss'
+                                                            ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_15px_rgba(239,68,68,0.95)] z-10'
+                                                            : 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_15px_rgba(6,182,212,0.95)] z-10')
+                                                        : '';
+
+                                                    return (
+                                                        <div key={roundNum} className="flex flex-col items-center gap-1 sm:gap-2">
+                                                            <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl flex items-center justify-center text-[10px] sm:text-xs transition-all ${ringStyle} ${
+                                                                result === 'win'
+                                                                    ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_10px_rgba(6,182,212,0.5)]'
+                                                                    : result === 'loss'
+                                                                    ? 'bg-red-500 text-white font-black shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+                                                                    : 'bg-[#1f2236] text-slate-600'
+                                                            }`}>
+                                                                {result === 'win' ? (
+                                                                    <Check size={13} strokeWidth={3} />
+                                                                ) : result === 'loss' ? (
+                                                                    <X size={13} strokeWidth={3} />
+                                                                ) : (
+                                                                    <Lock size={10} />
+                                                                )}
+                                                            </div>
+                                                            <span className={`text-[8px] sm:text-[9px] font-bold ${isCurrent ? (result === 'loss' ? 'text-red-400 font-mono font-black' : 'text-cyan-400 font-mono font-black') : 'text-slate-400'}`}>
+                                                                R{roundNum}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Action Button */}
+                                        <div className="w-full pt-1">
+                                            <button
+                                                onClick={() => setMinigameResultState(null)}
+                                                className={`w-full py-2.5 sm:py-3 px-4 rounded-full text-xs font-mono font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2 ${
+                                                    minigameResultState.won
+                                                        ? 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.4)]'
+                                                        : 'bg-[#1f2236] hover:bg-[#282c47] text-slate-200 border border-slate-700'
+                                                }`}
+                                            >
+                                                <span>PROCEED TO MAZE SELECTION</span>
+                                            </button>
+                                        </div>
+
                                     </div>
+
                                 </div>
-                            )}
+
+                            </div>
                         </div>
                     </motion.div>
                 )}
@@ -2018,135 +2252,200 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             )}
                         </div>
 
-                        {/* Step 2: Transparent Blur Victory Card & Canvas Confetti Shower */}
+                        {/* Step 2: Minigame Victory Style Card with White Firing Flame */}
                         {showVictoryCard && (
-                            <>
-                                {/* Victory Content (White Font Theme) */}
-                                <div className="relative z-20 max-w-2xl w-full p-4 sm:p-6 text-center space-y-6 max-h-[92vh] overflow-y-auto m-4 text-white animate-in zoom-in-95 duration-300">
-                                    {(() => {
-                                        const sortedParticipants = (gameState?.participants || []).slice().sort((a, b) => {
-                                            const aEscaped = Boolean(a.hasReachedExit || a.status === 'escaped');
-                                            const bEscaped = Boolean(b.hasReachedExit || b.status === 'escaped');
-                                            if (aEscaped !== bEscaped) return aEscaped ? -1 : 1;
-                                            return (b.score || 0) - (a.score || 0);
-                                        });
-                                        const winnerPlayer = sortedParticipants[0];
-                                        const winnerEscaped = Boolean(winnerPlayer?.hasReachedExit || winnerPlayer?.status === 'escaped');
-                                        const isIWinner = winnerPlayer && isSamePlayer(winnerPlayer, myPlayer) && winnerEscaped;
+                            <div className="relative z-20 w-full max-w-3xl p-4 sm:p-6 text-center text-white max-h-[92vh] overflow-y-auto m-4 animate-in zoom-in-95 duration-300">
+                                {/* Dynamic CSS Keyframes for Firing WHITE Flame Animation */}
+                                <style dangerouslySetInnerHTML={{
+                                    __html: `
+                                    @keyframes whiteFireFlicker {
+                                        0% { transform: scale(1) translateY(0) rotate(-4deg); filter: drop-shadow(0 4px 24px rgba(255, 255, 255, 0.95)); }
+                                        25% { transform: scale(1.15) translateY(-5px) rotate(-8deg); filter: drop-shadow(0 8px 36px rgba(255, 255, 255, 1)); }
+                                        50% { transform: scale(0.92) translateY(2px) rotate(-1deg); filter: drop-shadow(0 2px 24px rgba(240, 240, 255, 0.9)); }
+                                        75% { transform: scale(1.12) translateY(-3px) rotate(-6deg); filter: drop-shadow(0 6px 32px rgba(255, 255, 255, 0.95)); }
+                                        100% { transform: scale(1) translateY(0) rotate(-4deg); filter: drop-shadow(0 4px 24px rgba(255, 255, 255, 0.95)); }
+                                    }
 
-                                        return (
-                                            <>
-                                                {/* Winner Header Badge */}
-                                                <div className="flex flex-col items-center gap-2">
-                                                    <div className="w-16 h-16 rounded-2xl bg-white/20 border-2 border-white/50 flex items-center justify-center shadow-lg backdrop-blur-md animate-bounce">
-                                                        <i className="fa-solid fa-ranking-star text-3xl text-white"></i>
-                                                    </div>
-                                                    <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/20 border-2 border-white/40 rounded-full text-white text-xs font-black uppercase tracking-widest shadow-md backdrop-blur-md">
-                                                        <Sparkles size={14} className="text-amber-400" /> CONGRATULATIONS! TRIAL CONCLUDED
-                                                    </div>
-                                                    <h2 className="font-cinzel text-2xl sm:text-3xl font-black text-white uppercase tracking-widest mt-1 drop-shadow-lg">
-                                                        {isIWinner ? 'JOKER TRIAL VICTORY' : 'JOKER TRIAL CONCLUDED'}
-                                                    </h2>
-                                                </div>
+                                    @keyframes whiteHeatPulse {
+                                        0%, 100% { transform: scale(0.9); opacity: 0.5; }
+                                        50% { transform: scale(1.4); opacity: 0.95; }
+                                    }
+                                `}} />
 
-                                                <div className="w-full bg-white/15 border-2 border-white/40 text-white rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-lg backdrop-blur-md">
-                                                    <div className="flex items-center gap-4 text-left">
-                                                        <div className="w-12 h-12 rounded-full bg-white/30 border-2 border-white flex items-center justify-center overflow-hidden shrink-0 shadow-md">
-                                                            {winnerPlayer?.avatar_url ? (
-                                                                <img src={winnerPlayer.avatar_url} alt={winnerPlayer.username} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <Crown size={24} className="text-amber-400 animate-pulse" />
-                                                            )}
-                                                        </div>
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <Crown size={16} className="text-amber-400" />
-                                                                <span className="text-xs text-amber-300 font-extrabold uppercase tracking-widest">STAGE WINNER</span>
-                                                            </div>
-                                                            <h3 className="text-lg font-black text-white font-mono drop-shadow-md">{winnerPlayer?.username || gameState?.winner_username || 'CHAMPION'}</h3>
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <span className={`px-3.5 py-1.5 font-black text-xs uppercase rounded-lg tracking-wider shadow-md ${winnerEscaped ? 'bg-emerald-400 border-2 border-emerald-300 text-slate-900' : 'bg-red-400 border-2 border-red-300 text-slate-900'
-                                                            }`}>
-                                                            {winnerEscaped ? 'ESCAPED (+1000 PTS)' : 'ELIMINATED (-200 PTS)'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </>
-                                        );
-                                    })()}
-
-                                    {/* Player Points Leaderboard Table (White Font) */}
-                                    <div className="w-full space-y-2 text-left">
-                                        <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2 drop-shadow-md">
-                                            <Users size={14} className="text-white" /> PLAYER POINTS & LEADERBOARD RANKINGS:
-                                        </h4>
-                                        <div className="bg-white/15 border border-white/30 rounded-xl overflow-hidden divide-y divide-white/20 shadow-lg backdrop-blur-md">
-                                            {(gameState?.participants || [])
-                                                .slice()
-                                                .sort((a, b) => {
-                                                    const aEscaped = Boolean(a.hasReachedExit || a.status === 'escaped');
-                                                    const bEscaped = Boolean(b.hasReachedExit || b.status === 'escaped');
-                                                    if (aEscaped !== bEscaped) return aEscaped ? -1 : 1;
-                                                    const aFinal = (a.score || 0) + (aEscaped ? 1000 : -200);
-                                                    const bFinal = (b.score || 0) + (bEscaped ? 1000 : -200);
-                                                    return bFinal - aFinal;
-                                                })
-                                                .map((p, idx) => {
-                                                    const isEscaped = Boolean(p.hasReachedExit || p.status === 'escaped');
-                                                    const isMe = isSamePlayer(p, myPlayer);
-                                                    const rankStr = idx === 0 ? '🥇 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`;
-                                                    const baseScore = p.score || 0;
-                                                    const finalScore = isEscaped ? baseScore + 1000 : Math.max(0, baseScore - 200);
-
-                                                    return (
-                                                        <div
-                                                            key={p.id || idx}
-                                                            className={`p-3.5 flex items-center justify-between text-xs font-mono transition-all backdrop-blur-sm ${isMe ? 'bg-white/25 font-bold' : ''
-                                                                }`}
-                                                        >
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="w-10 font-black text-amber-300">{rankStr}</span>
-                                                                <span className={`font-extrabold ${isEscaped ? 'text-white' : 'text-slate-100'}`}>
-                                                                    {p.username || 'PLAYER'} {isMe && '(YOU)'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex items-center gap-4">
-                                                                <span className="text-slate-200">
-                                                                    SCORE: <strong className="text-white font-extrabold">{finalScore} PTS</strong>
-                                                                </span>
-                                                                <span
-                                                                    className={`px-3 py-1 text-[10px] font-black uppercase rounded shadow-md ${isEscaped
-                                                                        ? 'bg-emerald-400 text-slate-900 border border-emerald-300'
-                                                                        : 'bg-red-400 text-slate-900 border border-red-300'
-                                                                        }`}
-                                                                >
-                                                                    {isEscaped ? 'ESCAPED (+1000)' : 'ELIMINATED (-200)'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
+                                <div className="relative w-full mt-6">
+                                    {/* 3D FLOATING WHITE FIRING FLAME AT TOP CENTER */}
+                                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none">
+                                        <div className="relative flex items-center justify-center">
+                                            <div className="absolute w-16 h-16 rounded-full blur-xl animate-[whiteHeatPulse_2s_infinite] bg-white/70" />
+                                            <Flame
+                                                size={58}
+                                                className="text-white fill-slate-100 transform transition-all duration-300 animate-[whiteFireFlicker_1.2s_infinite_alternate_ease-in-out]"
+                                            />
                                         </div>
                                     </div>
 
-                                    {/* Return Home Button (White Font Sheer Glass) */}
-                                    <button
-                                        onClick={() => {
-                                            if (onClose) {
-                                                onClose();
-                                            } else {
-                                                window.location.href = '/home';
-                                            }
-                                        }}
-                                        className="w-full py-4 bg-white/20 hover:bg-white/40 text-white border-2 border-white/50 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-xl hover:scale-[1.01] flex items-center justify-center gap-2 backdrop-blur-md"
-                                    >
-                                        <Home size={18} className="text-white" />
-                                        <span>RETURN HOME // REDIRECT TO GAMES SECTION</span>
-                                    </button>
+                                    {/* Outer Card Container */}
+                                    <div className="w-full bg-[#0e101a]/95 rounded-3xl sm:rounded-[36px] p-5 sm:p-8 pt-12 text-white shadow-[0_25px_60px_rgba(0,0,0,0.85)] border border-slate-800 backdrop-blur-xl relative overflow-hidden flex flex-col items-center">
+                                        {/* Background Grid Overlay */}
+                                        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2133_1px,transparent_1px),linear-gradient(to_bottom,#1f2133_1px,transparent_1px)] bg-[size:24px_24px] opacity-30 pointer-events-none" />
+
+                                        {(() => {
+                                            const sortedParticipants = (gameState?.participants || []).slice().sort((a, b) => {
+                                                const aEscaped = Boolean(a.hasReachedExit || a.status === 'escaped');
+                                                const bEscaped = Boolean(b.hasReachedExit || b.status === 'escaped');
+                                                if (aEscaped !== bEscaped) return aEscaped ? -1 : 1;
+                                                return (b.score || 0) - (a.score || 0);
+                                            });
+                                            const winnerPlayer = sortedParticipants[0];
+                                            const winnerEscaped = Boolean(winnerPlayer?.hasReachedExit || winnerPlayer?.status === 'escaped');
+                                            const isIWinner = winnerPlayer && isSamePlayer(winnerPlayer, myPlayer) && winnerEscaped;
+
+                                            return (
+                                                <>
+                                                    {/* Top Status Header Row */}
+                                                    <div className="w-full flex justify-between items-center border-b border-slate-800/80 pb-3 mb-6 relative z-10 font-mono">
+                                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
+                                                            JOKER TRIAL FINAL RESULTS
+                                                        </span>
+                                                        <span className={`px-3 py-1 bg-slate-900 border rounded-full text-xs font-black font-mono uppercase tracking-wider ${winnerEscaped ? 'border-emerald-500/50 text-emerald-400' : 'border-red-500/50 text-red-400'}`}>
+                                                            {winnerEscaped ? 'VICTORY ESCAPE' : 'TRIAL ELIMINATION'}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* LEFT & RIGHT SPLIT CONTENT LAYOUT */}
+                                                    <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 items-center relative z-10 font-mono">
+                                                        
+                                                        {/* LEFT COLUMN: Place Number #1 & Champion Graphic */}
+                                                        <div className="md:col-span-5 flex flex-col items-center justify-center p-6 bg-[#141624] border border-slate-800/80 rounded-3xl shadow-inner min-h-[220px]">
+                                                            <div className="relative group flex flex-col items-center text-center">
+                                                                <div className="absolute inset-0 bg-white/20 rounded-full blur-2xl group-hover:blur-3xl transition-all" />
+                                                                
+                                                                {/* Place Number #1 Badge Box (GLOW GREEN IF WIN, GLOW RED IF ELIMINATED) */}
+                                                                <div className={`relative p-5 rounded-2xl transform hover:scale-105 transition-all flex flex-col items-center min-w-[150px] ${
+                                                                    winnerEscaped
+                                                                        ? 'bg-[#041a12] border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)] text-emerald-300'
+                                                                        : 'bg-[#1c080e] border-2 border-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] text-red-300'
+                                                                }`}>
+                                                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-2 shadow-inner ${
+                                                                        winnerEscaped
+                                                                            ? 'bg-emerald-950 border border-emerald-400/80 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.6)]'
+                                                                            : 'bg-red-950 border border-red-500/80 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.6)]'
+                                                                    }`}>
+                                                                        <span className="font-cinzel text-2xl font-black">#1</span>
+                                                                    </div>
+                                                                    <span className={`text-[9px] font-black tracking-[0.2em] uppercase font-mono ${
+                                                                        winnerEscaped ? 'text-emerald-400' : 'text-red-400'
+                                                                    }`}>
+                                                                        STAGE CHAMPION
+                                                                    </span>
+                                                                    <h3 className="font-cinzel text-lg sm:text-xl font-black text-white uppercase tracking-wider mt-1">
+                                                                        {winnerPlayer?.username || gameState?.winner_username || 'CHAMPION'}
+                                                                    </h3>
+                                                                </div>
+
+                                                                <span className={`text-[10px] font-black tracking-[0.15em] uppercase font-mono block mt-3 px-3 py-1 rounded-full border ${winnerEscaped ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' : 'bg-red-950/60 border-red-500/50 text-red-400'}`}>
+                                                                    {winnerEscaped ? 'ESCAPED (+1000 PTS)' : 'ELIMINATED (-200 PTS)'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* RIGHT COLUMN: Title, Subtitle, Leaderboard List & Single Return Button */}
+                                                        <div className="md:col-span-7 flex flex-col items-start text-left space-y-4 w-full">
+                                                            
+                                                            {/* Main Title */}
+                                                            <div className="space-y-1">
+                                                                <h2 className="font-cinzel text-2xl sm:text-3xl font-black uppercase tracking-[0.15em] text-white">
+                                                                    {isIWinner ? 'JOKER TRIAL VICTORY!' : 'PROTOCOL CONCLUDED'}
+                                                                </h2>
+                                                                <div className="w-20 h-0.5 bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+                                                            </div>
+
+                                                            {/* Subtitle Message */}
+                                                            <p className="text-xs text-slate-300 font-mono leading-relaxed">
+                                                                {winnerEscaped ? (
+                                                                    <>Player <strong className="text-white font-bold">{winnerPlayer?.username}</strong> successfully navigated the 14-round maze to reach the Exit Gate.</>
+                                                                ) : (
+                                                                    <>All candidates failed to reach exit gates within 14 rounds of rotated maze trials.</>
+                                                                )}
+                                                            </p>
+
+                                                            {/* Leaderboard Rankings Section */}
+                                                            <div className="w-full bg-[#161826] border border-slate-800 rounded-2xl p-3.5 space-y-2">
+                                                                <div className="flex justify-between items-center pb-2 border-b border-slate-800/60">
+                                                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                                                                        RANKING // CANDIDATE SCORES
+                                                                    </span>
+                                                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                                                                        FINAL CREDITS
+                                                                    </span>
+                                                                </div>
+
+                                                                <div className="space-y-1.5 max-h-[160px] overflow-y-auto">
+                                                                    {sortedParticipants.map((p, idx) => {
+                                                                        const isEscaped = Boolean(p.hasReachedExit || p.status === 'escaped');
+                                                                        const baseScore = p.score || 0;
+                                                                        const finalScore = isEscaped ? baseScore + 1000 : Math.max(0, baseScore - 200);
+
+                                                                        return (
+                                                                            <div
+                                                                                key={p.id || idx}
+                                                                                className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono transition-all ${
+                                                                                    idx === 0
+                                                                                        ? 'bg-white/10 border border-white/30 text-white font-bold shadow-sm'
+                                                                                        : 'bg-[#0e101a] text-slate-300 border border-slate-800/80'
+                                                                                }`}
+                                                                            >
+                                                                                <div className="flex items-center gap-2.5">
+                                                                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
+                                                                                        idx === 0 ? 'bg-white text-slate-950' : 'bg-slate-800 text-slate-400'
+                                                                                    }`}>
+                                                                                        #{idx + 1}
+                                                                                    </span>
+                                                                                    <span className="font-bold tracking-wider">{p.username}</span>
+                                                                                </div>
+
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
+                                                                                        isEscaped ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40' : 'bg-red-950/80 text-red-400 border border-red-500/40'
+                                                                                    }`}>
+                                                                                        {isEscaped ? 'ESCAPED' : 'ELIMINATED'}
+                                                                                    </span>
+                                                                                    <span className="font-black text-white min-w-[65px] text-right">
+                                                                                        {finalScore} PTS
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Bottom Action Button (Single Full-Width Return Button) */}
+                                                            <div className="w-full pt-1">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (onClose) {
+                                                                            onClose();
+                                                                        } else {
+                                                                            window.location.href = '/home';
+                                                                        }
+                                                                    }}
+                                                                    className="w-full py-3 bg-white hover:bg-slate-100 text-slate-950 font-mono font-black text-xs uppercase tracking-widest rounded-full flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(255,255,255,0.4)] cursor-pointer transform hover:scale-[1.01]"
+                                                                >
+                                                                    <Home size={15} />
+                                                                    <span>RETURN TO LOBBY</span>
+                                                                </button>
+                                                            </div>
+
+                                                        </div>
+
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
-                            </>
+                            </div>
                         )}
                     </motion.div>
                 )}
@@ -2218,6 +2517,15 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             PRESS [SPACEBAR] CLOSE MAP VISION
                         </button>
                     </div>
+                </div>
+            )}
+
+            {/* Screen Protection Blackout Overlay for Screenshot / Screen Record Protection (Only active during minigames) */}
+            {isScreenProtected && (activeMinigame || gameState?.phase === 'minigame') && (
+                <div className="fixed inset-0 z-[99999] bg-black flex flex-col items-center justify-center text-white font-mono text-center p-6 select-none pointer-events-none">
+                    <ShieldAlert size={56} className="text-red-500 animate-pulse mb-4" />
+                    <h2 className="text-2xl font-bold tracking-widest text-red-500 uppercase mb-2">SCREEN PROTECTED</h2>
+                    <p className="text-sm text-slate-400 max-w-md">Screenshots and Screen Recording are disabled for game safety.</p>
                 </div>
             )}
         </div>

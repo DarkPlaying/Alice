@@ -22,7 +22,7 @@ export const getInventoryCardCounts = (inventory: SpecialDoorCardType[] = []): R
     return counts;
 };
 
-// Merges DB inventory with local player inventory so newly claimed and refunded cards are NEVER wiped out by stale Realtime updates.
+// Merges DB inventory with local player inventory so newly claimed cards are NEVER wiped out by stale Realtime updates.
 export const mergePlayerInventories = (
     dbInventory: SpecialDoorCardType[] = [],
     localInventory: SpecialDoorCardType[] = [],
@@ -40,16 +40,11 @@ export const mergePlayerInventories = (
 
         let finalCount = Math.max(dbC, localC);
 
-        // If local has MORE cards than DB (claimed or refunded card), ALWAYS keep local count
-        if (localC > dbC) {
+        // If card was explicitly used locally in this phase, local count is authoritative for that card
+        if (cardType === 'skip' && playerFlags?.hasUsedSkipCard) {
             finalCount = localC;
-        } else if (localC < dbC) {
-            // If local has FEWER cards (card consumed locally), check if card was used
-            if (cardType === 'skip' && playerFlags?.hasUsedSkipCard) {
-                finalCount = localC;
-            } else if (cardType === 'green' && playerFlags?.hasUsedGreenCard) {
-                finalCount = localC;
-            }
+        } else if (cardType === 'green' && playerFlags?.hasUsedGreenCard) {
+            finalCount = localC;
         }
 
         for (let i = 0; i < finalCount; i++) {
@@ -92,19 +87,22 @@ export async function claimSpecialCardsForPlayer(
         const liveNewMap = liveParsed.new_map && liveParsed.new_map.length === 7 ? liveParsed.new_map : generateRotatedMap(gameState.map_rotation || 0);
         const liveOldMap = liveParsed.old_map && liveParsed.old_map.length === 7 ? liveParsed.old_map : liveNewMap;
 
-        // Read special cards at claim room cell (prefer old_map frozen snapshot, fall back to new_map)
+        // Read special cards at claim room cell: check live new_map FIRST.
+        // If new_map cell specialCards has been cleared ([]), the card in this room was already claimed!
         const oldMapCell = liveOldMap[claimR]?.[claimC];
         const newMapCell = liveNewMap[claimR]?.[claimC];
 
-        const availableCards: SpecialDoorCardType[] = (oldMapCell?.specialCards && oldMapCell.specialCards.length > 0)
-            ? oldMapCell.specialCards
-            : (newMapCell?.specialCards && newMapCell.specialCards.length > 0)
-                ? newMapCell.specialCards
-                : [];
+        const availableCards: SpecialDoorCardType[] = (newMapCell?.specialCards && newMapCell.specialCards.length > 0)
+            ? newMapCell.specialCards
+            : (Array.isArray(newMapCell?.specialCards) && newMapCell.specialCards.length === 0)
+                ? [] // Already claimed & cleared from new_map!
+                : (oldMapCell?.specialCards && oldMapCell.specialCards.length > 0)
+                    ? oldMapCell.specialCards
+                    : [];
 
         const cardsToClaim = availableCards.filter(c => c && (c as string) !== 'none');
         if (cardsToClaim.length === 0) {
-            console.log(`[JOKER_CARD_SERVICE] Room (${claimR}, ${claimC}) has no special cards available.`);
+            console.log(`[JOKER_CARD_SERVICE] Room (${claimR}, ${claimC}) has no special cards available or already claimed.`);
             return null;
         }
 

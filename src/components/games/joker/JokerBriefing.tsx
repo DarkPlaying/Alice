@@ -9,36 +9,36 @@ interface JokerBriefingProps {
 
 export const JokerBriefing: React.FC<JokerBriefingProps> = ({ timeLeft, onStartGame }) => {
     return (
-        <div className="fixed inset-0 z-[1000] bg-white flex items-center justify-center p-4 sm:p-6 overflow-y-auto font-mono select-none">
+        <div className="fixed inset-0 z-[1000] bg-white flex items-center justify-center p-2 sm:p-6 overflow-y-auto no-scrollbar font-mono select-none">
             <motion.div
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="w-full max-w-2xl bg-white border border-slate-300 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col font-mono text-slate-900 relative"
+                className="w-full max-w-lg sm:max-w-2xl bg-white border border-slate-300 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col font-mono text-slate-900 relative max-h-[92vh] overflow-y-auto no-scrollbar"
             >
                 {/* Header */}
-                <div className="p-6 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-slate-200 border border-slate-300 rounded-xl text-slate-900">
-                            <ShieldAlert size={24} className="animate-pulse text-slate-900" />
+                <div className="p-3.5 sm:p-6 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="p-1.5 sm:p-2.5 bg-slate-200 border border-slate-300 rounded-xl text-slate-900 shrink-0">
+                            <ShieldAlert size={20} className="animate-pulse text-slate-900" />
                         </div>
                         <div>
-                            <h2 className="font-cinzel text-xl sm:text-2xl font-black text-slate-950 uppercase tracking-widest leading-none">
+                            <h2 className="font-cinzel text-sm sm:text-2xl font-black text-slate-950 uppercase tracking-widest leading-none">
                                 JOKER TRIAL :: THE ULTIMATE PROTOCOL
                             </h2>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-1.5">
+                            <p className="text-[8px] sm:text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-1">
                                 TACTICAL BRIEFING // INDIVIDUAL 14-ROUND LABYRINTH
                             </p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 rounded-xl shadow-sm">
-                        <Timer size={16} className="text-slate-600 animate-pulse" />
-                        <span className="text-sm font-black text-slate-900">{timeLeft}s</span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-white border border-slate-300 rounded-xl shadow-sm shrink-0">
+                        <Timer size={14} className="text-slate-600 animate-pulse" />
+                        <span className="text-xs sm:text-sm font-black text-slate-900">{timeLeft}s</span>
                     </div>
                 </div>
 
-                {/* Content Body - Crisp White Aesthetic */}
-                <div className="p-6 space-y-5 text-xs text-slate-800 leading-relaxed font-mono">
+                {/* Content Body */}
+                <div className="p-3.5 sm:p-6 space-y-3 sm:space-y-5 text-xs text-slate-800 leading-relaxed font-mono">
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                         <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest font-cinzel">
                             RULES OF ENGAGEMENT

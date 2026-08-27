@@ -241,7 +241,11 @@ export const JokerGameMaster: React.FC<JokerGameMasterProps> = ({ user }) => {
                     let nextRound = freshGS.current_round || 1;
 
                     if (freshGS.phase === 'briefing') {
-                        nextPhase = 'choosing';
+                        if (JokerGameConfig.isMinigameRound(nextRound)) {
+                            nextPhase = 'minigame';
+                        } else {
+                            nextPhase = 'choosing';
+                        }
                     } else if (freshGS.phase === 'choosing') {
                         nextPhase = 'reveal';
                     } else if (freshGS.phase === 'reveal') {
@@ -271,11 +275,9 @@ export const JokerGameMaster: React.FC<JokerGameMasterProps> = ({ user }) => {
                         if (freshGS.phase === 'choosing' && nextPhase === 'reveal') {
                             // Start of Reveal Phase: Keep player in current room! Record purchase choice & deduct score
                             if (p.pendingDoorChoice) {
-                                const isSkipChoice = Boolean(p.pendingDoorChoice.isSkip || p.hasUsedSkipCard);
-                                const actualCost = isSkipChoice ? 0 : (p.pendingDoorChoice.finalCost || 0);
                                 return {
                                     ...p,
-                                    score: Math.max(0, (p.score || 0) - actualCost),
+                                    score: Math.max(0, (p.score || 0) - (p.pendingDoorChoice.finalCost || 0)),
                                     lastDoorChoice: p.pendingDoorChoice,
                                     boughtDoorChoice: p.pendingDoorChoice,
                                     pendingDoorChoice: undefined

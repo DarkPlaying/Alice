@@ -116,9 +116,20 @@ export class PlayerController {
     this.camera.quaternion.setFromEuler(this.euler);
   }
 
-  private onKeyDown(e: KeyboardEvent) {
-    if (!this.isPointerLocked) return;
+  public setTouchMovement(forward: boolean, backward: boolean, left: boolean, right: boolean) {
+    this.moveForward = forward;
+    this.moveBackward = backward;
+    this.moveLeft = left;
+    this.moveRight = right;
+  }
 
+  public rotateCamera(deltaAngleY: number) {
+    this.euler.setFromQuaternion(this.camera.quaternion);
+    this.euler.y += deltaAngleY;
+    this.camera.quaternion.setFromEuler(this.euler);
+  }
+
+  private onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Control') {
       this.unlockPointer();
     }

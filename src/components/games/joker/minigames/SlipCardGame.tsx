@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, ShieldAlert, XOctagon } from 'lucide-react';
 
@@ -64,24 +64,106 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
 
         setCards(fullDeck);
 
-        // Auto fold cards after 15s viewing period to start matching phase
-        const foldTimer = setTimeout(() => {
+        // Auto fold cards after 60s viewing period (when displayTimer <= 50s) to start matching phase
+        if (displayTimer > 50) {
+            setPhase('memorize');
+            setCards(fullDeck);
+        } else {
             setPhase('splicing');
-            setCards(cList => cList.map(c => ({ ...c, isFlipped: false })));
-        }, 15000);
-
-        return () => clearTimeout(foldTimer);
+            setCards(fullDeck.map(c => ({ ...c, isFlipped: false })));
+        }
     }, []);
 
-    // Check phase timer expiration
+    const [isScreenProtected, setIsScreenProtected] = useState(false);
+
     useEffect(() => {
-        if (displayTimer <= 0 && gameResult === 'playing') {
-            handleGameOver(false);
+        const triggerProtection = () => {
+            setIsScreenProtected(true);
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText('');
+                }
+            } catch (err) { }
+            setTimeout(() => setIsScreenProtected(false), 3000);
+        };
+
+        const handleBlur = () => triggerProtection();
+        const handleFocus = () => setIsScreenProtected(false);
+        const handleVisibility = () => {
+            if (document.hidden) triggerProtection();
+            else setIsScreenProtected(false);
+        };
+
+        const handleKey = (e: KeyboardEvent) => {
+            const keyLower = e.key ? e.key.toLowerCase() : '';
+            const codeLower = e.code ? e.code.toLowerCase() : '';
+            const isFKey = keyLower.startsWith('f') && keyLower.length > 1; // F1 - F12
+            const isPrtScr = keyLower.includes('print') || keyLower.includes('snapshot') || e.keyCode === 44 || codeLower.includes('print');
+            const isSystemKey =
+                isPrtScr ||
+                e.ctrlKey ||
+                e.altKey ||
+                e.metaKey ||
+                keyLower === 'control' ||
+                keyLower === 'alt' ||
+                keyLower === 'meta' ||
+                keyLower === 'contextmenu' ||
+                codeLower.includes('win') ||
+                isFKey;
+
+            if (isSystemKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerProtection();
+            }
+        };
+
+        const handleCopy = (e: ClipboardEvent) => {
+            e.preventDefault();
+            triggerProtection();
+        };
+
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', handleVisibility);
+        window.addEventListener('keydown', handleKey, { capture: true });
+        window.addEventListener('keyup', handleKey, { capture: true });
+        window.addEventListener('copy', handleCopy, { capture: true });
+
+        return () => {
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('focus', handleFocus);
+            document.removeEventListener('visibilitychange', handleVisibility);
+            window.removeEventListener('keydown', handleKey, { capture: true });
+            window.removeEventListener('keyup', handleKey, { capture: true });
+            window.removeEventListener('copy', handleCopy, { capture: true });
+        };
+    }, []);
+
+    const hasReportedResult = useRef(false);
+    const isWonRef = useRef(false);
+
+    // Sync phase transitions based on main 110s phase timer
+    useEffect(() => {
+        if (displayTimer > 50) {
+            if (phase !== 'memorize') setPhase('memorize');
+        } else if (displayTimer <= 50 && displayTimer > 20) {
+            if (phase === 'memorize') {
+                setPhase('splicing');
+                setCards(cList => cList.map(c => ({ ...c, isFlipped: false })));
+            }
+        } else if (displayTimer <= 20) {
+            // Open result modal ONLY during result phase (last 20s)
+            if (!hasReportedResult.current) {
+                hasReportedResult.current = true;
+                const won = isWonRef.current || gameResult === 'won' || matchedPairsCount >= 1;
+                onComplete(won, 0);
+            }
         }
-    }, [displayTimer, gameResult]);
+    }, [displayTimer, phase, gameResult, matchedPairsCount]);
 
     const handleCardClick = (index: number) => {
-        if (phase === 'memorize' || gameResult !== 'playing' || isAdminLocked) return;
+        if (phase === 'memorize' || isAdminLocked || failedAttempts >= 5) return;
         if (cards[index].isMatched || cards[index].isFlipped) return;
         if (flippedIndices.length >= 2) return;
 
@@ -97,72 +179,67 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
             const idx2 = newFlipped[1];
 
             if (nextCards[idx1].pairId === nextCards[idx2].pairId) {
-                // Match!
+                // Synchronously mark win!
+                isWonRef.current = true;
+                setGameResult('won');
+                const newCount = matchedPairsCount + 1;
+                setMatchedPairsCount(newCount);
+
                 setTimeout(() => {
                     const matchCards = [...nextCards];
                     matchCards[idx1].isMatched = true;
                     matchCards[idx2].isMatched = true;
                     setCards(matchCards);
                     setFlippedIndices([]);
-                    const newCount = matchedPairsCount + 1;
-                    setMatchedPairsCount(newCount);
-
-                    if (newCount >= 5) {
-                        handleGameOver(true);
-                    }
-                }, 400);
+                }, 300);
             } else {
                 // Fail mismatch
+                const newFails = failedAttempts + 1;
+                setFailedAttempts(newFails);
+
+                if (newFails >= 5) {
+                    setIsAdminLocked(true);
+                    if (!isWonRef.current && matchedPairsCount === 0) {
+                        setGameResult('lost');
+                    }
+                }
+
                 setTimeout(() => {
                     const failCards = [...nextCards];
                     failCards[idx1].isFlipped = false;
                     failCards[idx2].isFlipped = false;
                     setCards(failCards);
                     setFlippedIndices([]);
-                    const newFails = failedAttempts + 1;
-                    setFailedAttempts(newFails);
-
-                    if (newFails >= 5) {
-                        setIsAdminLocked(true);
-                        handleGameOver(false);
-                    }
-                }, 700);
+                }, 600);
             }
         }
     };
 
-    const handleGameOver = (won: boolean) => {
-        setGameResult(won ? 'won' : 'lost');
-        setTimeout(() => {
-            onComplete(won, won ? 300 : 0);
-        }, 1500);
-    };
-
     return (
-        <div className="flex flex-col items-center justify-between w-full max-w-4xl p-4 sm:p-6 bg-[#050508]/95 border border-slate-400/30 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(226,232,240,0.15)] text-slate-100 font-mono relative select-none">
+        <div className="flex flex-col items-center justify-between w-full max-w-full p-4 sm:p-6 bg-[#050508]/95 border border-slate-400/30 rounded-2xl backdrop-blur-xl shadow-[0_0_50px_rgba(226,232,240,0.15)] text-slate-100 font-mono relative select-none">
             {/* Header Dialog Aesthetic */}
             <div className="w-full pb-4 border-b border-slate-700/50 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <div>
                     <h3 className="font-cinzel text-xl sm:text-2xl font-black text-slate-200 uppercase tracking-widest flex items-center gap-3">
                         <Eye className="text-slate-400 animate-pulse" size={24} />
-                        SLIP THE CARD :: PAIR PROTOCOL
+                        CARD GAME :: MATCH THE PAIRS
                     </h3>
                     <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] mt-1">
-                        {phase === 'memorize' ? 'PHASE 1: MEMORIZATION (VIEWING CARDS)' : 'PHASE 2: MATCH 5 PAIRS (SPLICING)'}
+                        {phase === 'memorize' ? 'PHASE 1: MEMORIZE CARD LOCATIONS' : 'PHASE 2: FIND MATCHING PAIR'}
                     </p>
                 </div>
 
                 <div className="flex items-center gap-6">
                     <div className="text-right">
                         <span className="text-[9px] text-slate-500 uppercase tracking-widest block">Phase Timer</span>
-                        <span className={`text-xl font-bold font-mono ${displayTimer <= 15 ? 'text-red-400 animate-pulse' : 'text-slate-200'}`}>
-                            {formatTime(displayTimer)}
+                        <span className={`text-xl font-bold font-mono ${((phase === 'memorize' ? (displayTimer - 50) : (displayTimer - 20)) <= 5) ? 'text-red-400 animate-pulse' : 'text-slate-200'}`}>
+                            {formatTime(phase === 'memorize' ? Math.max(0, displayTimer - 50) : Math.max(0, displayTimer - 20))}
                         </span>
                     </div>
 
                     <div className="text-right">
                         <span className="text-[9px] text-slate-500 uppercase tracking-widest block">Matched Pairs</span>
-                        <span className="text-xl font-bold text-emerald-400">{matchedPairsCount}/5</span>
+                        <span className="text-xl font-bold text-emerald-400">{matchedPairsCount}/1</span>
                     </div>
 
                     <div className="text-right">
@@ -179,18 +256,18 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
                 <span className="text-slate-300 font-bold uppercase tracking-widest flex items-center gap-2">
                     {phase === 'memorize' ? (
                         <>
-                            <Eye size={16} className="text-slate-400 animate-pulse" /> MEMORIZE ALL CARD LOCATIONS BEFORE FOLD
+                            <Eye size={16} className="text-slate-400 animate-pulse" /> MEMORIZE ALL CARD LOCATIONS NOW
                         </>
                     ) : (
                         <>
-                            <ShieldAlert size={16} className="text-slate-400" /> SLIP CARDS TO MATCH 5 PAIRS
+                            <ShieldAlert size={16} className="text-slate-400" /> CLICK CARDS TO MATCH A PAIR
                         </>
                     )}
                 </span>
 
                 {gameResult !== 'playing' && (
                     <span className={`font-black text-xs uppercase tracking-widest ${gameResult === 'won' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {gameResult === 'won' ? 'PROTOCOL CLEARED (+300 CR)' : 'PROTOCOL ENDED (0 CR DEDUCTION - NO MINUS)'}
+                        {gameResult === 'won' ? 'YOU WON! (1 GAME CARD REWARD)' : 'GAME ENDED'}
                     </span>
                 )}
             </div>
@@ -215,49 +292,89 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
                 )}
             </AnimatePresence>
 
-            {/* 6x6 Card Grid fits in single screen view without scrolling */}
-            <div className="w-full max-w-2xl sm:max-w-3xl my-1">
-                <div className="grid grid-cols-6 gap-1.5 sm:gap-2 w-full">
-                    {cards.map((card, idx) => {
-                        let suitName = 'Spades';
-                        if (card.suit === '♥') suitName = 'Hearts';
-                        if (card.suit === '♣') suitName = 'Clubs';
-                        if (card.suit === '♦') suitName = 'Diamonds';
-                        const cardImgSrc = `/borderland_cards/${suitName}_${card.value}.png`;
+            {/* 12 x 3 Square Card Grid with Anti-Screenshot Shield */}
+            <div className="w-full my-3 min-h-[360px] flex items-center justify-center relative">
+                {isScreenProtected ? (
+                    <div className="w-full h-[360px] bg-black border-2 border-red-600 rounded-2xl flex flex-col items-center justify-center text-red-500 font-mono space-y-3 z-50 shadow-[0_0_50px_rgba(239,68,68,0.5)]">
+                        <ShieldAlert size={64} className="animate-pulse text-red-500" />
+                        <h2 className="text-2xl font-black uppercase tracking-widest text-red-500">SCREENSHOT PROTECTED</h2>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">MINIGAME CARDS HIDDEN FOR GAME SECURITY</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5 sm:gap-3 w-full max-w-full">
+                        {cards.map((card, idx) => {
+                            let suitName = 'Spades';
+                            if (card.suit === '♥') suitName = 'Hearts';
+                            if (card.suit === '♣') suitName = 'Clubs';
+                            if (card.suit === '♦') suitName = 'Diamonds';
+                            const cardImgSrc = `/borderland_cards/${suitName}_${card.value}.png`;
+                            const isInteractionDisabled = phase !== 'splicing' || card.isMatched || isAdminLocked || failedAttempts >= 5;
 
-                        return (
-                            <motion.div
-                                key={card.id}
-                                whileHover={phase === 'splicing' && !card.isMatched && !isAdminLocked ? { scale: 1.05 } : {}}
-                                whileTap={phase === 'splicing' && !card.isMatched && !isAdminLocked ? { scale: 0.95 } : {}}
-                                onClick={() => handleCardClick(idx)}
-                                className={`aspect-[2/3] max-h-[75px] sm:max-h-[95px] rounded-lg border flex flex-col items-center justify-center cursor-pointer transition-all duration-200 select-none overflow-hidden ${
-                                    card.isMatched
-                                        ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 opacity-60'
-                                        : card.isFlipped
-                                        ? 'bg-slate-900 border-slate-400 text-slate-100 shadow-[0_0_15px_rgba(226,232,240,0.2)]'
-                                        : isAdminLocked
-                                        ? 'bg-red-950/30 border-red-900 opacity-40 cursor-not-allowed'
-                                        : 'bg-[#0a0a0f] border-slate-700/80 hover:border-slate-400/50'
-                                }`}
-                            >
-                                {card.isFlipped || card.isMatched ? (
-                                    <img
-                                        src={cardImgSrc}
-                                        alt={`${card.value} of ${card.suit}`}
-                                        className="w-full h-full object-cover rounded-lg"
-                                    />
-                                ) : (
-                                    <img
-                                        src="/specialcard_joker/game.png"
-                                        alt="Joker Card Back"
-                                        className="w-full h-full object-cover rounded-lg opacity-80 hover:opacity-100 transition-opacity"
-                                    />
-                                )}
-                            </motion.div>
-                        );
-                    })}
-                </div>
+                            return (
+                                <motion.div
+                                    key={card.id}
+                                    whileHover={!isInteractionDisabled ? { scale: 1.06 } : {}}
+                                    whileTap={!isInteractionDisabled ? { scale: 0.95 } : {}}
+                                    onClick={() => handleCardClick(idx)}
+                                    className={`aspect-[5/7] w-full rounded-xl border flex items-center justify-center transition-all duration-200 select-none overflow-hidden ${card.isMatched
+                                            ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 opacity-60'
+                                            : card.isFlipped
+                                                ? 'bg-slate-900 border-slate-400 text-slate-100 shadow-[0_0_20px_rgba(226,232,240,0.25)]'
+                                                : isInteractionDisabled
+                                                    ? 'bg-red-950/30 border-red-900 opacity-40 cursor-not-allowed'
+                                                    : 'bg-[#0a0a0f] border-slate-700/80 hover:border-slate-400/50 cursor-pointer'
+                                        }`}
+                                >
+                                    {card.isFlipped || card.isMatched ? (
+                                        <>
+                                            {/* Laptop/Desktop View (sm:block): Render Real PNG Card Asset */}
+                                            <img
+                                                src={cardImgSrc}
+                                                alt={`${card.value} of ${card.suit}`}
+                                                className="hidden sm:block w-full h-full object-contain rounded-lg p-0.5 select-none"
+                                            />
+
+                                            {/* Mobile View Only (sm:hidden): Render CSS Text & Suit Shapes */}
+                                            <div className={`sm:hidden w-full h-full p-1.5 flex flex-col justify-between items-center rounded-xl border-2 select-none relative overflow-hidden ${
+                                                card.suit === '♥' || card.suit === '♦'
+                                                    ? 'text-red-500 border-red-500/60 bg-gradient-to-b from-slate-900 to-red-950/40 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
+                                                    : 'text-cyan-300 border-cyan-500/60 bg-gradient-to-b from-slate-900 to-cyan-950/40 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                                            }`}>
+                                                {/* Top Left Rank & Suit */}
+                                                <div className="w-full flex items-center justify-start text-[10px] font-black tracking-tighter leading-none">
+                                                    <span>{card.value}</span>
+                                                    <span className="text-[9px] ml-0.5">{card.suit}</span>
+                                                </div>
+
+                                                {/* Center Large Suit Shape */}
+                                                <div className="my-auto text-2xl font-black drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">
+                                                    {card.suit}
+                                                </div>
+
+                                                {/* Bottom Right Inverted Rank & Suit */}
+                                                <div className="w-full flex items-center justify-end text-[10px] font-black tracking-tighter leading-none rotate-180">
+                                                    <span>{card.value}</span>
+                                                    <span className="text-[9px] ml-0.5">{card.suit}</span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        /* Sleek Cyberpunk Card Back Pattern */
+                                        <div className="w-full h-full rounded-xl bg-gradient-to-br from-[#0e101c] via-[#161a2e] to-[#0a0c16] border border-cyan-500/40 p-1 flex flex-col items-center justify-center relative shadow-inner">
+                                            <div className="w-full h-full border border-cyan-500/20 rounded-lg flex items-center justify-center bg-[radial-gradient(#1e2442_1px,transparent_1px)] bg-[size:8px_8px]">
+                                                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-cyan-950/80 border border-cyan-400/50 rotate-45 flex items-center justify-center shadow-[0_0_10px_rgba(6,182,212,0.4)]">
+                                                    <span className="-rotate-45 text-[9px] sm:text-[11px] font-black text-cyan-300 font-mono">
+                                                        JK
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </motion.div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -102,7 +102,7 @@ export function removeAllCardsOfTypeFromInventory(inventory: SpecialDoorCardType
 
 // Unified Red & Freeze Multiplier Calculation:
 // Red: 1 Red = 2X, 2 Red = 4X, 3+ Red = 6X (Max 6X)
-// Freeze: Adds +5X to any active Red multiplier (e.g. 5X Freeze + 2X Red = 7X)
+// Freeze: Adds +5X to target (5X if no penalty, or +5X to active Red penalty e.g. 6X + 5 = 11X)
 export function calculateRedCostMultiplier(inventory: SpecialDoorCardType[] = [], cellRedCount: number = 0, isFrozen: boolean = false): number {
     const totalRedCount = getCardCountInInventory(inventory, 'red') + cellRedCount;
     let baseRedMult = 1;
@@ -111,7 +111,7 @@ export function calculateRedCostMultiplier(inventory: SpecialDoorCardType[] = []
     else if (totalRedCount === 1) baseRedMult = 2;
 
     if (isFrozen) {
-        return 5 + baseRedMult;
+        return baseRedMult > 1 ? baseRedMult + 5 : 5;
     }
 
     return baseRedMult;

@@ -80,6 +80,7 @@ export interface JokerPlayer {
         isLocked?: boolean;
         isProcessed?: boolean;
     };
+    minigameHistory?: Record<number, 'win' | 'loss'>;
 }
 
 export interface JokerGameState {

@@ -126,6 +126,76 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
 
     const handleDoorLockToggleRef = useRef<((door: DoorData) => void) | null>(null);
 
+    // Virtual Joystick Touch Controls for Mobile (Left side)
+    const [joystickTouchId, setJoystickTouchId] = useState<number | null>(null);
+    const [joystickPos, setJoystickPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const joystickCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+    const handleJoystickTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+        const touch = e.changedTouches[0];
+        if (!touch) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        joystickCenterRef.current = { x: centerX, y: centerY };
+        setJoystickTouchId(touch.identifier);
+
+        const dx = touch.clientX - centerX;
+        const dy = touch.clientY - centerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxDist = 35;
+        const clampedDist = Math.min(dist, maxDist);
+        const angle = Math.atan2(dy, dx);
+
+        const joyX = Math.cos(angle) * clampedDist;
+        const joyY = Math.sin(angle) * clampedDist;
+        setJoystickPos({ x: joyX, y: joyY });
+        updateJoystickKeyboard(joyX, joyY);
+    };
+
+    const handleJoystickTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (joystickTouchId === null) return;
+        let touch: React.Touch | undefined;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                touch = e.changedTouches[i];
+                break;
+            }
+        }
+        if (!touch) return;
+
+        const dx = touch.clientX - joystickCenterRef.current.x;
+        const dy = touch.clientY - joystickCenterRef.current.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxDist = 35;
+        const clampedDist = Math.min(dist, maxDist);
+        const angle = Math.atan2(dy, dx);
+
+        const joyX = Math.cos(angle) * clampedDist;
+        const joyY = Math.sin(angle) * clampedDist;
+        setJoystickPos({ x: joyX, y: joyY });
+        updateJoystickKeyboard(joyX, joyY);
+    };
+
+    const handleJoystickTouchEnd = () => {
+        setJoystickTouchId(null);
+        setJoystickPos({ x: 0, y: 0 });
+        if (playerControllerRef.current) {
+            playerControllerRef.current.setTouchMovement(false, false, false, false);
+        }
+    };
+
+    const updateJoystickKeyboard = (joyX: number, joyY: number) => {
+        const threshold = 6;
+        const forward = joyY < -threshold;
+        const backward = joyY > threshold;
+        const left = joyX < -threshold;
+        const right = joyX > threshold;
+        if (playerControllerRef.current) {
+            playerControllerRef.current.setTouchMovement(forward, backward, left, right);
+        }
+    };
+
     // Sync player pending choice — only update visual highlight, never open doors
     useEffect(() => {
         if (player?.pendingDoorChoice?.door) {
@@ -406,17 +476,14 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
             }
             onSelectDoor(null as any, 0, false);
         } else {
-            // Skip Card Validation & Target Calculation BEFORE locking
-            const isSkip = !!(player?.hasUsedSkipCard || player?.pendingDoorChoice?.isSkip);
-
-            // Check if door direction is blocked by Red Card attack (Skip Card BYPASSES Red Card door blocks!)
+            // Check if door direction is blocked by Red Card attack!
             const dDirStr = String(door.direction);
             const jokerDirCheck = (dDirStr === 'north' || dDirStr === 'up') ? 'up'
                 : (dDirStr === 'south' || dDirStr === 'down') ? 'down'
                     : (dDirStr === 'west' || dDirStr === 'left') ? 'left'
                         : 'right';
 
-            if (!isSkip && (player?.blockedDoorsByRed || []).includes(jokerDirCheck as any)) {
+            if ((player?.blockedDoorsByRed || []).includes(jokerDirCheck as any)) {
                 console.log(`[DOOR 3D LOG] Door ${door.direction} is blocked by Red Card attack! Opening unblock popup modal.`);
                 soundEngineRef.current?.playErrorBuzz();
                 modalOpenedAtRef.current = Date.now();
@@ -431,6 +498,8 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 return;
             }
 
+            // Skip Card Validation & Target Calculation BEFORE locking
+            const isSkip = !!(player?.hasUsedSkipCard || player?.pendingDoorChoice?.isSkip);
             const step = isSkip ? 2 : 1;
             let destR = Number(currentCell?.r ?? 0);
             let destC = Number(currentCell?.c ?? 0);
@@ -514,10 +583,8 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 doorSystemRef.current.setDoorSelected(dir3d, isSkip);
             }
 
-            // Green Card & Skip Card & Multiplier Application
-            const isFrozenByCard = !!player?.frozenBy || !!player?.frozenByPlayerId;
-            const baseMult = player?.nextRoundCostMultiplier || 1;
-            const costMultiplier = player?.hasUsedGreenCard ? 1 : (isFrozenByCard ? 5 + baseMult : baseMult);
+            // Green Card & Multiplier Application
+            const costMultiplier = player?.hasUsedGreenCard ? 1 : Math.max(1, player?.nextRoundCostMultiplier || 1);
             const finalCost = (player?.hasUsedGreenCard || isSkip) ? 0 : (door.cost || 10) * costMultiplier;
 
             onSelectDoor(door, finalCost, isSkip);
@@ -800,10 +867,8 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                         setSkipErrorModal(null);
                         if (onRefundSkipCard) onRefundSkipCard();
 
-                        const isFrozenByCard = !!player?.frozenBy || !!player?.frozenByPlayerId;
-                        const baseMult = player?.nextRoundCostMultiplier || 1;
-                        const costMultiplier = player?.hasUsedGreenCard ? 1 : (isFrozenByCard ? 5 + baseMult : baseMult);
-                        const finalCost = player?.hasUsedGreenCard ? 0 : (door.cost || 10) * costMultiplier;
+                        const costMultiplier = player?.hasUsedGreenCard ? 1 : Math.max(1, player?.nextRoundCostMultiplier || 1);
+                        const finalCost = (player?.hasUsedGreenCard || isSkipUsed) ? 0 : (door.cost || 10) * costMultiplier;
 
                         setSelectedDoor(door);
                         setLockedDoorDir(door.direction);
@@ -868,22 +933,22 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
         <div ref={containerRef} className="fixed inset-0 z-50 w-screen h-screen bg-white overflow-hidden select-none font-mono text-slate-900">
             <canvas ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing block" />
 
-            {/* TOP METALLIC WHITE HUB INSIDE 3D WORLD */}
-            <div className="absolute top-4 left-4 right-4 z-40 flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-white/95 border border-slate-300 rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono">
-                {/* Left Section: Title & Room Info + Game Icon */}
-                <div className="flex items-center gap-3.5">
-                    <div className="p-1.5 bg-slate-100 border border-slate-300 rounded-xl shadow-sm flex items-center justify-center shrink-0">
-                        <img src="/suit_assets/Joker Game.png" alt="Joker Game Logo" className="w-8 h-8 object-contain" />
+            {/* TOP METALLIC WHITE HUB INSIDE 3D WORLD (ULTRA-SLIM IN MOBILE LANDSCAPE) */}
+            <div className="absolute top-1.5 left-1.5 right-1.5 sm:top-4 sm:left-4 sm:right-4 z-40 flex flex-row items-center justify-between gap-1 sm:gap-4 p-1.5 sm:p-3.5 bg-white/95 border border-slate-300 rounded-lg sm:rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono overflow-x-auto whitespace-nowrap">
+                {/* Left Section: Title & Logo */}
+                <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
+                    <div className="p-1 sm:p-1.5 bg-slate-100 border border-slate-300 rounded-md sm:rounded-xl shadow-sm flex items-center justify-center shrink-0">
+                        <img src="/suit_assets/Joker Game.png" alt="Joker Game Logo" className="w-4 h-4 sm:w-7 sm:h-7 object-contain" />
                     </div>
                     <div>
-                        <h1 className="font-cinzel text-lg sm:text-2xl font-black text-slate-950 tracking-widest uppercase flex items-center gap-2">
-                            JOKER TRIAL <span className="text-slate-500 font-extrabold">:: LOGIC LABYRINTH</span>
+                        <h1 className="font-cinzel text-[10px] sm:text-xl font-black text-slate-950 tracking-wider uppercase">
+                            JOKER <span className="hidden md:inline text-slate-500 font-extrabold">:: LOGIC LABYRINTH</span>
                         </h1>
-                        <div className="flex items-center gap-3 mt-0.5">
-                            <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.2em] flex items-center gap-1">
+                        <div className="hidden lg:flex items-center gap-2 mt-0.5">
+                            <p className="text-[9px] text-slate-600 font-bold uppercase tracking-[0.2em] flex items-center gap-1">
                                 SUBJECT: <span className="font-black text-slate-900">{player?.username || user?.username || 'AGENT'}</span> // ENTRY R{player?.entryIndex || 1} ➔ EXIT G{player?.targetExitIndex || 1}
                             </p>
-                            <span className={`px-2.5 py-0.5 border rounded-full text-[10px] font-black uppercase tracking-widest font-cinzel shadow-sm ${currentCell?.type === 'exit'
+                            <span className={`px-2 py-0.2 border rounded-full text-[9px] font-black uppercase tracking-widest font-cinzel shadow-sm ${currentCell?.type === 'exit'
                                 ? 'bg-emerald-600 border-emerald-400 text-white animate-pulse'
                                 : currentCell?.type === 'entry'
                                     ? 'bg-red-600 border-red-400 text-white'
@@ -904,59 +969,60 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     <span>LOCK DOOR</span>
                 </div>
 
-                {/* Right Section: White Profile Pill Button, MAP Button, Inventory, Round, Timer, Credits & Exit */}
-                <div className="flex items-center gap-3 sm:gap-4">
+                {/* Right Section: Compact Icon Buttons & Metrics */}
+                <div className="flex items-center gap-1 sm:gap-4 shrink-0">
                     <button
                         onClick={() => setShowPlayerProfileModal(true)}
-                        className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                        className="p-1.5 sm:px-3.5 sm:py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-sm flex items-center gap-1 shrink-0"
                         title="Open Profile Card"
                     >
-                        <User size={15} className="text-slate-700" />
-                        <span>{player?.username || user?.username || 'PROFILE'}</span>
+                        <User size={14} className="text-slate-700" />
+                        <span className="hidden sm:inline">{player?.username || user?.username || 'PROFILE'}</span>
                     </button>
 
                     <button
                         onClick={() => setShowMapModal(true)}
-                        className="flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-md hover:scale-105 active:scale-95"
+                        className="p-1.5 sm:px-3.5 sm:py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-md flex items-center gap-1 shrink-0"
                         title="Open Labyrinth Map"
                     >
-                        <MapIcon size={15} className="text-slate-950" />
-                        <span>MAP</span>
+                        <MapIcon size={14} className="text-slate-950" />
+                        <span className="hidden sm:inline">MAP</span>
                     </button>
 
                     {onOpenInventory && (
                         <button
                             onClick={onOpenInventory}
-                            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shadow-sm"
+                            className="p-1.5 sm:px-3.5 sm:py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-sm flex items-center gap-1 shrink-0"
                         >
-                            <Briefcase size={15} className="text-slate-700" />
+                            <Briefcase size={14} className="text-slate-700" />
                             <span className="hidden sm:inline">INVENTORY</span>
-                            <span className="px-1.5 py-0.5 bg-emerald-600 text-white text-[10px] rounded font-black">
+                            <span className="px-1 py-0.2 bg-emerald-600 text-white text-[9px] rounded font-black">
                                 {player?.inventory?.length || 0}
                             </span>
                         </button>
                     )}
 
-                    <div className="text-center sm:text-right">
-                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">ROUND</span>
-                        <span className="text-xl font-black font-cinzel text-slate-950">{gameState?.current_round || 1}/14</span>
+                    {/* Compact Metrics Pills */}
+                    <div className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-slate-100 border border-slate-300 rounded-lg text-center shrink-0">
+                        <span className="text-[7px] sm:text-[9px] text-slate-500 font-bold uppercase tracking-wider block leading-none">R</span>
+                        <span className="text-xs sm:text-base font-black font-cinzel text-slate-950 leading-tight">{gameState?.current_round || 1}/14</span>
                     </div>
 
-                    <div className="text-center sm:text-right">
-                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">TIMER</span>
-                        <span className={`text-xl font-black font-mono ${timeLeft <= 10 ? 'text-red-600 animate-pulse' : 'text-slate-950'}`}>
+                    <div className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-slate-100 border border-slate-300 rounded-lg text-center shrink-0">
+                        <span className="text-[7px] sm:text-[9px] text-slate-500 font-bold uppercase tracking-wider block leading-none">TIME</span>
+                        <span className={`text-xs sm:text-base font-black font-mono leading-tight ${timeLeft <= 10 ? 'text-red-600 animate-pulse' : 'text-slate-950'}`}>
                             {timeLeft}s
                         </span>
                     </div>
 
-                    <div className="px-4 py-1.5 bg-slate-100 border border-slate-300 rounded-xl text-center sm:text-right shadow-inner">
-                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest block">CREDITS</span>
-                        <span className="text-xl font-black font-mono text-emerald-600">{player?.score !== undefined && player?.score !== null ? player.score : 1000}</span>
+                    <div className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-slate-100 border border-slate-300 rounded-lg text-center shrink-0">
+                        <span className="text-[7px] sm:text-[9px] text-slate-500 font-bold uppercase tracking-wider block leading-none">CR</span>
+                        <span className="text-xs sm:text-base font-black font-mono text-emerald-600 leading-tight">{player?.score !== undefined && player?.score !== null ? player.score : 1000}</span>
                     </div>
 
                     {onClose && (
-                        <button onClick={onClose} className="p-2 text-slate-500 hover:text-slate-950 transition-colors cursor-pointer" title="Exit Game">
-                            <LogOut size={20} />
+                        <button onClick={onClose} className="p-1 sm:p-2 text-slate-500 hover:text-slate-950 transition-colors cursor-pointer shrink-0" title="Exit Game">
+                            <LogOut size={16} />
                         </button>
                     )}
                 </div>
@@ -994,10 +1060,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 )}
             </AnimatePresence>
 
-            {/* PHASE 2 (CHOOSING) BOTTOM WHITE BUTTONS HUB OVERLAY */}
+            {/* PHASE 2 (CHOOSING) BOTTOM WHITE BUTTONS HUB OVERLAY (ONE LINE ON MOBILE) */}
             {phase === 'choosing' && (
-                <div className="absolute bottom-6 left-6 right-6 z-40 bg-white/95 border border-slate-300 rounded-2xl p-4 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div className="flex flex-wrap justify-center md:justify-start items-center gap-3 w-full md:w-auto">
+                <div className="absolute bottom-2 left-2 right-2 sm:bottom-6 sm:left-6 sm:right-6 z-40 bg-white/95 border border-slate-300 rounded-xl sm:rounded-2xl p-2 sm:p-3 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono flex flex-row items-center justify-between gap-2 overflow-x-auto whitespace-nowrap">
+                    <div className="flex flex-row flex-nowrap items-center justify-center gap-1.5 sm:gap-3 w-full overflow-x-auto py-1">
                         {(['up', 'right', 'down', 'left'] as const).map((dir) => {
                             const door = availableDoors.find(d => d.direction === dir);
 
@@ -1012,7 +1078,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
 
                             if (!door || is1StepWallBlocked) {
                                 return (
-                                    <div key={dir} className="px-3 py-2 bg-slate-100 border border-slate-300 rounded-xl text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5 opacity-60">
+                                    <div key={dir} className="px-2.5 py-1.5 bg-slate-100 border border-slate-300 rounded-lg text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1 opacity-60 shrink-0">
                                         <span>{dir.toUpperCase()}</span>
                                         <span>BLOCKED</span>
                                     </div>
@@ -1043,7 +1109,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                     <button
                                         key={dir}
                                         onClick={() => handleDoorLockToggle(door)}
-                                        className="px-3 py-2 bg-red-50 border border-red-300 hover:bg-red-100 active:scale-95 rounded-xl text-[10px] text-red-600 font-extrabold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                                        className="px-2.5 py-1.5 bg-red-50 border border-red-300 hover:bg-red-100 active:scale-95 rounded-lg text-[9px] sm:text-[10px] text-red-600 font-extrabold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm shrink-0"
                                     >
                                         <span>{dir.toUpperCase()}</span>
                                         <span className="font-black text-red-600">SKIP BLOCKED</span>
@@ -1051,12 +1117,9 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                 );
                             }
 
-                            const isFrozenByCard = !!player?.frozenBy || !!player?.frozenByPlayerId;
-                            const baseMult = player?.nextRoundCostMultiplier || 1;
-                            const costMultiplier = player?.hasUsedGreenCard ? 1 : (isFrozenByCard ? 5 + baseMult : baseMult);
-
+                            const costMultiplier = player?.hasUsedGreenCard ? 1 : Math.max(1, player?.nextRoundCostMultiplier || 1);
                             const stableCost = stableDoorCostsRef.current[dir] || door.cost || 10;
-                            const displayCost = player?.hasUsedGreenCard ? 0 : stableCost * costMultiplier;
+                            const displayCost = (player?.hasUsedGreenCard || isSkipUsed) ? 0 : stableCost * costMultiplier;
 
                             const normalizeDir = (d?: string | null) => {
                                 if (!d) return '';
@@ -1076,54 +1139,90 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                 <button
                                     key={dir}
                                     onClick={() => handleDoorLockToggle(door)}
-                                    className={`px-4 py-2.5 rounded-xl border flex items-center gap-2.5 text-xs font-black font-mono transition-all cursor-pointer shadow-md ${isLockedThis
+                                    className={`px-1.5 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg border flex items-center gap-1 text-[8px] sm:text-[10px] font-black font-mono transition-all cursor-pointer shadow-sm shrink-0 ${isLockedThis
                                         ? isSkipUsed
-                                            ? 'bg-blue-600 border-blue-300 text-white ring-4 ring-blue-500/90 shadow-[0_0_35px_rgba(59,130,246,0.9)] animate-pulse scale-105'
+                                            ? 'bg-blue-600 border-blue-300 text-white ring-1 ring-blue-500/90 shadow-[0_0_15px_rgba(59,130,246,0.9)] animate-pulse scale-105'
                                             : (costMultiplier > 1 && !player?.hasUsedGreenCard)
-                                                ? 'bg-amber-400 border-red-600 text-slate-950 ring-4 ring-red-500/90 shadow-[0_0_35px_rgba(239,68,68,0.9)] animate-pulse scale-105'
-                                                : 'bg-amber-400 border-amber-300 text-slate-950 ring-4 ring-amber-400/90 shadow-[0_0_35px_rgba(245,158,11,0.9)] animate-pulse scale-105'
+                                                ? 'bg-amber-400 border-red-600 text-slate-950 ring-1 ring-red-500/90 shadow-[0_0_15px_rgba(239,68,68,0.9)] animate-pulse scale-105'
+                                                : 'bg-amber-400 border-amber-300 text-slate-950 ring-1 ring-amber-400/90 shadow-[0_0_15px_rgba(245,158,11,0.9)] animate-pulse scale-105'
                                         : (costMultiplier > 1 && !player?.hasUsedGreenCard)
-                                            ? 'bg-red-950/60 hover:bg-red-900/80 border-red-500/80 text-red-100 shadow-[0_0_15px_rgba(239,68,68,0.4)]'
+                                            ? 'bg-red-950/60 hover:bg-red-900/80 border-red-500/80 text-red-100 shadow-[0_0_10px_rgba(239,68,68,0.4)]'
                                             : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-900'
                                         }`}
                                 >
-                                    <span className="uppercase">{dir} DOOR:</span>
-                                    <span className={isLockedThis ? (isSkipUsed ? 'text-white font-black flex items-center gap-1' : 'text-slate-950 font-black flex items-center gap-1') : (costMultiplier > 1 && !player?.hasUsedGreenCard ? 'text-red-400 font-black flex items-center gap-1' : 'text-emerald-700 font-black')}>
+                                    <span className="uppercase">{dir}:</span>
+                                    <span className={isLockedThis ? (isSkipUsed ? 'text-white font-black flex items-center gap-0.5' : 'text-slate-950 font-black flex items-center gap-0.5') : (costMultiplier > 1 && !player?.hasUsedGreenCard ? 'text-red-400 font-black flex items-center gap-0.5' : 'text-emerald-700 font-black')}>
                                         {displayCost} CR {
-                                            isFrozenByCard ? (
-                                                <span className="text-indigo-300 text-[10px] font-extrabold bg-indigo-950/90 border border-indigo-500/60 px-1.5 py-0.5 rounded shadow-[0_0_8px_rgba(99,102,241,0.5)]">
-                                                    ({costMultiplier}X FROZEN)
-                                                </span>
-                                            ) : (costMultiplier > 1 && !player?.hasUsedGreenCard) ? (
-                                                <span className={isLockedThis ? "text-red-950 text-[10px] font-black bg-red-500/30 border border-red-950/40 px-1 py-0.5 rounded" : "text-red-400 text-[10px] font-extrabold bg-red-950/80 border border-red-500/50 px-1 py-0.5 rounded"}>
-                                                    ({costMultiplier}X RED)
+                                            (costMultiplier > 1 && !player?.hasUsedGreenCard) ? (
+                                                <span className={isLockedThis ? "text-red-950 text-[8px] font-black bg-red-500/30 border border-red-950/40 px-0.5 py-0.2 rounded" : "text-red-400 text-[8px] font-extrabold bg-red-950/80 border border-red-500/50 px-0.5 py-0.2 rounded"}>
+                                                    ({costMultiplier}X)
                                                 </span>
                                             ) : null
                                         }
                                     </span>
                                     {isLockedThis ? (
-                                        <Lock size={14} className={isSkipUsed ? "text-white animate-pulse ml-1" : "text-slate-950 animate-pulse ml-1"} />
+                                        <Lock size={11} className={isSkipUsed ? "text-white animate-pulse ml-0.5" : "text-slate-950 animate-pulse ml-0.5"} />
                                     ) : (
-                                        <Unlock size={14} className={costMultiplier > 1 && !player?.hasUsedGreenCard ? "text-red-400 ml-1" : "text-slate-500 ml-1"} />
+                                        <Unlock size={11} className={costMultiplier > 1 && !player?.hasUsedGreenCard ? "text-red-400 ml-0.5" : "text-slate-500 ml-0.5"} />
                                     )}
                                 </button>
                             );
                         })}
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-slate-800 font-extrabold uppercase tracking-wider">
-                            {lockedDoorDir ? (
+                    {/* Right side info badge (Only shown if locked or on desktop) */}
+                    {lockedDoorDir && (
+                        <div className="hidden sm:flex items-center gap-3 shrink-0">
+                            <span className="text-xs text-slate-800 font-extrabold uppercase tracking-wider">
                                 <span className={isSkipUsed ? "text-blue-600 flex items-center gap-1.5 font-black drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]" : "text-amber-700 flex items-center gap-1.5 font-black"}>
                                     <Lock size={14} /> LOCKED: {lockedDoorDir.toUpperCase()} VECTOR {isSkipUsed ? '(SKIP CARD 2-STEP)' : (currentCell?.doors.find(d => d.direction === lockedDoorDir)?.cardType === 'special' ? '(SECRET CARD)' : '')}
                                 </span>
-                            ) : (
-                                <span className="text-slate-600 font-bold">SELECT & LOCK 1 DOOR TO ADVANCE</span>
-                            )}
-                        </span>
-                    </div>
+                            </span>
+                        </div>
+                    )}
                 </div>
             )}
+
+            {/* MOBILE TOUCH VIRTUAL JOYSTICK (LEFT SIDE) & CAMERA ROTATE CONTROLS (RIGHT SIDE) */}
+            <div className="sm:hidden pointer-events-none fixed inset-0 z-50 flex items-end justify-between p-3 pb-16">
+                {/* LEFT SIDE: Virtual Joystick */}
+                <div
+                    onTouchStart={handleJoystickTouchStart}
+                    onTouchMove={handleJoystickTouchMove}
+                    onTouchEnd={handleJoystickTouchEnd}
+                    className="pointer-events-auto w-20 h-20 rounded-full border-2 border-cyan-400/80 bg-slate-950/80 backdrop-blur-md relative flex items-center justify-center shadow-[0_0_25px_rgba(6,182,212,0.5)] touch-none select-none active:border-cyan-300"
+                >
+                    <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.2)_0%,transparent_70%)] pointer-events-none" />
+                    <div
+                        style={{ transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)` }}
+                        className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-300 via-cyan-400 to-cyan-600 border border-white shadow-[0_0_12px_rgba(255,255,255,0.9)] pointer-events-none flex items-center justify-center"
+                    >
+                        <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                    </div>
+                </div>
+
+                {/* RIGHT SIDE: View Rotate Control Buttons */}
+                <div className="pointer-events-auto flex items-center gap-2">
+                    <button
+                        onTouchStart={() => {
+                            if (playerControllerRef.current) playerControllerRef.current.rotateCamera(0.25);
+                        }}
+                        className="w-10 h-10 rounded-full bg-slate-950/90 border-2 border-cyan-400/80 text-cyan-300 flex items-center justify-center shadow-lg active:scale-95 active:bg-cyan-950 font-black text-xs font-mono"
+                        title="Rotate Left"
+                    >
+                        ◄
+                    </button>
+                    <button
+                        onTouchStart={() => {
+                            if (playerControllerRef.current) playerControllerRef.current.rotateCamera(-0.25);
+                        }}
+                        className="w-10 h-10 rounded-full bg-slate-950/90 border-2 border-cyan-400/80 text-cyan-300 flex items-center justify-center shadow-lg active:scale-95 active:bg-cyan-950 font-black text-xs font-mono"
+                        title="Rotate Right"
+                    >
+                        ►
+                    </button>
+                </div>
+            </div>
 
             {/* PHASE 3 (REVEAL) IN-WORLD HUD */}
             {phase === 'reveal' && (
@@ -1166,10 +1265,8 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                         setSkipErrorModal(null);
                                         if (onRefundSkipCard) onRefundSkipCard();
 
-                                        const isFrozenByCard = !!player?.frozenBy || !!player?.frozenByPlayerId;
-                                        const baseMult = player?.nextRoundCostMultiplier || 1;
-                                        const costMultiplier = player?.hasUsedGreenCard ? 1 : (isFrozenByCard ? 5 + baseMult : baseMult);
-                                        const finalCost = player?.hasUsedGreenCard ? 0 : (door.cost || 10) * costMultiplier;
+                                        const costMultiplier = player?.hasUsedGreenCard ? 1 : Math.max(1, player?.nextRoundCostMultiplier || 1);
+                                        const finalCost = (player?.hasUsedGreenCard || isSkipUsed) ? 0 : (door.cost || 10) * costMultiplier;
 
                                         setSelectedDoor(door);
                                         setLockedDoorDir(door.direction);

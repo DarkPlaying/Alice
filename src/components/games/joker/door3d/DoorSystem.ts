@@ -683,13 +683,12 @@ export class DoorSystem {
       ease: 'sine.inOut'
     });
 
-    group.rotation.y = -0.15;
+    group.rotation.y = 0;
     gsap.to(group.rotation, {
-      y: 0.15,
-      duration: 3.0,
+      y: Math.PI * 2,
+      duration: 6.0,
       repeat: -1,
-      yoyo: true,
-      ease: 'sine.inOut'
+      ease: 'none'
     });
 
     this.scene.add(group);
