@@ -1183,61 +1183,73 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 </div>
             )}
 
-            {/* MOBILE TOUCH VIRTUAL JOYSTICK (LEFT SIDE) & CAMERA ROTATE CONTROLS (RIGHT SIDE) */}
-            <div className="sm:hidden pointer-events-none fixed inset-0 z-50 flex items-end justify-between p-3 pb-16">
-                {/* LEFT SIDE: Virtual Joystick */}
+            {/* MOBILE TOUCH CONTROLS (LEFT: JOYSTICK, RIGHT: JUMP & SIT ACTION BUTTONS LIKE BGMI/PUBG) */}
+            <div className="sm:hidden pointer-events-none fixed inset-0 z-50 flex items-end justify-between p-4 pb-16">
+                {/* LEFT SIDE: Upgraded Virtual Joystick */}
                 <div
                     onTouchStart={handleJoystickTouchStart}
                     onTouchMove={handleJoystickTouchMove}
                     onTouchEnd={handleJoystickTouchEnd}
-                    className="pointer-events-auto w-20 h-20 rounded-full border-2 border-cyan-400/80 bg-slate-950/80 backdrop-blur-md relative flex items-center justify-center shadow-[0_0_25px_rgba(6,182,212,0.5)] touch-none select-none active:border-cyan-300"
+                    className="pointer-events-auto w-24 h-24 rounded-full border-2 border-cyan-400/80 bg-[#060814]/90 backdrop-blur-xl relative flex items-center justify-center shadow-[0_0_35px_rgba(6,182,212,0.6)] touch-none select-none active:border-cyan-300 transition-all"
                 >
-                    <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.2)_0%,transparent_70%)] pointer-events-none" />
+                    {/* Radial Ambient Heat Glow Ring */}
+                    <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.3)_0%,transparent_70%)] pointer-events-none" />
+                    
+                    {/* Inner Notches Dial Ring */}
+                    <div className="absolute inset-1 rounded-full border border-cyan-500/30 pointer-events-none flex items-center justify-center">
+                        <span className="absolute top-0.5 text-[8px] font-black text-cyan-400/70">▲</span>
+                        <span className="absolute bottom-0.5 text-[8px] font-black text-cyan-400/70">▼</span>
+                        <span className="absolute left-1 text-[8px] font-black text-cyan-400/70">◄</span>
+                        <span className="absolute right-1 text-[8px] font-black text-cyan-400/70">►</span>
+                    </div>
+
+                    {/* Joystick Move Knob */}
                     <div
                         style={{ transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)` }}
-                        className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-300 via-cyan-400 to-cyan-600 border border-white shadow-[0_0_12px_rgba(255,255,255,0.9)] pointer-events-none flex items-center justify-center"
+                        className="w-11 h-11 rounded-full bg-gradient-to-br from-cyan-200 via-cyan-400 to-cyan-600 border-2 border-white shadow-[0_0_18px_rgba(6,182,212,0.9)] pointer-events-none flex items-center justify-center transition-transform duration-75"
                     >
-                        <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                        <div className="w-3 h-3 rounded-full bg-white shadow-inner" />
                     </div>
                 </div>
 
-                {/* RIGHT SIDE: View Rotate Control Buttons */}
-                <div className="pointer-events-auto flex items-center gap-2">
+                {/* RIGHT SIDE: Action Jump & Sit Buttons */}
+                <div className="pointer-events-auto flex items-center gap-3">
                     <button
-                        onTouchStart={() => {
-                            if (playerControllerRef.current) playerControllerRef.current.rotateCamera(0.25);
-                        }}
-                        className="w-10 h-10 rounded-full bg-slate-950/90 border-2 border-cyan-400/80 text-cyan-300 flex items-center justify-center shadow-lg active:scale-95 active:bg-cyan-950 font-black text-xs font-mono"
-                        title="Rotate Left"
+                        onTouchStart={() => playerControllerRef.current?.toggleSit()}
+                        onClick={() => playerControllerRef.current?.toggleSit()}
+                        className="w-12 h-12 rounded-full bg-slate-900/90 border-2 border-amber-400 text-amber-300 font-mono font-black text-xs shadow-[0_0_20px_rgba(245,158,11,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer"
+                        title="Sit / Crouch"
                     >
-                        ◄
+                        <span className="text-[10px] leading-none">▼</span>
+                        <span className="text-[9px] font-black tracking-tighter">SIT</span>
                     </button>
+
                     <button
-                        onTouchStart={() => {
-                            if (playerControllerRef.current) playerControllerRef.current.rotateCamera(-0.25);
-                        }}
-                        className="w-10 h-10 rounded-full bg-slate-950/90 border-2 border-cyan-400/80 text-cyan-300 flex items-center justify-center shadow-lg active:scale-95 active:bg-cyan-950 font-black text-xs font-mono"
-                        title="Rotate Right"
+                        onTouchStart={() => playerControllerRef.current?.jump()}
+                        onClick={() => playerControllerRef.current?.jump()}
+                        className="w-12 h-12 rounded-full bg-cyan-950/90 border-2 border-cyan-400 text-cyan-300 font-mono font-black text-xs shadow-[0_0_20px_rgba(6,182,212,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer"
+                        title="Jump"
                     >
-                        ►
+                        <span className="text-[10px] leading-none">▲</span>
+                        <span className="text-[9px] font-black tracking-tighter">JUMP</span>
                     </button>
                 </div>
             </div>
 
-            {/* PHASE 3 (REVEAL) IN-WORLD HUD */}
+            {/* PHASE 3 (REVEAL) IN-WORLD HUD (COMPACT & ELEVATED ON MOBILE) */}
             {phase === 'reveal' && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-xl w-full px-4 text-center">
+                <div className="absolute bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-xl w-full px-2 sm:px-4 text-center">
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white/95 border border-emerald-600 p-4 rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 space-y-1.5"
+                        className="bg-white/95 border border-emerald-600 p-2 sm:p-4 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 space-y-0.5 sm:space-y-1.5"
                     >
-                        <h4 className="font-cinzel text-base font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-2">
-                            <Zap size={18} className="animate-pulse" />
+                        <h4 className="font-cinzel text-[10px] sm:text-base font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-1.5">
+                            <Zap size={14} className="animate-pulse" />
                             REVEAL PHASE // BOUGHT DOOR OPENED
                         </h4>
-                        <p className="text-[10px] text-slate-700 font-extrabold uppercase tracking-widest">
-                            WALK AROUND FREELY // ADVANCING TO NEXT ROOM AT END OF REVEAL PHASE
+                        <p className="text-[8px] sm:text-[10px] text-slate-700 font-extrabold uppercase tracking-wider">
+                            WALK AROUND FREELY // ADVANCING AT END OF PHASE
                         </p>
                     </motion.div>
                 </div>

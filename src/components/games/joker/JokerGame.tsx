@@ -2068,16 +2068,16 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             }
                         `}} />
 
-                        {/* HORIZONTAL CARD WITH TOP FLOATING ELECTRIC BLUE FLAME (NO BOX) */}
-                        <div className="relative w-full max-w-3xl mt-6">
+                        {/* HORIZONTAL CARD WITH TOP FLOATING ELECTRIC BLUE FLAME (COMPACT ON MOBILE) */}
+                        <div className="relative w-full max-w-sm sm:max-w-3xl mt-4 sm:mt-6">
 
                             {/* 3D FLOATING FLAME AT TOP CENTER */}
-                            <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none">
+                            <div className="absolute -top-8 sm:-top-10 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center pointer-events-none">
                                 <div className="relative flex items-center justify-center">
-                                    <div className={`absolute w-16 h-16 rounded-full blur-xl animate-[blueHeatPulse_2s_infinite] ${minigameResultState.won ? 'bg-cyan-400/80' : 'bg-red-500/70'}`} />
+                                    <div className={`absolute w-12 h-12 sm:w-16 sm:h-16 rounded-full blur-xl animate-[blueHeatPulse_2s_infinite] ${minigameResultState.won ? 'bg-cyan-400/80' : 'bg-red-500/70'}`} />
 
                                     <Flame
-                                        size={58}
+                                        size={42}
                                         className={`transform transition-all duration-300 ${
                                             minigameResultState.won
                                                 ? 'text-cyan-300 fill-cyan-400 animate-[blueFireFlicker_1.2s_infinite_alternate_ease-in-out]'
@@ -2088,65 +2088,65 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             </div>
 
                             {/* Outer Horizontal Card Container */}
-                            <div className="w-full bg-[#0e101a] rounded-3xl sm:rounded-[36px] p-4 sm:p-8 pt-10 sm:pt-12 text-white shadow-[0_25px_60px_rgba(0,0,0,0.8)] border border-slate-800 relative overflow-hidden flex flex-col items-center">
+                            <div className="w-full bg-[#0e101a] rounded-2xl sm:rounded-[36px] p-3 sm:p-8 pt-8 sm:pt-12 text-white shadow-[0_25px_60px_rgba(0,0,0,0.8)] border border-slate-800 relative overflow-hidden flex flex-col items-center">
                                 {/* Background Subtle Grid Overlay */}
                                 <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2133_1px,transparent_1px),linear-gradient(to_bottom,#1f2133_1px,transparent_1px)] bg-[size:24px_24px] opacity-30 pointer-events-none" />
 
                                 {/* Top Status Header Row */}
-                                <div className="w-full flex justify-between items-center border-b border-slate-800/80 pb-2.5 mb-4 sm:mb-6 relative z-10">
+                                <div className="w-full flex justify-between items-center border-b border-slate-800/80 pb-2 mb-3 sm:mb-6 relative z-10">
                                     <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-                                        <Trophy size={14} className={minigameResultState.won ? 'text-cyan-400' : 'text-slate-500'} />
+                                        <Trophy size={13} className={minigameResultState.won ? 'text-cyan-400' : 'text-slate-500'} />
                                         ROUND {gameState?.current_round || 1} MINIGAME {minigameResultState.won ? 'VICTORY' : 'RESULT'}
                                     </span>
-                                    <span className="px-2.5 py-0.5 sm:px-3 sm:py-1 bg-slate-900 border border-slate-800 rounded-full text-[10px] sm:text-xs font-bold text-slate-400 font-mono">
+                                    <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-slate-900 border border-slate-800 rounded-full text-[9px] sm:text-xs font-bold text-slate-400 font-mono">
                                         CLOSING IN: {timeLeft}s
                                     </span>
                                 </div>
 
                                 {/* LEFT & RIGHT SPLIT CONTENT LAYOUT */}
-                                <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-8 items-center relative z-10">
+                                <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-8 items-center relative z-10">
                                     
                                     {/* LEFT COLUMN: Game Card Artwork Graphic Display */}
-                                    <div className="md:col-span-5 flex flex-col items-center justify-center p-3 sm:p-5 bg-[#141624] border border-slate-800/80 rounded-2xl sm:rounded-3xl shadow-inner min-h-[110px] sm:min-h-[220px]">
+                                    <div className="md:col-span-5 flex flex-col items-center justify-center p-2.5 sm:p-5 bg-[#141624] border border-slate-800/80 rounded-xl sm:rounded-3xl shadow-inner min-h-[90px] sm:min-h-[220px]">
                                         {minigameResultState.won ? (
                                             <div className="relative group flex flex-col items-center">
                                                 <div className="absolute inset-0 bg-cyan-400/25 rounded-2xl blur-xl group-hover:blur-2xl transition-all" />
-                                                <div className="relative p-1.5 sm:p-2 bg-[#080912] border border-cyan-400/50 rounded-xl sm:rounded-2xl shadow-[0_0_30px_rgba(6,182,212,0.3)] transform hover:scale-105 transition-all">
+                                                <div className="relative p-1 sm:p-2 bg-[#080912] border border-cyan-400/50 rounded-lg sm:rounded-2xl shadow-[0_0_30px_rgba(6,182,212,0.3)] transform hover:scale-105 transition-all">
                                                     <img
                                                         src="/specialcard_joker/game.png"
                                                         alt="Game Card Reward"
-                                                        className="w-20 h-28 sm:w-28 sm:h-40 object-contain rounded-lg sm:rounded-xl shadow-lg border border-cyan-300/40"
+                                                        className="w-16 h-22 sm:w-28 sm:h-40 object-contain rounded-md sm:rounded-xl shadow-lg border border-cyan-300/40"
                                                     />
                                                 </div>
-                                                <span className="text-[9px] sm:text-[10px] font-black text-cyan-400 tracking-[0.2em] uppercase font-mono block mt-2 sm:mt-3 drop-shadow-[0_0_8px_rgba(6,182,212,0.6)]">
+                                                <span className="text-[8px] sm:text-[10px] font-black text-cyan-400 tracking-[0.2em] uppercase font-mono block mt-1.5 sm:mt-3 drop-shadow-[0_0_8px_rgba(6,182,212,0.6)]">
                                                     +1 GAME CARD REWARD
                                                 </span>
                                             </div>
                                         ) : (
-                                            <div className="flex flex-col items-center py-2 sm:py-4">
-                                                <span className="font-cinzel text-4xl sm:text-6xl font-black text-slate-600 tracking-widest drop-shadow-sm">
+                                            <div className="flex flex-col items-center py-1 sm:py-4">
+                                                <span className="font-cinzel text-3xl sm:text-6xl font-black text-slate-600 tracking-widest drop-shadow-sm">
                                                     00
                                                 </span>
-                                                <span className="text-[9px] sm:text-[10px] font-black text-red-400 tracking-[0.2em] uppercase mt-1 sm:mt-2">
+                                                <span className="text-[8px] sm:text-[10px] font-black text-red-400 tracking-[0.2em] uppercase mt-1 sm:mt-2">
                                                     NO CARD CLAIMED
                                                 </span>
                                             </div>
                                         )}
                                     </div>
 
-                                    {/* RIGHT COLUMN: Title, Message, History Milestones & Action Button */}
-                                    <div className="md:col-span-7 flex flex-col items-start text-left space-y-3 sm:space-y-4">
+                                    {/* RIGHT COLUMN: Title, Message, History Milestones & Info Banner */}
+                                    <div className="md:col-span-7 flex flex-col items-start text-left space-y-2.5 sm:space-y-4">
                                         
                                         {/* Main Title */}
-                                        <div className="space-y-1">
-                                            <h2 className="font-cinzel text-xl sm:text-3xl font-black uppercase tracking-[0.15em] text-white">
+                                        <div className="space-y-0.5">
+                                            <h2 className="font-cinzel text-lg sm:text-3xl font-black uppercase tracking-[0.15em] text-white">
                                                 {minigameResultState.won ? 'YOU WON THE MINIGAME!' : 'MINIGAME ENDED'}
                                             </h2>
-                                            <div className={`w-16 sm:w-20 h-0.5 ${minigameResultState.won ? 'bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]' : 'bg-red-500/80'}`} />
+                                            <div className={`w-14 sm:w-20 h-0.5 ${minigameResultState.won ? 'bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.8)]' : 'bg-red-500/80'}`} />
                                         </div>
 
                                         {/* Subtitle Message */}
-                                        <p className="text-[11px] sm:text-xs text-slate-300 font-mono leading-relaxed">
+                                        <p className="text-[10px] sm:text-xs text-slate-300 font-mono leading-relaxed">
                                             {minigameResultState.won ? (
                                                 <>Outstanding speed! <strong className="text-cyan-300 font-bold">1 GAME CARD</strong> has been added to your inventory for maze advantages.</>
                                             ) : (
@@ -2155,17 +2155,17 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                         </p>
 
                                         {/* Minigame Milestones Progress Row */}
-                                        <div className="w-full bg-[#161826] border border-slate-800 rounded-xl sm:rounded-2xl p-2.5 sm:p-4">
-                                            <div className="flex flex-wrap justify-between items-center gap-1.5 mb-2 sm:mb-3 pb-1.5 sm:pb-2 border-b border-slate-800/60">
-                                                <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                                        <div className="w-full bg-[#161826] border border-slate-800 rounded-lg sm:rounded-2xl p-2 sm:p-4">
+                                            <div className="flex flex-wrap justify-between items-center gap-1 mb-1.5 sm:mb-3 pb-1 sm:pb-2 border-b border-slate-800/60">
+                                                <span className="text-[7px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
                                                     MINIGAME MILESTONES
                                                 </span>
-                                                <span className={`text-[7px] sm:text-[8px] font-bold ${minigameResultState.won ? 'text-cyan-400 bg-cyan-950/40 border-cyan-500/40' : 'text-red-400 bg-red-950/40 border-red-500/40'} border px-2 py-0.5 rounded-md uppercase tracking-wider font-mono`}>
+                                                <span className={`text-[7px] sm:text-[8px] font-bold ${minigameResultState.won ? 'text-cyan-400 bg-cyan-950/40 border-cyan-500/40' : 'text-red-400 bg-red-950/40 border-red-500/40'} border px-1.5 py-0.2 rounded uppercase tracking-wider font-mono`}>
                                                     CURRENT: R{gameState?.current_round || 1}
                                                 </span>
                                             </div>
 
-                                            <div className="grid grid-cols-7 gap-1 sm:gap-4 text-center py-1">
+                                            <div className="grid grid-cols-7 gap-1 sm:gap-4 text-center py-0.5">
                                                 {[1, 2, 3, 4, 5, 6, 7].map((roundNum) => {
                                                     const currentRoundNum = gameState?.current_round || 1;
                                                     const activeHistory = myPlayer?.minigameHistory || minigameHistory;
@@ -2174,13 +2174,13 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
 
                                                     const ringStyle = isCurrent
                                                         ? (result === 'loss'
-                                                            ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_15px_rgba(239,68,68,0.95)] z-10'
-                                                            : 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_15px_rgba(6,182,212,0.95)] z-10')
+                                                            ? 'ring-1 sm:ring-2 ring-red-500 ring-offset-1 sm:ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_10px_rgba(239,68,68,0.95)] z-10'
+                                                            : 'ring-1 sm:ring-2 ring-cyan-400 ring-offset-1 sm:ring-offset-2 ring-offset-[#161826] scale-105 shadow-[0_0_10px_rgba(6,182,212,0.95)] z-10')
                                                         : '';
 
                                                     return (
-                                                        <div key={roundNum} className="flex flex-col items-center gap-1 sm:gap-2">
-                                                            <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl flex items-center justify-center text-[10px] sm:text-xs transition-all ${ringStyle} ${
+                                                        <div key={roundNum} className="flex flex-col items-center gap-0.5 sm:gap-2">
+                                                            <div className={`w-5 h-5 sm:w-8 sm:h-8 rounded-md sm:rounded-xl flex items-center justify-center text-[9px] sm:text-xs transition-all ${ringStyle} ${
                                                                 result === 'win'
                                                                     ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_10px_rgba(6,182,212,0.5)]'
                                                                     : result === 'loss'
@@ -2188,14 +2188,14 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                                                     : 'bg-[#1f2236] text-slate-600'
                                                             }`}>
                                                                 {result === 'win' ? (
-                                                                    <Check size={13} strokeWidth={3} />
+                                                                    <Check size={11} strokeWidth={3} />
                                                                 ) : result === 'loss' ? (
-                                                                    <X size={13} strokeWidth={3} />
+                                                                    <X size={11} strokeWidth={3} />
                                                                 ) : (
-                                                                    <Lock size={10} />
+                                                                    <Lock size={9} />
                                                                 )}
                                                             </div>
-                                                            <span className={`text-[8px] sm:text-[9px] font-bold ${isCurrent ? (result === 'loss' ? 'text-red-400 font-mono font-black' : 'text-cyan-400 font-mono font-black') : 'text-slate-400'}`}>
+                                                            <span className={`text-[7px] sm:text-[9px] font-bold ${isCurrent ? (result === 'loss' ? 'text-red-400 font-mono font-black' : 'text-cyan-400 font-mono font-black') : 'text-slate-400'}`}>
                                                                 R{roundNum}
                                                             </span>
                                                         </div>
@@ -2204,18 +2204,12 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                             </div>
                                         </div>
 
-                                        {/* Action Button */}
-                                        <div className="w-full pt-1">
-                                            <button
-                                                onClick={() => setMinigameResultState(null)}
-                                                className={`w-full py-2.5 sm:py-3 px-4 rounded-full text-xs font-mono font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2 ${
-                                                    minigameResultState.won
-                                                        ? 'bg-cyan-400 hover:bg-cyan-300 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.4)]'
-                                                        : 'bg-[#1f2236] hover:bg-[#282c47] text-slate-200 border border-slate-700'
-                                                }`}
-                                            >
-                                                <span>PROCEED TO MAZE SELECTION</span>
-                                            </button>
+                                        {/* Current Round Minigame Info Banner (Static Info, Not a Button) */}
+                                        <div className="w-full pt-0.5">
+                                            <div className="w-full py-1.5 sm:py-2 px-3 sm:px-4 rounded-full text-[9px] sm:text-xs font-mono font-bold uppercase tracking-wider bg-[#161826] border border-slate-700/60 text-slate-200 text-center flex items-center justify-center gap-2 shadow-sm">
+                                                <Sparkles size={12} className={minigameResultState.won ? 'text-cyan-400' : 'text-amber-400'} />
+                                                <span>ROUND {gameState?.current_round || 1} :: {JokerMinigameConfig.getMinigameTypeForRound(gameState?.current_round || 1).toUpperCase()} MINIGAME</span>
+                                            </div>
                                         </div>
 
                                     </div>

@@ -18,9 +18,13 @@ export class PlayerController {
   private moveLeft = false;
   private moveRight = false;
 
-  private velocity = new THREE.Vector3();
+  public velocity = new THREE.Vector3();
   private direction = new THREE.Vector3();
   public moveSpeed = 6.0;
+
+  public jumpVelocity = 0;
+  public jumpHeight = 0;
+  public isSitting = false;
 
   private stepTimer = 0;
   private stepDistance = 0;
@@ -28,6 +32,16 @@ export class PlayerController {
   public onSelectKeyPress?: () => void;
   public onExitDoorBoundary?: () => void;
   public allowExitDoor = false;
+
+  public jump() {
+    if (this.jumpHeight <= 0.05) {
+      this.jumpVelocity = 5.0;
+    }
+  }
+
+  public toggleSit() {
+    this.isSitting = !this.isSitting;
+  }
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, soundEngine: SoundEngine) {
     this.camera = camera;
@@ -253,7 +267,21 @@ export class PlayerController {
       // In east/west corridor — clamp Z to corridor width
       this.position.z = Math.max(-corridorClamp, Math.min(corridorClamp, this.position.z));
     }
-    this.position.y = 1.6;
+    // Handle Sitting / Crouching Height
+    const targetBaseHeight = this.isSitting ? 0.85 : 1.60;
+
+    // Handle Jump Physics Impulse
+    if (this.jumpHeight > 0 || this.jumpVelocity !== 0) {
+      this.jumpVelocity -= 15.0 * delta;
+      this.jumpHeight += this.jumpVelocity * delta;
+      if (this.jumpHeight <= 0) {
+        this.jumpHeight = 0;
+        this.jumpVelocity = 0;
+      }
+    }
+
+    this.position.y = targetBaseHeight + this.jumpHeight;
+    this.camera.position.copy(this.position);
 
     if (isMoving) {
       this.stepTimer += delta * 10;

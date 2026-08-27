@@ -341,20 +341,20 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
                                                     : 'text-cyan-300 border-cyan-500/60 bg-gradient-to-b from-slate-900 to-cyan-950/40 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
                                             }`}>
                                                 {/* Top Left Rank & Suit */}
-                                                <div className="w-full flex items-center justify-start text-[10px] font-black tracking-tighter leading-none">
+                                                <div className="w-full flex flex-col items-start leading-none text-[10px] font-black">
                                                     <span>{card.value}</span>
-                                                    <span className="text-[9px] ml-0.5">{card.suit}</span>
+                                                    <span className="text-[8px] mt-0.5">{card.suit}</span>
                                                 </div>
 
                                                 {/* Center Large Suit Shape */}
-                                                <div className="my-auto text-2xl font-black drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">
+                                                <div className="my-auto text-xl font-black drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">
                                                     {card.suit}
                                                 </div>
 
                                                 {/* Bottom Right Inverted Rank & Suit */}
-                                                <div className="w-full flex items-center justify-end text-[10px] font-black tracking-tighter leading-none rotate-180">
+                                                <div className="w-full flex flex-col items-end leading-none text-[10px] font-black rotate-180">
                                                     <span>{card.value}</span>
-                                                    <span className="text-[9px] ml-0.5">{card.suit}</span>
+                                                    <span className="text-[8px] mt-0.5">{card.suit}</span>
                                                 </div>
                                             </div>
                                         </>
