@@ -1215,12 +1215,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 {/* RIGHT SIDE: Action Jump & Sit Buttons */}
                 <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
                     <button
-                        onTouchStart={(e) => {
-                            e.preventDefault();
+                        onTouchStart={() => {
                             if (playerControllerRef.current) playerControllerRef.current.toggleSit();
                         }}
-                        onClick={(e) => {
-                            e.preventDefault();
+                        onClick={() => {
                             if (playerControllerRef.current) playerControllerRef.current.toggleSit();
                         }}
                         className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-950/90 border-2 border-amber-400 text-amber-300 font-mono font-black shadow-[0_0_20px_rgba(245,158,11,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
@@ -1231,12 +1229,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     </button>
 
                     <button
-                        onTouchStart={(e) => {
-                            e.preventDefault();
+                        onTouchStart={() => {
                             if (playerControllerRef.current) playerControllerRef.current.jump();
                         }}
-                        onClick={(e) => {
-                            e.preventDefault();
+                        onClick={() => {
                             if (playerControllerRef.current) playerControllerRef.current.jump();
                         }}
                         className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-cyan-950/90 border-2 border-cyan-400 text-cyan-300 font-mono font-black shadow-[0_0_20px_rgba(6,182,212,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"

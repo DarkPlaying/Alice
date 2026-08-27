@@ -1771,9 +1771,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             />
 
                             {gameState?.phase === 'briefing' && (
-                                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white p-4">
-                                    <JokerBriefing timeLeft={timeLeft} />
-                                </div>
+                                <JokerBriefing timeLeft={timeLeft} />
                             )}
                         </>
                     )}
@@ -2206,9 +2204,9 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                                             </div>
                                         </div>
 
-                                        {/* Current Round Minigame Info Banner (Static Info, Not a Button) */}
-                                        <div className="w-full pt-0.5">
-                                            <div className="w-full py-1.5 sm:py-2 px-3 sm:px-4 rounded-full text-[9px] sm:text-xs font-mono font-bold uppercase tracking-wider bg-[#161826] border border-slate-700/60 text-slate-200 text-center flex items-center justify-center gap-2 shadow-sm">
+                                        {/* Current Round Minigame Info Text Box (Static Div, Non-Clickable) */}
+                                        <div className="w-full pt-1 pointer-events-none select-none">
+                                            <div className="w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-full text-[9px] sm:text-xs font-mono font-bold uppercase tracking-widest bg-[#121422] border border-slate-800 text-slate-300 text-center flex items-center justify-center gap-2 shadow-inner">
                                                 <Sparkles size={12} className={minigameResultState.won ? 'text-cyan-400' : 'text-amber-400'} />
                                                 <span>ROUND {gameState?.current_round || 1} :: {JokerMinigameConfig.getMinigameTypeForRound(gameState?.current_round || 1).toUpperCase()} MINIGAME</span>
                                             </div>
