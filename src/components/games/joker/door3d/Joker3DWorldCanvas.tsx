@@ -1213,39 +1213,51 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 </div>
 
                 {/* RIGHT SIDE: Action Jump & Sit Buttons */}
-                <div className="pointer-events-auto flex items-center gap-3">
+                <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
                     <button
-                        onTouchStart={() => playerControllerRef.current?.toggleSit()}
-                        onClick={() => playerControllerRef.current?.toggleSit()}
-                        className="w-12 h-12 rounded-full bg-slate-900/90 border-2 border-amber-400 text-amber-300 font-mono font-black text-xs shadow-[0_0_20px_rgba(245,158,11,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer"
+                        onTouchStart={(e) => {
+                            e.preventDefault();
+                            if (playerControllerRef.current) playerControllerRef.current.toggleSit();
+                        }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            if (playerControllerRef.current) playerControllerRef.current.toggleSit();
+                        }}
+                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-950/90 border-2 border-amber-400 text-amber-300 font-mono font-black shadow-[0_0_20px_rgba(245,158,11,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
                         title="Sit / Crouch"
                     >
-                        <span className="text-[10px] leading-none">▼</span>
-                        <span className="text-[9px] font-black tracking-tighter">SIT</span>
+                        <span className="text-[9px] sm:text-[10px] leading-none">▼</span>
+                        <span className="text-[8px] font-black tracking-tighter">SIT</span>
                     </button>
 
                     <button
-                        onTouchStart={() => playerControllerRef.current?.jump()}
-                        onClick={() => playerControllerRef.current?.jump()}
-                        className="w-12 h-12 rounded-full bg-cyan-950/90 border-2 border-cyan-400 text-cyan-300 font-mono font-black text-xs shadow-[0_0_20px_rgba(6,182,212,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer"
+                        onTouchStart={(e) => {
+                            e.preventDefault();
+                            if (playerControllerRef.current) playerControllerRef.current.jump();
+                        }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            if (playerControllerRef.current) playerControllerRef.current.jump();
+                        }}
+                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-cyan-950/90 border-2 border-cyan-400 text-cyan-300 font-mono font-black shadow-[0_0_20px_rgba(6,182,212,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
                         title="Jump"
                     >
-                        <span className="text-[10px] leading-none">▲</span>
-                        <span className="text-[9px] font-black tracking-tighter">JUMP</span>
+                        <span className="text-[9px] sm:text-[10px] leading-none">▲</span>
+                        <span className="text-[8px] font-black tracking-tighter">JUMP</span>
                     </button>
                 </div>
             </div>
 
-            {/* PHASE 3 (REVEAL) IN-WORLD HUD (COMPACT & ELEVATED ON MOBILE) */}
+            {/* PHASE 3 (REVEAL) IN-WORLD HUD (POSITIONED AT MIDDLE TOP ON MOBILE) */}
             {phase === 'reveal' && (
-                <div className="absolute bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-xl w-full px-2 sm:px-4 text-center">
+                <div className="absolute top-14 sm:top-20 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-xl w-full px-2 sm:px-4 text-center">
                     <motion.div
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={{ opacity: 0, y: -15 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white/95 border border-emerald-600 p-2 sm:p-4 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 space-y-0.5 sm:space-y-1.5"
+                        className="bg-white/95 border border-emerald-600 p-2 sm:p-3.5 rounded-xl sm:rounded-2xl backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.4)] text-slate-900 space-y-0.5 sm:space-y-1"
                     >
-                        <h4 className="font-cinzel text-[10px] sm:text-base font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-1.5">
-                            <Zap size={14} className="animate-pulse" />
+                        <h4 className="font-cinzel text-[9px] sm:text-sm font-black text-emerald-700 uppercase tracking-widest flex items-center justify-center gap-1">
+                            <Zap size={13} className="animate-pulse" />
                             REVEAL PHASE // BOUGHT DOOR OPENED
                         </h4>
                         <p className="text-[8px] sm:text-[10px] text-slate-700 font-extrabold uppercase tracking-wider">

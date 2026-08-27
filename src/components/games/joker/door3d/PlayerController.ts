@@ -34,9 +34,9 @@ export class PlayerController {
   public allowExitDoor = false;
 
   public jump() {
-    if (this.jumpHeight <= 0.05) {
-      this.jumpVelocity = 5.0;
-    }
+    this.jumpVelocity = 7.0;
+    this.jumpHeight = 0.1;
+    try { this.soundEngine.playStep(); } catch (e) {}
   }
 
   public toggleSit() {

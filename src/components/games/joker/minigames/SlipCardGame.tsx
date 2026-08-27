@@ -335,26 +335,26 @@ export const SlipCardGame: React.FC<SlipCardGameProps> = ({ timeLeft: mainTimeLe
                                             />
 
                                             {/* Mobile View Only (sm:hidden): Render CSS Text & Suit Shapes */}
-                                            <div className={`sm:hidden w-full h-full p-1.5 flex flex-col justify-between items-center rounded-xl border-2 select-none relative overflow-hidden ${
+                                            <div className={`sm:hidden w-full h-full p-1 flex flex-col justify-between items-center rounded-lg border-2 select-none relative overflow-hidden ${
                                                 card.suit === '♥' || card.suit === '♦'
                                                     ? 'text-red-500 border-red-500/60 bg-gradient-to-b from-slate-900 to-red-950/40 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
                                                     : 'text-cyan-300 border-cyan-500/60 bg-gradient-to-b from-slate-900 to-cyan-950/40 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
                                             }`}>
                                                 {/* Top Left Rank & Suit */}
-                                                <div className="w-full flex flex-col items-start leading-none text-[10px] font-black">
+                                                <div className="absolute top-0.5 left-1 flex flex-col items-start leading-none text-[9px] font-black z-10">
                                                     <span>{card.value}</span>
-                                                    <span className="text-[8px] mt-0.5">{card.suit}</span>
+                                                    <span className="text-[7px] leading-none">{card.suit}</span>
                                                 </div>
 
                                                 {/* Center Large Suit Shape */}
-                                                <div className="my-auto text-xl font-black drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">
+                                                <div className="my-auto text-lg font-black drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]">
                                                     {card.suit}
                                                 </div>
 
                                                 {/* Bottom Right Inverted Rank & Suit */}
-                                                <div className="w-full flex flex-col items-end leading-none text-[10px] font-black rotate-180">
+                                                <div className="absolute bottom-0.5 right-1 flex flex-col items-end leading-none text-[9px] font-black rotate-180 z-10">
                                                     <span>{card.value}</span>
-                                                    <span className="text-[8px] mt-0.5">{card.suit}</span>
+                                                    <span className="text-[7px] leading-none">{card.suit}</span>
                                                 </div>
                                             </div>
                                         </>
