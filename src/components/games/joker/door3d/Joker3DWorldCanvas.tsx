@@ -1052,18 +1052,19 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0 }}
-                        className="absolute top-32 sm:top-36 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 bg-amber-950/90 border border-amber-400 rounded-full text-xs font-bold text-amber-300 shadow-2xl backdrop-blur-md flex items-center gap-2.5"
+                        className="absolute top-28 sm:top-36 left-1/2 -translate-x-1/2 z-40 px-3.5 py-2 sm:px-5 sm:py-2.5 bg-amber-950/90 border border-amber-400 rounded-full text-xs font-bold text-amber-300 shadow-2xl backdrop-blur-md flex items-center gap-2"
                     >
-                        <Lock size={15} className="animate-pulse" />
-                        <span>PRESS [E] OR [SPACE] TO LOCK {nearbyDoorTitle.toUpperCase()}</span>
+                        <Lock size={15} className="animate-pulse shrink-0" />
+                        <span className="hidden sm:inline">PRESS [E] OR [SPACE] TO LOCK {nearbyDoorTitle.toUpperCase()}</span>
+                        <span className="inline sm:hidden text-[10px] font-black text-amber-200 uppercase tracking-tight">USE BOTTOM BUTTONS TO SELECT {nearbyDoorTitle.toUpperCase()} DOOR</span>
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* BOTTOM WHITE BUTTONS HUB OVERLAY (VISIBLE IN CHOOSING & REVEAL PHASES) */}
+            {/* BOTTOM WHITE BUTTONS HUB OVERLAY (COMPACT FIT, NO SCROLLBAR) */}
             {(phase === 'choosing' || phase === 'reveal') && (
-                <div className="absolute bottom-2 left-2 right-2 sm:bottom-6 sm:left-6 sm:right-6 z-40 bg-white/95 border border-slate-300 rounded-xl sm:rounded-2xl p-2 sm:p-3 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono flex flex-row items-center justify-between gap-2 overflow-x-auto whitespace-nowrap">
-                    <div className="flex flex-row flex-nowrap items-center justify-center gap-1.5 sm:gap-3 w-full overflow-x-auto py-1">
+                <div className="absolute bottom-1.5 sm:bottom-6 left-1/2 -translate-x-1/2 w-fit max-w-[98%] sm:max-w-max z-40 bg-white/95 border border-slate-300 rounded-xl sm:rounded-2xl p-1 sm:p-2.5 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-slate-900 font-mono flex flex-row items-center justify-center gap-1 sm:gap-2 no-scrollbar overflow-hidden whitespace-nowrap">
+                    <div className="flex flex-row flex-nowrap items-center justify-center gap-1 sm:gap-3 w-full no-scrollbar overflow-hidden py-0.5 sm:py-1">
                         {(['up', 'right', 'down', 'left'] as const).map((dir) => {
                             const door = availableDoors.find(d => d.direction === dir);
 
@@ -1078,7 +1079,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
 
                             if (!door || is1StepWallBlocked) {
                                 return (
-                                    <div key={dir} className="px-2.5 py-1.5 bg-slate-100 border border-slate-300 rounded-lg text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1 opacity-60 shrink-0">
+                                    <div key={dir} className="px-1.5 py-1 sm:px-2.5 sm:py-1.5 bg-slate-100 border border-slate-300 rounded-md sm:rounded-lg text-[7.5px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-tight flex items-center gap-0.5 shrink-0 select-none">
                                         <span>{dir.toUpperCase()}</span>
                                         <span>BLOCKED</span>
                                     </div>
@@ -1109,10 +1110,10 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                     <button
                                         key={dir}
                                         onClick={() => handleDoorLockToggle(door)}
-                                        className="px-2.5 py-1.5 bg-red-50 border border-red-300 hover:bg-red-100 active:scale-95 rounded-lg text-[9px] sm:text-[10px] text-red-600 font-extrabold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm shrink-0"
+                                        className="px-1.5 py-1 sm:px-2.5 sm:py-1.5 bg-red-50 border border-red-300 hover:bg-red-100 active:scale-95 rounded-md sm:rounded-lg text-[7.5px] sm:text-[10px] text-red-600 font-extrabold uppercase tracking-tight flex items-center gap-0.5 cursor-pointer transition-all shadow-sm shrink-0 select-none"
                                     >
                                         <span>{dir.toUpperCase()}</span>
-                                        <span className="font-black text-red-600">SKIP BLOCKED</span>
+                                        <span className="font-black text-red-600">BLOCKED</span>
                                     </button>
                                 );
                             }
@@ -1139,7 +1140,7 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                 <button
                                     key={dir}
                                     onClick={() => handleDoorLockToggle(door)}
-                                    className={`px-1.5 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg border flex items-center gap-1 text-[8px] sm:text-[10px] font-black font-mono transition-all cursor-pointer shadow-sm shrink-0 ${isLockedThis
+                                    className={`px-1 py-1 sm:px-3 sm:py-1.5 rounded-md sm:rounded-lg border flex items-center gap-0.5 sm:gap-1 text-[7.5px] sm:text-[10px] font-black font-mono transition-all cursor-pointer shadow-sm shrink-0 select-none ${isLockedThis
                                         ? isSkipUsed
                                             ? 'bg-blue-600 border-blue-300 text-white ring-1 ring-blue-500/90 shadow-[0_0_15px_rgba(59,130,246,0.9)] animate-pulse scale-105'
                                             : (costMultiplier > 1 && !player?.hasUsedGreenCard)
@@ -1248,9 +1249,9 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 </div>
             </div>
 
-            {/* PHASE 3 (REVEAL) IN-WORLD HUD (POSITIONED AT VERY TOP CENTER) */}
+            {/* PHASE 3 (REVEAL) IN-WORLD HUD (POSITIONED BELOW TOP HEADER BAR) */}
             {phase === 'reveal' && (
-                <div className="absolute top-2 sm:top-3 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-md w-full px-2 text-center pointer-events-none">
+                <div className="absolute top-16 sm:top-14 left-1/2 -translate-x-1/2 z-40 max-w-[260px] sm:max-w-md w-full px-2 text-center pointer-events-none">
                     <motion.div
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}

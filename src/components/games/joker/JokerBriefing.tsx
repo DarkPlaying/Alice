@@ -9,7 +9,7 @@ interface JokerBriefingProps {
 
 export const JokerBriefing: React.FC<JokerBriefingProps> = ({ timeLeft, onStartGame }) => {
     return (
-        <div className="fixed inset-0 z-[30] bg-white flex flex-col items-center justify-center pt-16 sm:pt-20 p-2 sm:p-4 overflow-y-auto no-scrollbar font-mono select-none">
+        <div className="fixed inset-0 z-[1000] bg-white flex flex-col items-center justify-center p-2 sm:p-6 overflow-y-auto no-scrollbar font-mono select-none">
             <motion.div
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}

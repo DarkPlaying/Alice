@@ -294,14 +294,14 @@ export class PlayerController {
       }
 
       if (this.stepDistance > 1.8) {
-        this.soundEngine.playStep();
+        try { this.soundEngine?.playStep(); } catch (e) {}
         this.stepDistance = 0;
       }
 
-      this.camera.position.y = 1.6 + Math.sin(this.stepTimer) * 0.04;
+      this.camera.position.y = this.position.y + Math.sin(this.stepTimer) * 0.04;
     } else {
       this.stepTimer += delta * 2;
-      this.camera.position.y = 1.6 + Math.sin(this.stepTimer) * 0.008;
+      this.camera.position.y = this.position.y + Math.sin(this.stepTimer) * 0.008;
     }
 
     this.camera.position.x = this.position.x;
