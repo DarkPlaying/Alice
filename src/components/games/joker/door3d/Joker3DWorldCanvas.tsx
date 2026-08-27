@@ -1212,34 +1212,38 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     </div>
                 </div>
 
-                {/* RIGHT SIDE: Action Jump & Sit Buttons */}
+                {/* RIGHT SIDE: Action Jump & Sit Buttons (White Theme with Console Logging) */}
                 <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
                     <button
                         onTouchStart={() => {
+                            console.log('[TOUCH_ACTION] SIT TOUCHED', playerControllerRef.current);
                             if (playerControllerRef.current) playerControllerRef.current.toggleSit();
                         }}
                         onClick={() => {
+                            console.log('[TOUCH_ACTION] SIT CLICKED', playerControllerRef.current);
                             if (playerControllerRef.current) playerControllerRef.current.toggleSit();
                         }}
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-950/90 border-2 border-amber-400 text-amber-300 font-mono font-black shadow-[0_0_20px_rgba(245,158,11,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
+                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-white/95 text-slate-950 border-2 border-amber-500 font-mono font-black shadow-[0_4px_15px_rgba(245,158,11,0.4)] active:scale-90 active:bg-amber-100 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
                         title="Sit / Crouch"
                     >
-                        <span className="text-[9px] sm:text-[10px] leading-none">▼</span>
-                        <span className="text-[8px] font-black tracking-tighter">SIT</span>
+                        <span className="text-[9px] sm:text-[10px] leading-none text-amber-600 font-black">▼</span>
+                        <span className="text-[8px] font-black text-slate-950 tracking-tighter">SIT</span>
                     </button>
 
                     <button
                         onTouchStart={() => {
+                            console.log('[TOUCH_ACTION] JUMP TOUCHED', playerControllerRef.current);
                             if (playerControllerRef.current) playerControllerRef.current.jump();
                         }}
                         onClick={() => {
+                            console.log('[TOUCH_ACTION] JUMP CLICKED', playerControllerRef.current);
                             if (playerControllerRef.current) playerControllerRef.current.jump();
                         }}
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-cyan-950/90 border-2 border-cyan-400 text-cyan-300 font-mono font-black shadow-[0_0_20px_rgba(6,182,212,0.6)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
+                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-white/95 text-slate-950 border-2 border-cyan-600 font-mono font-black shadow-[0_4px_15px_rgba(6,182,212,0.4)] active:scale-90 active:bg-cyan-100 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
                         title="Jump"
                     >
-                        <span className="text-[9px] sm:text-[10px] leading-none">▲</span>
-                        <span className="text-[8px] font-black tracking-tighter">JUMP</span>
+                        <span className="text-[9px] sm:text-[10px] leading-none text-cyan-600 font-black">▲</span>
+                        <span className="text-[8px] font-black text-slate-950 tracking-tighter">JUMP</span>
                     </button>
                 </div>
             </div>

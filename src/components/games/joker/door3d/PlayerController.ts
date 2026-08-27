@@ -34,13 +34,15 @@ export class PlayerController {
   public allowExitDoor = false;
 
   public jump() {
-    this.jumpVelocity = 7.0;
-    this.jumpHeight = 0.1;
-    try { this.soundEngine.playStep(); } catch (e) {}
+    console.log('[PLAYER_CONTROLLER] JUMP TRIGGERED! Current Y:', this.position.y.toFixed(2));
+    this.jumpVelocity = 7.5;
+    this.jumpHeight = 0.15;
+    try { this.soundEngine?.playStep(); } catch (e) {}
   }
 
   public toggleSit() {
     this.isSitting = !this.isSitting;
+    console.log('[PLAYER_CONTROLLER] SIT TOGGLED! isSitting:', this.isSitting, 'Target Base Height:', this.isSitting ? '0.75m' : '1.60m');
   }
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, soundEngine: SoundEngine) {
