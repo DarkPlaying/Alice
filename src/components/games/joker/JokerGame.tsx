@@ -1656,11 +1656,13 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
     const currentCell = (rawCell && rawCell.type !== 'wall') ? rawCell : gridMatrix[fallbackEntry.r][fallbackEntry.c];
 
     const isMinigameMode = !!(activeMinigame || minigameResultState?.show || gameState?.phase === 'minigame');
+    const isBriefingPhase = gameState?.phase === 'briefing';
+    const showTopHeader = isMinigameMode || isBriefingPhase;
 
     return (
         <div className={`w-full min-h-screen ${isMinigameMode ? 'bg-[#050508] text-slate-100' : 'bg-white text-slate-900'} font-mono flex flex-col items-center justify-start p-2 sm:p-4 relative overflow-y-auto select-none transition-colors duration-300`}>
-            {/* Top Header HUD (Rendered strictly during minigame mode) */}
-            {isMinigameMode && (
+            {/* Top Header HUD (Rendered during minigame mode and briefing phase on laptop view) */}
+            {showTopHeader && (
                 <header className={`w-full ${isMinigameMode ? 'max-w-[98%] bg-[#0a0b12]/95 border-slate-800/90 text-slate-100 shadow-[0_4px_30px_rgba(0,0,0,0.5)]' : 'max-w-6xl bg-white/95 border-slate-300 text-slate-900 shadow-md'} mx-auto p-2 sm:p-4 border rounded-xl sm:rounded-2xl backdrop-blur-xl flex flex-row items-center justify-between gap-2 relative z-40 transition-all duration-300 overflow-hidden`}>
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                         <div className={`p-1 sm:p-1.5 ${isMinigameMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-300'} border rounded-lg sm:rounded-xl shadow-sm shrink-0`}>
