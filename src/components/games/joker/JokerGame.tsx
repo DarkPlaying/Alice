@@ -1683,7 +1683,7 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                         {/* Inventory Button */}
                         <button
                             onClick={() => setShowInventoryModal(true)}
-                            className={`flex items-center gap-1 sm:gap-2 px-2 py-1 sm:px-3 sm:py-1.5 ${isMinigameMode ? 'bg-[#08090e] hover:bg-slate-900 border-slate-800 text-slate-100' : 'bg-white hover:bg-slate-100 border-slate-300 text-slate-900'} border rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer`}
+                            className={`flex items-center gap-1 sm:gap-2 px-2 py-1 sm:px-3 sm:py-1.5 ${isMinigameMode ? 'bg-[#08090e] hover:bg-slate-900 border-slate-800 text-slate-100' : 'bg-white hover:bg-slate-100 border-slate-300 text-slate-900'} border rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-sm`}
                         >
                             <Briefcase size={13} className={isMinigameMode ? "text-emerald-400" : "text-slate-700"} />
                             <span className="hidden md:inline">INVENTORY</span>
@@ -1692,21 +1692,21 @@ export const JokerGame: React.FC<JokerGameProps> = ({ user, onClose }) => {
                             </span>
                         </button>
 
-                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
-                            <span className="text-slate-400 font-bold hidden sm:inline">R:</span>
-                            <span className="font-black text-white">{gameState?.current_round || 1}/14</span>
+                        <div className={`px-2 py-1 ${isMinigameMode ? 'bg-slate-900/60 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'} border rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs`}>
+                            <span className={`${isMinigameMode ? 'text-slate-400' : 'text-slate-500'} font-bold hidden sm:inline`}>R:</span>
+                            <span className={`font-black ${isMinigameMode ? 'text-white' : 'text-slate-900'}`}>{gameState?.current_round || 1}/14</span>
                         </div>
 
-                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
-                            <span className="text-slate-400 font-bold hidden sm:inline">TIME:</span>
-                            <span className={`font-black ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-slate-100'}`}>
+                        <div className={`px-2 py-1 ${isMinigameMode ? 'bg-slate-900/60 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'} border rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs`}>
+                            <span className={`${isMinigameMode ? 'text-slate-400' : 'text-slate-500'} font-bold hidden sm:inline`}>TIME:</span>
+                            <span className={`font-black ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : (isMinigameMode ? 'text-slate-100' : 'text-slate-900')}`}>
                                 {timeLeft}s
                             </span>
                         </div>
 
-                        <div className="px-2 py-1 bg-slate-900/60 border border-slate-800 rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs">
-                            <span className="text-slate-400 font-bold hidden sm:inline">CR:</span>
-                            <span className="font-black text-emerald-400">{myPlayer?.score ?? 1000}</span>
+                        <div className={`px-2 py-1 ${isMinigameMode ? 'bg-slate-900/60 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-sm'} border rounded-lg text-center font-mono flex items-center gap-1 text-[10px] sm:text-xs`}>
+                            <span className={`${isMinigameMode ? 'text-slate-400' : 'text-slate-500'} font-bold hidden sm:inline`}>CR:</span>
+                            <span className="font-black text-emerald-600">{myPlayer?.score ?? 1000}</span>
                         </div>
 
                         {onClose && (

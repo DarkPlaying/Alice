@@ -2,17 +2,21 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import gsap from 'gsap';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Lock, Unlock, Zap, Briefcase, LogOut, AlertTriangle, Eye, Timer, ShieldAlert, User, Map as MapIcon, X } from 'lucide-react';
+import { Shield, Lock, Unlock, Zap, Briefcase, LogOut, AlertTriangle, Eye, Timer, ShieldAlert, User, Map as MapIcon, X, Palette, Check, ChevronLeft, ChevronRight, Sparkles, Image as ImageIcon } from 'lucide-react';
 import type { DoorData, JokerPlayer, MapCell, JokerGameState } from '../jokerTypes';
 import { DOOR_3D_CONFIG } from './door3dConfig';
-import { DungeonHallway } from './DungeonHallway';
-import { DoorSystem, type DoorData3D } from './DoorSystem';
+import { DungeonHallway, resolveCardRoomTheme, THEME_DATA_MAP } from './DungeonHallway';
+import { TestDoorSystem as DoorSystem, type TestDoorData3D as DoorData3D } from './TestDoorSystem';
+import { Stylized3DCharacter } from './character/Stylized3DCharacter';
 import { PlayerController } from './PlayerController';
 import { SoundEngine } from './SoundEngine';
 import { calculateRedCostMultiplier } from '../jokerInventoryConfig';
 import { PlayerCardModal } from '../../../PlayerCardModal';
 import { parseMapMatrix } from '../jokerMapData';
 import { JokerMapGrid } from '../JokerMapGrid';
+import { CHARACTER_OPTIONS, ROOM_THEME_OPTIONS, THEME_DEFAULTS } from './Joker3DTestRoom';
+import { loadCharacterPose, loadCharacterEmotes } from './characters';
+import { CharacterPreview3D } from './CharacterPreview3D';
 
 interface Joker3DWorldCanvasProps {
     currentCell: MapCell;
@@ -30,6 +34,8 @@ interface Joker3DWorldCanvasProps {
     onClose?: () => void;
     onRefundSkipCard?: () => void;
     onUnblockDoorWithGreenCard?: (direction: 'up' | 'right' | 'down' | 'left') => void;
+    onChooseDoor?: (door: DoorData, isSkip?: boolean) => void;
+    onCancelPendingSelection?: () => void;
 }
 
 export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
@@ -47,7 +53,9 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     onOpenInventory,
     onClose,
     onRefundSkipCard,
-    onUnblockDoorWithGreenCard
+    onUnblockDoorWithGreenCard,
+    onChooseDoor,
+    onCancelPendingSelection
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,10 +69,63 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     const [showPlayerProfileModal, setShowPlayerProfileModal] = useState<boolean>(false);
     const [showMapModal, setShowMapModal] = useState<boolean>(false);
 
+    // Character & Room Theme Selector Modals
+    const [showCharacterModal, setShowCharacterModal] = useState(false);
+    const initialSavedModel = typeof window !== 'undefined' ? localStorage.getItem('joker_equipped_character') : null;
+    const arkhamOriginsIndex = CHARACTER_OPTIONS.findIndex(c => c.modelUrl.includes('arkham_origins'));
+    const defaultCharIdx = arkhamOriginsIndex >= 0 ? arkhamOriginsIndex : 5;
+    const initialIndex = initialSavedModel ? CHARACTER_OPTIONS.findIndex(c => c.modelUrl === initialSavedModel) : defaultCharIdx;
+    const resolvedCharIndex = initialIndex >= 0 ? initialIndex : defaultCharIdx;
+    const [selectedCharIndex, setSelectedCharIndex] = useState(resolvedCharIndex);
+    const [activeCharModelUrl, setActiveCharModelUrl] = useState(initialSavedModel || CHARACTER_OPTIONS[resolvedCharIndex]?.modelUrl || '/joker_batman_arkham_origins.glb');
+
+    const [showThemeModal, setShowThemeModal] = useState(false);
+    const parsedMapInit = parseMapMatrix(gameState?.map_matrix || gridMatrix);
+    const activeNewMapInit = parsedMapInit.new_map && parsedMapInit.new_map.length === 7 ? parsedMapInit.new_map : gridMatrix;
+    const initialGeneratedTheme = resolveCardRoomTheme(currentCell, activeNewMapInit);
+    const initialSavedTheme = typeof window !== 'undefined' ? localStorage.getItem('joker_room_theme') : null;
+    const defaultTheme = initialGeneratedTheme || (ROOM_THEME_OPTIONS.some(t => t.id === initialSavedTheme) ? (initialSavedTheme as string) : 'White');
+    const [activeTheme, setActiveTheme] = useState<string>(defaultTheme);
+
+    const handleSelectCharacter = (charIndex: number) => {
+        const targetChar = CHARACTER_OPTIONS[charIndex];
+        if (!targetChar) return;
+        setSelectedCharIndex(charIndex);
+        setActiveCharModelUrl(targetChar.modelUrl);
+        try {
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('joker_equipped_character', targetChar.modelUrl);
+            }
+        } catch {}
+        if (characterRef.current) {
+            characterRef.current.loadModel(targetChar.modelUrl);
+        }
+        setShowCharacterModal(false);
+    };
+
+    const handleSelectRoomTheme = (themeId: string) => {
+        setActiveTheme(themeId);
+        try {
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('joker_room_theme', themeId);
+            }
+        } catch {}
+        if (hallwayRef.current) {
+            const theme = ROOM_THEME_OPTIONS.find(t => t.id === themeId);
+            hallwayRef.current.applyRoomTheme(themeId, theme?.imageUrl);
+        }
+        const themeConfig = THEME_DEFAULTS[themeId] || THEME_DEFAULTS['green'];
+        if (doorSystemRef.current && themeConfig?.floorColor) {
+            doorSystemRef.current.updateDoorGlass({ color: themeConfig.floorColor });
+        }
+        setShowThemeModal(false);
+    };
+
     const soundEngineRef = useRef<SoundEngine | null>(null);
     const doorSystemRef = useRef<DoorSystem | null>(null);
     const hallwayRef = useRef<DungeonHallway | null>(null);
     const playerControllerRef = useRef<PlayerController | null>(null);
+    const characterRef = useRef<Stylized3DCharacter | null>(null);
 
     const currentSpecialCardRef = useRef<string | null>(null);
     const lastRenderedCenterCardKeyRef = useRef<string>('');
@@ -125,6 +186,25 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     }, [onEnterRoom]);
 
     const handleDoorLockToggleRef = useRef<((door: DoorData) => void) | null>(null);
+    const targetHeadingAngleRef = useRef<number>(0);
+    const isAutoWalkingRef = useRef<boolean>(false);
+
+    // Mobile Auto-Landscape Rotated Studio View & Touch Detection
+    const [isMobilePortrait, setIsMobilePortrait] = useState(false);
+
+    useEffect(() => {
+        const checkOrientation = () => {
+            const isPortrait = window.innerWidth < window.innerHeight && window.innerWidth < 850;
+            setIsMobilePortrait(isPortrait);
+        };
+        checkOrientation();
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', checkOrientation);
+        return () => {
+            window.removeEventListener('resize', checkOrientation);
+            window.removeEventListener('orientationchange', checkOrientation);
+        };
+    }, []);
 
     // Virtual Joystick Touch Controls for Mobile (Left side)
     const [joystickTouchId, setJoystickTouchId] = useState<number | null>(null);
@@ -228,13 +308,18 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
         soundEngineRef.current = soundEngine;
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#ffffff');
+        scene.background = new THREE.Color('#0f172a');
 
-        const camera = new THREE.PerspectiveCamera(60, containerRef.current.clientWidth / containerRef.current.clientHeight, 0.1, 50);
+        const camera = new THREE.PerspectiveCamera(66, containerRef.current.clientWidth / containerRef.current.clientHeight, 0.1, 1000);
+        camera.position.set(0, 2.4, 3.9);
         scene.add(camera);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2.2);
         scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+        dirLight.position.set(0, 10, 5);
+        scene.add(dirLight);
 
         const renderer = new THREE.WebGLRenderer({
             canvas: canvasRef.current,
@@ -252,11 +337,112 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
         const doorSystem = new DoorSystem(scene, soundEngine);
         doorSystemRef.current = doorSystem;
 
+        // Apply default scanner transform matching 3D test room defaults
+        doorSystem.setScannerTransform(0.70, 2.70, 0.14, 1.60);
+
         const playerController = new PlayerController(camera, renderer.domElement, soundEngine);
         playerControllerRef.current = playerController;
 
+        const character = new Stylized3DCharacter(activeCharModelUrl);
+        const charPose = loadCharacterPose(activeCharModelUrl);
+        character.updatePoseSettings(charPose);
+        const charEmotes = loadCharacterEmotes(activeCharModelUrl);
+        character.setEmoteTracks(charEmotes);
+        scene.add(character.mesh);
+        characterRef.current = character;
+
         hallway.rebuildRoomForCell(currentCell, doorSystem, gridMatrix, false, player);
+        const currentThemeConfig = THEME_DATA_MAP[defaultTheme] || THEME_DATA_MAP['White'];
+        hallway.applyRoomTheme(defaultTheme, currentThemeConfig.imageUrl);
+        doorSystem.updateDoorGlass({ color: currentThemeConfig.floorColor });
+        doorSystem.updateDoorThemeColors(currentThemeConfig.floorColor);
         doorSystem.animateDoorsFadeIn();
+
+        DoorSystem.preloadAssets();
+
+        // TPS Camera & Heading Angles (Default matching Testing Studio: dist=3.25, height=2.75, pitch=0.01, fov=66)
+        const cameraYaw = { current: 0 };
+        const curPitch = { current: 0.01 };
+        const curDistance = { current: 3.25 };
+        const curHeadHeight = { current: 2.75 };
+
+        let isDragging = false;
+        let prevPointerX = 0;
+        let prevPointerY = 0;
+
+        const isCtrlRef = { current: false };
+        const isCursorLockedRef = { current: false };
+
+        const onPointerLockChange = () => {
+            const locked = document.pointerLockElement === dom || document.pointerLockElement === canvasRef.current;
+            isCursorLockedRef.current = locked;
+        };
+        document.addEventListener('pointerlockchange', onPointerLockChange);
+
+        const handlePointerDown = (clientX: number, clientY: number) => {
+            isDragging = true;
+            prevPointerX = clientX;
+            prevPointerY = clientY;
+        };
+
+        const handlePointerMove = (e: MouseEvent, forceTrack: boolean = false) => {
+            if (isCtrlRef.current) return;
+            if (!isDragging && !forceTrack && !isCursorLockedRef.current) return;
+
+            const isLocked = isCursorLockedRef.current;
+            const deltaX = isLocked ? (e.movementX || 0) : (e.clientX - prevPointerX);
+            prevPointerX = e.clientX;
+            prevPointerY = e.clientY;
+
+            if (!isLocked && Math.abs(deltaX) > 100) return;
+
+            const sensitivity = isLocked ? 0.0035 : 0.0055;
+            targetHeadingAngleRef.current -= deltaX * sensitivity;
+        };
+
+        const handlePointerUp = () => { isDragging = false; };
+
+        const dom = containerRef.current;
+        const onMouseDown = (e: MouseEvent) => {
+            if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.sidebar-panel') || (e.target as HTMLElement).closest('input')) return;
+            handlePointerDown(e.clientX, e.clientY);
+
+            if (!isCtrlRef.current && !document.pointerLockElement && dom) {
+                try {
+                    dom.requestPointerLock();
+                } catch {}
+            }
+        };
+        const onMouseMove = (e: MouseEvent) => {
+            if (isCtrlRef.current) return;
+            if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.sidebar-panel')) return;
+            handlePointerMove(e, true);
+        };
+        const onMouseUp = () => handlePointerUp();
+
+        dom.addEventListener('mousedown', onMouseDown);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+
+        const handleKeyDownPointer = (e: KeyboardEvent) => {
+            if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+                isCtrlRef.current = true;
+                if (document.pointerLockElement) {
+                    try {
+                        document.exitPointerLock();
+                    } catch {}
+                }
+            }
+        };
+
+        const handleKeyUpPointer = (e: KeyboardEvent) => {
+            if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+                isCtrlRef.current = false;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDownPointer);
+        window.addEventListener('keyup', handleKeyUpPointer);
 
         playerController.onSelectKeyPress = () => {
             if (phaseRef.current === 'reveal') return;
@@ -350,7 +536,67 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
         const animate = () => {
             animationFrameId = requestAnimationFrame(animate);
             const delta = Math.min(clock.getDelta(), 0.1);
-            playerController.update(delta, false, doorSystem.doors);
+
+            // Update door system animation mixer
+            doorSystem.update(delta);
+
+            playerController.update(delta, false, doorSystem.doors as any);
+
+            const isMoving = playerController.velocity.lengthSq() > 0.05;
+            if (characterRef.current) {
+                if (!isAutoWalkingRef.current) {
+                    characterRef.current.targetRotationY = targetHeadingAngleRef.current;
+                }
+                characterRef.current.position.copy(playerController.position);
+                characterRef.current.isWalking = isMoving || isAutoWalkingRef.current;
+                characterRef.current.update(delta);
+            }
+
+            // Smooth TPS Camera orbiting around character position
+            const charPos = playerController.position;
+            let diffAngle = targetHeadingAngleRef.current - cameraYaw.current;
+            while (diffAngle < -Math.PI) diffAngle += Math.PI * 2;
+            while (diffAngle > Math.PI) diffAngle -= Math.PI * 2;
+            cameraYaw.current += diffAngle * Math.min(1.0, delta * 7.0);
+
+            const isEmoteActive = characterRef.current && (characterRef.current.doorEmoteTimer > 0 || characterRef.current.scannerTouchTimer > 0);
+            const targetHeadHeight = isEmoteActive ? (2.75 + 0.15) : 2.75;
+            const targetDistance = isEmoteActive ? (3.25 + 0.30) : 3.25;
+            const targetPitch = isEmoteActive ? (0.01 + 0.04) : 0.01;
+
+            curHeadHeight.current = THREE.MathUtils.lerp(curHeadHeight.current, targetHeadHeight, Math.min(1.0, delta * 8.0));
+            curDistance.current = THREE.MathUtils.lerp(curDistance.current, targetDistance, Math.min(1.0, delta * 8.0));
+            curPitch.current = THREE.MathUtils.lerp(curPitch.current, targetPitch, Math.min(1.0, delta * 8.0));
+
+            const dist = curDistance.current;
+            const pitch = curPitch.current;
+            const height = curHeadHeight.current;
+
+            const desiredCamX = charPos.x + Math.sin(cameraYaw.current) * Math.cos(pitch) * dist;
+            const desiredCamY = charPos.y + height + Math.sin(pitch) * dist;
+            const desiredCamZ = charPos.z + Math.cos(cameraYaw.current) * Math.cos(pitch) * dist;
+
+            const maxRoomBound = 7.5;
+            const minHeightBound = 0.5;
+            const maxHeightBound = 7.5;
+
+            const safeCamX = THREE.MathUtils.clamp(desiredCamX, -maxRoomBound, maxRoomBound);
+            const safeCamZ = THREE.MathUtils.clamp(desiredCamZ, -maxRoomBound, maxRoomBound);
+            let safeCamY = THREE.MathUtils.clamp(desiredCamY, minHeightBound, maxHeightBound);
+
+            const isClampedX = Math.abs(safeCamX - desiredCamX) > 0.05;
+            const isClampedZ = Math.abs(safeCamZ - desiredCamZ) > 0.05;
+            if (isClampedX || isClampedZ) {
+                safeCamY = Math.min(maxHeightBound, safeCamY + 0.35);
+            }
+
+            const lookDistance = 5.0;
+            const lookX = charPos.x - Math.sin(cameraYaw.current) * Math.cos(pitch) * lookDistance;
+            const lookY = charPos.y + (height * 0.85) - Math.sin(pitch) * lookDistance;
+            const lookZ = charPos.z - Math.cos(cameraYaw.current) * Math.cos(pitch) * lookDistance;
+
+            camera.position.set(safeCamX, safeCamY, safeCamZ);
+            camera.lookAt(lookX, lookY, lookZ);
 
             if (doorSystem.centerMesh && !cardClaimedInRoomRef.current) {
                 const cardPos = doorSystem.centerMesh.position;
@@ -400,6 +646,17 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
         return () => {
             cancelAnimationFrame(animationFrameId);
             window.removeEventListener('resize', handleResize);
+            document.removeEventListener('pointerlockchange', onPointerLockChange);
+            window.removeEventListener('keydown', handleKeyDownPointer);
+            window.removeEventListener('keyup', handleKeyUpPointer);
+            dom.removeEventListener('mousedown', onMouseDown);
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+            if (document.pointerLockElement) {
+                try {
+                    document.exitPointerLock();
+                } catch {}
+            }
             renderer.dispose();
         };
     }, []);
@@ -473,6 +730,11 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
             selectedDoorRef.current = null;
             if (doorSystemRef.current) {
                 doorSystemRef.current.setDoorSelected(null);
+                const dir3d = door.direction === 'up' ? 'north'
+                    : door.direction === 'down' ? 'south'
+                        : door.direction === 'right' ? 'east' : 'west';
+                doorSystemRef.current.updateScannerStatus(dir3d, 'SCANNER: READY', 'ready');
+                doorSystemRef.current.setScannerGlow(dir3d, 'white');
             }
             onSelectDoor(null as any, 0, false);
         } else {
@@ -576,16 +838,137 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
             selectedDoorRef.current = door;
             lastChosenDirRef.current = door.direction;
             lastChosenIsSkipRef.current = isSkip;
+
+            const dir3d = door.direction === 'up' ? 'north'
+                : door.direction === 'down' ? 'south'
+                    : door.direction === 'right' ? 'east' : 'west';
+
             if (doorSystemRef.current) {
-                const dir3d = door.direction === 'up' ? 'north'
-                    : door.direction === 'down' ? 'south'
-                        : door.direction === 'right' ? 'east' : 'west';
                 doorSystemRef.current.setDoorSelected(dir3d, isSkip);
+                doorSystemRef.current.updateScannerStatus(dir3d, 'SCANNING FACE...', 'scanning');
             }
 
             // Green Card & Multiplier Application
             const costMultiplier = player?.hasUsedGreenCard ? 1 : Math.max(1, player?.nextRoundCostMultiplier || 1);
             const finalCost = (player?.hasUsedGreenCard || isSkip) ? 0 : (door.cost || 10) * costMultiplier;
+
+            // Calculate exact world coordinates for biometric face scan and hand touch
+            const doorWidth = 4.15;
+            const scOffset = (doorWidth / 2) + 0.70; // 2.775m
+            const wallDist = 8.0; // ROOM_SIZE / 2
+            const faceScanStandDist = 1.35;
+            const handTouchStandDist = 0.75;
+
+            let scanX = 0, scanZ = 0;
+            let touchX = 0, touchZ = 0;
+            let targetRotY = 0;
+
+            if (dir3d === 'north') {
+                scanX = scOffset; scanZ = -wallDist + faceScanStandDist;
+                touchX = scOffset; touchZ = -wallDist + handTouchStandDist;
+                targetRotY = 0;
+            } else if (dir3d === 'south') {
+                scanX = -scOffset; scanZ = wallDist - faceScanStandDist;
+                touchX = -scOffset; touchZ = wallDist - handTouchStandDist;
+                targetRotY = Math.PI;
+            } else if (dir3d === 'east') {
+                scanX = wallDist - faceScanStandDist; scanZ = scOffset;
+                touchX = wallDist - handTouchStandDist; touchZ = scOffset;
+                targetRotY = -Math.PI / 2;
+            } else if (dir3d === 'west') {
+                scanX = -wallDist + faceScanStandDist; scanZ = -scOffset;
+                touchX = -wallDist + handTouchStandDist; touchZ = -scOffset;
+                targetRotY = Math.PI / 2;
+            }
+
+            if (playerControllerRef.current) {
+                playerControllerRef.current.isScanning = true;
+                playerControllerRef.current.isCameraLocked = true;
+                playerControllerRef.current.velocity.set(0, 0, 0);
+
+                const startX = playerControllerRef.current.position.x;
+                const startZ = playerControllerRef.current.position.z;
+                const dx = scanX - startX;
+                const dz = scanZ - startZ;
+                const dist = Math.hypot(dx, dz);
+
+                const walkHeading = Math.atan2(-dx, -dz);
+                targetHeadingAngleRef.current = walkHeading;
+                if (characterRef.current) {
+                    characterRef.current.targetRotationY = walkHeading;
+                    characterRef.current.isWalking = true;
+                }
+                isAutoWalkingRef.current = true;
+                const duration = Math.max(0.6, Math.min(2.5, dist / 2.2));
+
+                // Step 1: Smoothly walk to biometric face scan position with walking animation
+                gsap.killTweensOf(playerControllerRef.current.position);
+                gsap.to(playerControllerRef.current.position, {
+                    x: scanX,
+                    z: scanZ,
+                    duration,
+                    ease: 'linear',
+                    onUpdate: () => {
+                        if (characterRef.current && playerControllerRef.current) {
+                            characterRef.current.position.copy(playerControllerRef.current.position);
+                        }
+                    },
+                    onComplete: () => {
+                        isAutoWalkingRef.current = false;
+                        if (characterRef.current) {
+                            characterRef.current.isWalking = false;
+                            characterRef.current.targetRotationY = targetRotY;
+                        }
+                        targetHeadingAngleRef.current = targetRotY;
+
+                        // Step 2: Trigger volumetric face scan laser beam & sound
+                        doorSystemRef.current?.triggerFaceScan(dir3d, () => {
+                            doorSystemRef.current?.setScannerGlow(dir3d, 'green');
+                            doorSystemRef.current?.updateScannerStatus(dir3d, 'ACCESS GRANTED', 'granted');
+
+                            // Step 3: Walk to touch terminal keypad (0.75m from wall)
+                            if (playerControllerRef.current) {
+                                isAutoWalkingRef.current = true;
+                                if (characterRef.current) {
+                                    characterRef.current.isWalking = true;
+                                }
+                                gsap.to(playerControllerRef.current.position, {
+                                    x: touchX,
+                                    z: touchZ,
+                                    duration: 0.45,
+                                    ease: 'linear',
+                                    onUpdate: () => {
+                                        if (characterRef.current && playerControllerRef.current) {
+                                            characterRef.current.position.copy(playerControllerRef.current.position);
+                                        }
+                                    },
+                                    onComplete: () => {
+                                        isAutoWalkingRef.current = false;
+                                        if (characterRef.current) {
+                                            characterRef.current.isWalking = false;
+                                            characterRef.current.targetRotationY = targetRotY;
+                                            targetHeadingAngleRef.current = targetRotY;
+                                            // Step 4: Play hand touch emote
+                                            characterRef.current.triggerScannerTouchEmote();
+                                        }
+
+                                        doorSystemRef.current?.setScannerGlow(dir3d, 'cyan');
+                                        setTimeout(() => doorSystemRef.current?.setScannerGlow(dir3d, 'white'), 400);
+
+                                        setTimeout(() => {
+                                            if (playerControllerRef.current) {
+                                                playerControllerRef.current.isScanning = false;
+                                                playerControllerRef.current.isCameraLocked = false;
+                                            }
+                                            doorSystemRef.current?.updateScannerStatus(dir3d, 'STATUS: LOCKED (CONFIRMED)', 'granted');
+                                        }, 1000);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
 
             onSelectDoor(door, finalCost, isSkip);
             soundEngineRef.current?.playLockClick();
@@ -635,6 +1018,15 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 console.log(`[DOOR 3D LOG] Building 3D room geometry for Room (${currentCell.r}, ${currentCell.c}) (isSkip: ${isSkipUsed})`);
                 // Room geometry (walls, doors) built from old_map structure; card display updated separately from new_map
                 hallwayRef.current.rebuildRoomForCell(displayCell, doorSystemRef.current, activeOldMap, isSkipUsed, player, phase === 'reveal');
+
+                // Dynamic theme resolution from new_map cards
+                const activeNewMap = parsedMap.new_map && parsedMap.new_map.length === 7 ? parsedMap.new_map : activeOldMap;
+                const dynamicTheme = resolveCardRoomTheme(currentCell, activeNewMap);
+                const themeConfig = THEME_DATA_MAP[dynamicTheme] || THEME_DATA_MAP['White'];
+                hallwayRef.current.applyRoomTheme(dynamicTheme, themeConfig.imageUrl);
+                doorSystemRef.current.updateDoorGlass({ color: themeConfig.floorColor });
+                doorSystemRef.current.updateDoorThemeColors(themeConfig.floorColor);
+                setActiveTheme(dynamicTheme);
             }
 
             const activeLockDir = lockedDoorDir
@@ -930,7 +1322,24 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
     }, [redBlockWarningModal?.show, redBlockWarningModal?.jokerDir, greenCardsOwned, onUnblockDoorWithGreenCard]);
 
     return (
-        <div ref={containerRef} className="fixed inset-0 z-50 w-screen h-screen bg-white overflow-hidden select-none font-mono text-slate-900">
+        <div
+            ref={containerRef}
+            className={`fixed inset-0 z-50 w-screen h-screen bg-white overflow-hidden select-none font-mono text-slate-900 ${isMobilePortrait ? 'mobile-portrait-rotated' : ''}`}
+            style={
+                isMobilePortrait
+                    ? {
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100vh',
+                        height: '100vw',
+                        transformOrigin: 'top left',
+                        transform: 'rotate(90deg) translateY(-100%)',
+                        overflow: 'hidden'
+                    }
+                    : undefined
+            }
+        >
             <canvas ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing block" />
 
             {/* TOP METALLIC WHITE HUB INSIDE 3D WORLD (ULTRA-SLIM IN MOBILE LANDSCAPE) */}
@@ -970,7 +1379,27 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                 </div>
 
                 {/* Right Section: Compact Icon Buttons & Metrics */}
-                <div className="flex items-center gap-1 sm:gap-4 shrink-0">
+                <div className="flex items-center gap-1 sm:gap-2.5 shrink-0">
+                    {/* ROOM THEMES */}
+                    <button
+                        onClick={() => setShowThemeModal(true)}
+                        className="p-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm flex items-center gap-1 shrink-0 bg-gradient-to-r from-purple-700 via-indigo-700 to-indigo-800 hover:from-purple-600 hover:to-indigo-600 text-white border border-purple-400/50"
+                        title={`Select Room Theme (Current: ${ROOM_THEME_OPTIONS.find(t => t.id === activeTheme)?.name || activeTheme})`}
+                    >
+                        <Palette size={14} className="shrink-0" />
+                        <span className="hidden md:inline">ROOM: {ROOM_THEME_OPTIONS.find(t => t.id === activeTheme)?.name || activeTheme}</span>
+                    </button>
+
+                    {/* CHARACTERS */}
+                    <button
+                        onClick={() => setShowCharacterModal(true)}
+                        className="p-1.5 sm:px-3 sm:py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 text-white rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-md flex items-center gap-1 shrink-0"
+                        title="Choose 3D Character Outfit"
+                    >
+                        <User size={14} className="shrink-0" />
+                        <span className="hidden md:inline">OUTFIT</span>
+                    </button>
+
                     <button
                         onClick={() => setShowPlayerProfileModal(true)}
                         className="p-1.5 sm:px-3.5 sm:py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-sm flex items-center gap-1 shrink-0"
@@ -1213,38 +1642,34 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                     </div>
                 </div>
 
-                {/* RIGHT SIDE: Action Jump & Sit Buttons (White Theme with Console Logging) */}
+                {/* RIGHT SIDE: Action SCAN Biometric & Lock Button */}
                 <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
                     <button
-                        onTouchStart={() => {
-                            console.log('[TOUCH_ACTION] SIT TOUCHED', playerControllerRef.current);
-                            if (playerControllerRef.current) playerControllerRef.current.toggleSit();
+                        onTouchStart={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const nearby = doorSystemRef.current && playerControllerRef.current ? doorSystemRef.current.getNearbyDoor(playerControllerRef.current.position) : null;
+                            const to2dDir: Record<string, string> = { north: 'up', south: 'down', east: 'right', west: 'left' };
+                            const targetDoor = nearby ? currentCell?.doors.find(d => d.direction === (to2dDir[nearby.direction] || nearby.direction)) : (selectedDoorRef.current || (currentCell?.doors && currentCell.doors[0]));
+                            if (targetDoor && handleDoorLockToggleRef.current) {
+                                handleDoorLockToggleRef.current(targetDoor);
+                            }
                         }}
-                        onClick={() => {
-                            console.log('[TOUCH_ACTION] SIT CLICKED', playerControllerRef.current);
-                            if (playerControllerRef.current) playerControllerRef.current.toggleSit();
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const nearby = doorSystemRef.current && playerControllerRef.current ? doorSystemRef.current.getNearbyDoor(playerControllerRef.current.position) : null;
+                            const to2dDir: Record<string, string> = { north: 'up', south: 'down', east: 'right', west: 'left' };
+                            const targetDoor = nearby ? currentCell?.doors.find(d => d.direction === (to2dDir[nearby.direction] || nearby.direction)) : (selectedDoorRef.current || (currentCell?.doors && currentCell.doors[0]));
+                            if (targetDoor && handleDoorLockToggleRef.current) {
+                                handleDoorLockToggleRef.current(targetDoor);
+                            }
                         }}
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-white/95 text-slate-950 border-2 border-amber-500 font-mono font-black shadow-[0_4px_15px_rgba(245,158,11,0.4)] active:scale-90 active:bg-amber-100 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
-                        title="Sit / Crouch"
+                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-cyan-400 via-cyan-500 to-indigo-600 text-white border-2 border-cyan-200 font-mono font-black shadow-[0_0_25px_rgba(6,182,212,0.8)] active:scale-90 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
+                        title="Biometric Scan & Lock Door"
                     >
-                        <span className="text-[9px] sm:text-[10px] leading-none text-amber-600 font-black">▼</span>
-                        <span className="text-[8px] font-black text-slate-950 tracking-tighter">SIT</span>
-                    </button>
-
-                    <button
-                        onTouchStart={() => {
-                            console.log('[TOUCH_ACTION] JUMP TOUCHED', playerControllerRef.current);
-                            if (playerControllerRef.current) playerControllerRef.current.jump();
-                        }}
-                        onClick={() => {
-                            console.log('[TOUCH_ACTION] JUMP CLICKED', playerControllerRef.current);
-                            if (playerControllerRef.current) playerControllerRef.current.jump();
-                        }}
-                        className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-white/95 text-slate-950 border-2 border-cyan-600 font-mono font-black shadow-[0_4px_15px_rgba(6,182,212,0.4)] active:scale-90 active:bg-cyan-100 flex flex-col items-center justify-center pointer-events-auto backdrop-blur-md cursor-pointer select-none"
-                        title="Jump"
-                    >
-                        <span className="text-[9px] sm:text-[10px] leading-none text-cyan-600 font-black">▲</span>
-                        <span className="text-[8px] font-black text-slate-950 tracking-tighter">JUMP</span>
+                        <Lock size={16} className="text-white animate-pulse" />
+                        <span className="text-[8px] font-black text-white tracking-widest uppercase mt-0.5">SCAN</span>
                     </button>
                 </div>
             </div>
@@ -1410,6 +1835,191 @@ export const Joker3DWorldCanvas: React.FC<Joker3DWorldCanvasProps> = ({
                                 currentPlayerId={player?.id}
                                 isAdminView={false}
                             />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 1. 3D CHARACTER SELECTOR MODAL (FULL SCREEN BIG CENTER CARD & 3D OBJ) */}
+            {showCharacterModal && (
+                <div className="fixed inset-0 z-[2000] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+                    <div className="bg-slate-950/95 border-2 border-indigo-500/80 rounded-3xl w-full h-full max-w-6xl max-h-[92vh] overflow-hidden shadow-[0_0_100px_rgba(99,102,241,0.35)] flex flex-col">
+                        {/* Modal Header */}
+                        <div className="bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-950 px-6 py-3.5 border-b border-indigo-500/40 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-400/50 flex items-center justify-center text-indigo-300">
+                                    <User size={18} />
+                                </div>
+                                <div>
+                                    <h3 className="font-black text-sm sm:text-base uppercase tracking-widest text-white flex items-center gap-2">
+                                        <span>CHOOSE CHARACTER OUTFIT</span>
+                                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-300 border border-indigo-400/40">
+                                            {CHARACTER_OPTIONS[selectedCharIndex].badge}
+                                        </span>
+                                    </h3>
+                                    <span className="text-[10px] font-mono text-slate-400">
+                                        {selectedCharIndex + 1} of {CHARACTER_OPTIONS.length} • {CHARACTER_OPTIONS[selectedCharIndex].name}
+                                    </span>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowCharacterModal(false)}
+                                className="w-9 h-9 rounded-full bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white flex items-center justify-center font-bold text-sm transition-all cursor-pointer shadow-md hover:scale-105"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Full-Screen Main Content Stage */}
+                        <div className="flex-1 relative flex flex-col items-center justify-center bg-gradient-to-b from-slate-950 via-indigo-950/20 to-slate-950 p-2 sm:p-4 overflow-hidden">
+                            {/* Left Arrow Button */}
+                            <button
+                                onClick={() => setSelectedCharIndex(prev => (prev - 1 + CHARACTER_OPTIONS.length) % CHARACTER_OPTIONS.length)}
+                                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 z-20 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-indigo-950/80 border-2 border-indigo-500/70 hover:bg-indigo-600 text-white flex items-center justify-center cursor-pointer shadow-[0_0_25px_rgba(99,102,241,0.5)] hover:scale-110 active:scale-95 transition-all"
+                                title="Previous Character"
+                            >
+                                <ChevronLeft size={28} />
+                            </button>
+
+                            {/* Right Arrow Button */}
+                            <button
+                                onClick={() => setSelectedCharIndex(prev => (prev + 1) % CHARACTER_OPTIONS.length)}
+                                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 z-20 w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-indigo-950/80 border-2 border-indigo-500/70 hover:bg-indigo-600 text-white flex items-center justify-center cursor-pointer shadow-[0_0_25px_rgba(99,102,241,0.5)] hover:scale-110 active:scale-95 transition-all"
+                                title="Next Character"
+                            >
+                                <ChevronRight size={28} />
+                            </button>
+
+                            {/* Big 3D Character Viewport */}
+                            <div className="w-full h-full flex-1 max-w-4xl relative rounded-2xl overflow-hidden border border-indigo-500/30 shadow-2xl bg-black/40">
+                                <CharacterPreview3D
+                                    key={CHARACTER_OPTIONS[selectedCharIndex].modelUrl}
+                                    modelUrl={CHARACTER_OPTIONS[selectedCharIndex].modelUrl}
+                                    className="w-full h-full"
+                                />
+
+                                {/* Character Info Overlay */}
+                                <div className="absolute top-3 left-3 bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-xl border border-indigo-500/40 pointer-events-none">
+                                    <h4 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">
+                                        {CHARACTER_OPTIONS[selectedCharIndex].name}
+                                    </h4>
+                                    <p className="text-[10px] text-indigo-300 font-bold">
+                                        {CHARACTER_OPTIONS[selectedCharIndex].subtitle}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Bottom Action Bar */}
+                        <div className="bg-slate-950 px-6 py-3.5 border-t border-indigo-500/40 flex items-center justify-between gap-3 shrink-0">
+                            <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">
+                                Model: <span className="text-cyan-400 font-bold">{CHARACTER_OPTIONS[selectedCharIndex].modelUrl}</span>
+                            </span>
+                            <button
+                                onClick={() => handleSelectCharacter(selectedCharIndex)}
+                                className={`px-6 py-2.5 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2 shadow-xl transition-all cursor-pointer ${activeCharModelUrl === CHARACTER_OPTIONS[selectedCharIndex].modelUrl
+                                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/30 ring-2 ring-emerald-400'
+                                    : 'bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 text-white shadow-indigo-500/40 ring-1 ring-indigo-400/50 hover:scale-105'
+                                    }`}
+                            >
+                                {activeCharModelUrl === CHARACTER_OPTIONS[selectedCharIndex].modelUrl ? (
+                                    <>
+                                        <Check size={16} />
+                                        <span>EQUIPPED</span>
+                                    </>
+                                ) : (
+                                    <span>EQUIP OUTFIT</span>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ROOM THEME SELECTOR MODAL */}
+            {showThemeModal && (
+                <div className="fixed inset-0 z-[2000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 font-mono">
+                    <div className="bg-slate-900 border-2 border-emerald-500/80 rounded-2xl w-full max-w-md overflow-hidden shadow-[0_0_50px_rgba(16,185,129,0.3)] flex flex-col">
+                        {/* Modal Header */}
+                        <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-950 px-5 py-3 border-b border-emerald-500/40 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Palette className="text-emerald-400" size={20} />
+                                <h3 className="font-black text-sm uppercase tracking-widest text-white">
+                                    CHOOSE ROOM THEME
+                                </h3>
+                            </div>
+                            <button
+                                onClick={() => setShowThemeModal(false)}
+                                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Theme Options */}
+                        <div className="p-5 space-y-3.5">
+                            {ROOM_THEME_OPTIONS.map((theme) => {
+                                const isSelected = activeTheme === theme.id;
+                                return (
+                                    <div
+                                        key={theme.id}
+                                        onClick={() => handleSelectRoomTheme(theme.id)}
+                                        className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between gap-3 ${isSelected
+                                            ? 'bg-slate-800 border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.3)] ring-2 ring-emerald-500/50'
+                                            : 'bg-slate-950/70 hover:bg-slate-800 border-slate-700 text-slate-300'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            {/* Theme Visual Preview Thumbnail */}
+                                            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${theme.bgPreview} border border-slate-600 shadow-md flex items-center justify-center shrink-0 overflow-hidden relative`}>
+                                                {theme.imageUrl ? (
+                                                    <img src={theme.imageUrl} alt={theme.name} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full bg-white flex flex-col items-center justify-center text-slate-900 font-mono">
+                                                        <span className="text-[10px] font-black leading-none">SOLID</span>
+                                                        <span className="text-[8px] font-bold text-slate-500">WHITE</span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="space-y-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-black text-sm text-white uppercase tracking-wider">
+                                                        {theme.name}
+                                                    </h4>
+                                                    <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 border border-emerald-500/30">
+                                                        {theme.badge}
+                                                    </span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 leading-tight truncate">
+                                                    {theme.subtitle}
+                                                </p>
+                                                <p className="text-[9px] font-mono text-slate-500">
+                                                    Texture: {theme.imageUrl || 'None (Clean #ffffff)'}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Selection Indicator */}
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 border ${isSelected ? 'bg-emerald-500 border-emerald-300 text-slate-950 font-black' : 'border-slate-600'}`}>
+                                            {isSelected && <Check size={14} />}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="bg-slate-950 px-5 py-3 border-t border-slate-800 flex items-center justify-between">
+                            <span className="text-[9px] text-slate-400 font-mono">
+                                Live Environment Shader Switch
+                            </span>
+                            <button
+                                onClick={() => setShowThemeModal(false)}
+                                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase cursor-pointer transition-all"
+                            >
+                                DONE
+                            </button>
                         </div>
                     </div>
                 </div>

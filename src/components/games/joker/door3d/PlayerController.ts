@@ -33,11 +33,14 @@ export class PlayerController {
   public onExitDoorBoundary?: () => void;
   public allowExitDoor = false;
 
+  public isScanning = false;
+  public isCameraLocked = false;
+
   public jump() {
     console.log('[PLAYER_CONTROLLER] JUMP TRIGGERED! Current Y:', this.position.y.toFixed(2));
-    this.jumpVelocity = 12.0;
-    this.jumpHeight = 0.4;
-    try { this.soundEngine?.playStep(); } catch (e) {}
+    this.jumpVelocity = 0.1;
+    this.jumpHeight = 0.1;
+    try { this.soundEngine?.playStep(); } catch (e) { }
   }
 
   public toggleSit() {
@@ -50,26 +53,22 @@ export class PlayerController {
     this.domElement = domElement;
     this.soundEngine = soundEngine;
 
-    this.position = new THREE.Vector3(0, 1.6, 0);
-    this.camera.position.copy(this.position);
+    this.position = new THREE.Vector3(0, 0, 0);
+    this.camera.position.set(0, 1.85, 3.10);
 
     this.initEventListeners();
   }
 
   public setPosition(x: number, y: number, z: number) {
     this.position.set(x, y, z);
-    this.camera.position.set(x, y, z);
   }
 
-  public resetPositionKeepRotation(pos: THREE.Vector3 = new THREE.Vector3(0, 1.6, 0)) {
+  public resetPositionKeepRotation(pos: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
     this.position.copy(pos);
-    this.camera.position.copy(pos);
-    this.euler.setFromQuaternion(this.camera.quaternion);
   }
 
-  public resetPositionAndRotation(pos: THREE.Vector3 = new THREE.Vector3(0, 1.6, 0), yaw: number = 0, pitch: number = 0) {
+  public resetPositionAndRotation(pos: THREE.Vector3 = new THREE.Vector3(0, 0, 0), yaw: number = 0, pitch: number = 0) {
     this.position.copy(pos);
-    this.camera.position.copy(pos);
     this.euler.set(pitch, yaw, 0, 'YXZ');
     this.camera.quaternion.setFromEuler(this.euler);
   }
@@ -88,8 +87,10 @@ export class PlayerController {
 
   private initEventListeners() {
     this.domElement.addEventListener('click', () => {
-      if (!this.isPointerLocked) {
-        this.domElement.requestPointerLock();
+      if (!this.isPointerLocked && !this.isScanning) {
+        try {
+          this.domElement.requestPointerLock();
+        } catch {}
       }
     });
 
@@ -98,12 +99,22 @@ export class PlayerController {
     });
 
     document.addEventListener('mousemove', (e) => this.onMouseMove(e));
-    document.addEventListener('keydown', (e) => this.onKeyDown(e));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+        if (this.isPointerLocked) {
+          try {
+            document.exitPointerLock();
+          } catch {}
+        }
+      }
+      this.onKeyDown(e);
+    });
     document.addEventListener('keyup', (e) => this.onKeyUp(e));
   }
 
   public resetToCenter() {
-    this.position.set(0, 1.6, 0);
+    this.position.set(0, 0, 0);
     this.euler.set(0, 0, 0);
     this.camera.quaternion.setFromEuler(this.euler);
   }
@@ -119,20 +130,24 @@ export class PlayerController {
   }
 
   private onMouseMove(e: MouseEvent) {
-    if (!this.isPointerLocked) return;
+    if (!this.isPointerLocked || this.isCameraLocked || this.isScanning) return;
 
     const movementX = e.movementX || 0;
-    const movementY = e.movementY || 0;
 
     this.euler.setFromQuaternion(this.camera.quaternion);
     this.euler.y -= movementX * 0.0022;
-    this.euler.x -= movementY * 0.0022;
-
-    this.euler.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.euler.x));
+    this.euler.x = 0.01;
     this.camera.quaternion.setFromEuler(this.euler);
   }
 
   public setTouchMovement(forward: boolean, backward: boolean, left: boolean, right: boolean) {
+    if (this.isScanning) {
+      this.moveForward = false;
+      this.moveBackward = false;
+      this.moveLeft = false;
+      this.moveRight = false;
+      return;
+    }
     this.moveForward = forward;
     this.moveBackward = backward;
     this.moveLeft = left;
@@ -140,6 +155,7 @@ export class PlayerController {
   }
 
   public rotateCamera(deltaAngleY: number) {
+    if (this.isCameraLocked || this.isScanning) return;
     this.euler.setFromQuaternion(this.camera.quaternion);
     this.euler.y += deltaAngleY;
     this.camera.quaternion.setFromEuler(this.euler);
@@ -148,6 +164,14 @@ export class PlayerController {
   private onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Control') {
       this.unlockPointer();
+    }
+
+    if (this.isScanning) {
+      this.moveForward = false;
+      this.moveBackward = false;
+      this.moveLeft = false;
+      this.moveRight = false;
+      return;
     }
 
     switch (e.code) {
@@ -198,6 +222,15 @@ export class PlayerController {
   }
 
   public update(delta: number, isInteracting: boolean, doors: DoorData3D[] = []) {
+    if (this.isScanning) {
+      this.moveForward = false;
+      this.moveBackward = false;
+      this.moveLeft = false;
+      this.moveRight = false;
+      this.velocity.set(0, 0, 0);
+      return;
+    }
+
     this.velocity.x -= this.velocity.x * 10.0 * delta;
     this.velocity.z -= this.velocity.z * 10.0 * delta;
 
@@ -294,7 +327,7 @@ export class PlayerController {
       }
 
       if (this.stepDistance > 1.8) {
-        try { this.soundEngine?.playStep(); } catch (e) {}
+        try { this.soundEngine?.playStep(); } catch (e) { }
         this.stepDistance = 0;
       }
 

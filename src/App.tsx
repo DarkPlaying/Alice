@@ -11,6 +11,7 @@ import { Loader } from './components/Loader';
 import { WaitlistCard } from './components/ui/card-6';
 import { PixelCursorTrail } from './components/ui/pixel-trail';
 import { JokerEndingCardPreview } from './components/games/joker/JokerEndingCardPreview';
+import { Joker3DTestRoom } from './components/games/joker/door3d/Joker3DTestRoom';
 
 // Wrapper for authenticated routes with a warning overlay and 2s delay redirect to login
 function RequireAuth({ children, isLoggedIn, isAdmin, isLoading }: { children: React.ReactNode; isLoggedIn: boolean; isAdmin: boolean; isLoading: boolean }) {
@@ -408,6 +409,7 @@ function AppContent() {
           }
         />
         <Route path="/home/card/joker/ending" element={<JokerEndingCardPreview />} />
+        <Route path="/home/card/joker/testing" element={<Joker3DTestRoom onClose={() => navigate('/home/card')} />} />
         <Route
           path="/home/card/:gameId"
           element={

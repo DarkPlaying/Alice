@@ -5,10 +5,10 @@ export const DOOR_3D_CONFIG = {
   ROOM_HEIGHT: 8.0,
   WALL_THICKNESS: 0.4,
 
-  // Standard Playing Card Door Dimensions (Grand 2.4m x 3.8m Card Proportions)
-  DOOR_WIDTH: 2.4,
-  DOOR_HEIGHT: 3.8,
-  DOOR_DEPTH: 0.04, // Slim playing card thickness
+  // Standard Anime Spaceship Door Dimensions (4.15m x 4.60m)
+  DOOR_WIDTH: 4.15,
+  DOOR_HEIGHT: 4.60,
+  DOOR_DEPTH: 0.36,
 
   // Pass-Through Corridor Dimensions
   CORRIDOR_WIDTH: 2.6, // Pass-through size matching increased door width
